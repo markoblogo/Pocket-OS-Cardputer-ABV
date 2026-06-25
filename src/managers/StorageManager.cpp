@@ -61,7 +61,14 @@ uint16_t StorageManager::listFiles(const char* dir, const char* ext, String* out
   uint16_t count = 0;
   for (File file = root.openNextFile(); file && count < maxItems; file = root.openNextFile()) {
     String name = file.name();
-    if (!file.isDirectory() && (!ext || name.endsWith(ext))) out[count++] = name;
+    if (file.isDirectory()) continue;
+    String lower = name;
+    String lowerExt = ext ? String(ext) : "";
+    if (lowerExt.length()) lowerExt.toLowerCase();
+    lower.toLowerCase();
+    bool allowedExt = !ext || lower.endsWith(lowerExt);
+    bool hidden = name.startsWith(".") || name.startsWith("._") || name.equals(".DS_Store");
+    if (!hidden && allowedExt) out[count++] = name;
   }
   root.close();
   return count;

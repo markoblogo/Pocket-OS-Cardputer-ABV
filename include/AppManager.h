@@ -11,6 +11,7 @@ public:
   void onInput(const InputEvent& event);
   bool backgroundBusy() const;
   App* current() const;
+  void requestRedraw();
 
 private:
   static constexpr uint8_t MaxApps = 16;
@@ -20,5 +21,6 @@ private:
   int8_t selected_ = 0;
   int8_t active_ = -1;
   bool dirty_ = true;
+  uint32_t lastDrawMs_ = 0;
   void drawMenu();
 };

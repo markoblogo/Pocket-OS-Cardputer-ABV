@@ -1,5 +1,5 @@
 {
-  "screenTimeoutSec": 60,
+  "screenTimeoutSec": 0,
   "brightness": 160,
   "volume": 7,
   "shuffle": false,

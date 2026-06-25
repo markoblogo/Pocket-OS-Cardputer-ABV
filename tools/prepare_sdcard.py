@@ -9,6 +9,15 @@ REQUIRED_DIRS = [
     "browser/bookmarks", "browser/saved_pages", "ai", "config", "logs", "tmp",
 ]
 
+FORCE_ALLOW = {
+    Path("config/settings.json"),
+    Path("config/wifi.json"),
+    Path("config/ai.json"),
+    Path("config/bookmarks.json"),
+    Path("config/app_state.json"),
+    Path("config/randomizer_lists.txt"),
+}
+
 def is_unsafe(target: Path, project_root: Path) -> bool:
     target = target.resolve()
     return (
@@ -57,6 +66,12 @@ def main() -> int:
             skipped += 1
             continue
         if dest.exists() and args.force:
+            rel_path = rel.as_posix()
+            allowed = rel_path.startswith("config/") and rel in FORCE_ALLOW
+            if not allowed:
+                skipped += 1
+                continue
+        if dest.exists() and args.force:
             overwritten += 1
         else:
             copied += 1
@@ -73,4 +88,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

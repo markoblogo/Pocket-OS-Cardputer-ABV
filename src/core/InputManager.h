@@ -17,6 +17,12 @@ enum class InputAction : uint8_t {
   Wake
 };
 
+enum class InputContext : uint8_t {
+  Menu,
+  Navigation,
+  TextEntry
+};
+
 enum class InputEventType : uint8_t {
   Press,
   Release,
@@ -29,6 +35,7 @@ struct InputEvent {
   InputEventType type = InputEventType::Press;
   char text = '\0';
   uint32_t timestamp = 0;
+  bool wakeSuppressed = false;
 };
 
 struct InputTiming {
@@ -46,6 +53,13 @@ public:
   bool pollEvent(InputEvent& event);
   bool hasEvent() const;
   void clear();
+
+  void setInputContext(InputContext context);
+  InputContext getInputContext() const;
+  const String& lastRawText() const;
+  bool lastFnState() const;
+  bool lastWakeSuppressed() const;
+  const InputEvent& lastEvent() const;
 
   void setDisplayAwake(bool awake);
   bool isDisplayAwake() const;
@@ -78,7 +92,12 @@ private:
 
   InputTiming timing_;
   bool displayAwake_ = true;
+  InputContext context_ = InputContext::Navigation;
   ButtonState states_[kStateCount];
+  String lastRawText_;
+  InputEvent lastEvent_;
+  bool lastFn_ = false;
+  bool lastWakeSuppressed_ = false;
 
   InputEvent queue_[kQueueSize];
   uint8_t head_ = 0;
@@ -87,6 +106,7 @@ private:
 
   void scanDigitalSource(PhysicalSource source, bool rawDown, InputAction action, uint32_t now, bool repeatable);
   void emitPressOrWake(PhysicalSource source, InputAction action, uint32_t now);
-  void push(InputAction action, InputEventType type, uint32_t now, char text = '\0');
+  void push(InputAction action, InputEventType type, uint32_t now, char text = '\0', bool wakeSuppressed = false);
   bool queueTextChar(char c, uint32_t now);
+  bool queueMappedEvent(InputAction action, uint32_t now);
 };

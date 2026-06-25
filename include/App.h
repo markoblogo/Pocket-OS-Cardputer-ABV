@@ -14,6 +14,7 @@ struct AppContext {
   SettingsManager* settings = nullptr;
   PowerManager* power = nullptr;
   NetworkManager* network = nullptr;
+  InputManager* input = nullptr;
 };
 
 class App {
@@ -26,6 +27,7 @@ public:
   virtual const char* getTitle() const = 0;
   virtual const char* getHelpLine() const = 0;
   virtual bool wantsBackgroundWork() const { return false; }
+  virtual InputContext inputContext() const { return InputContext::Navigation; }
 
 protected:
   AppContext* ctx_ = nullptr;

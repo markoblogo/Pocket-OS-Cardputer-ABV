@@ -1,7 +1,7 @@
 #include "AppManager.h"
 
 #include "TerminalUI.h"
-#include <cstring>
+#include "InputManager.h"
 
 void AppManager::begin(AppContext& context) {
   ctx_ = &context;
@@ -18,33 +18,58 @@ void AppManager::update() {
 }
 
 void AppManager::draw() {
+  const uint32_t now = millis();
+  if (active_ >= 0) {
+    if (!dirty_ && !apps_[active_]->wantsBackgroundWork() && (now - lastDrawMs_ < 150)) return;
+  } else {
+    if (!dirty_ && (now - lastDrawMs_ < 120)) return;
+  }
+
+  ctx_->ui->clearFrame();
+
   if (active_ >= 0) {
     apps_[active_]->draw();
     ctx_->ui->footer(apps_[active_]->getHelpLine());
+    if (ctx_->input) ctx_->input->setInputContext(apps_[active_]->inputContext());
   } else {
     drawMenu();
+    if (ctx_->input) ctx_->input->setInputContext(InputContext::Menu);
   }
+  ctx_->ui->pushFrame();
+  dirty_ = false;
+  lastDrawMs_ = now;
 }
 
 void AppManager::onInput(const InputEvent& event) {
+  if (active_ >= 0 && ctx_->input) {
+    ctx_->input->setInputContext(apps_[active_]->inputContext());
+  }
   if (event.action == InputAction::Wake) {
-    if (active_ >= 0 && std::strcmp(apps_[active_]->getTitle(), "Input Test") == 0) {
-      apps_[active_]->onInput(event);
-    }
+    // Wake suppression is handled in PowerManager and not forwarded into app handlers.
+    dirty_ = true;
     return;
   }
   if (active_ >= 0) {
     if (event.action == InputAction::Back && event.type == InputEventType::LongPress) {
       active_ = -1;
       dirty_ = true;
+      if (ctx_->input) ctx_->input->setInputContext(InputContext::Menu);
       return;
     }
     apps_[active_]->onInput(event);
+    dirty_ = true;
     return;
   }
   if (event.type != InputEventType::Press && event.type != InputEventType::Repeat) return;
   if (event.action == InputAction::Up && selected_ > 0) --selected_;
   else if (event.action == InputAction::Down && selected_ < static_cast<int8_t>(count_) - 1) ++selected_;
+  else if (event.action == InputAction::Left && count_) selected_ = (selected_ + count_ - 1) % count_;
+  else if (event.action == InputAction::Right && count_) selected_ = (selected_ + 1) % count_;
+  else if (event.action == InputAction::TextChar && event.text >= '0' && event.text <= '9') {
+    uint8_t index = event.text - '0';
+    if (index == 0) index = 10;
+    if (index > 0 && index <= count_) active_ = index - 1;
+  }
   else if (event.action == InputAction::Select || event.action == InputAction::Enter) active_ = selected_;
   dirty_ = true;
 }
@@ -60,10 +85,39 @@ App* AppManager::current() const {
   return active_ >= 0 ? apps_[active_] : nullptr;
 }
 
+void AppManager::requestRedraw() {
+  dirty_ = true;
+}
+
+static const char* appIcon(uint8_t index) {
+  static const char* icons[] = {
+    "MUS",
+    "REC",
+    "NOTE",
+    "BOOK",
+    "CLOCK",
+    "NET",
+    "FILE",
+    "RAND",
+    "BROW",
+    "AI",
+    "PAY",
+    "DIAG",
+    "INFO"
+  };
+  return icons[index % 13];
+}
+
 void AppManager::drawMenu() {
-  ctx_->ui->header("Cardputer ADV Shell");
-  for (uint8_t i = 0; i < count_ && i < 12; ++i) {
-    ctx_->ui->listItem(i + 2, apps_[i]->getTitle(), i == selected_);
-  }
-  ctx_->ui->footer("GO:OPEN  \x18\x19:MOVE  HOLD GO:MENU");
+  if (!count_) return;
+  uint8_t safe = selected_;
+  if (safe >= count_) safe = 0;
+  ctx_->ui->drawTopBar("CARDPUTER ABVx", String(String(safe + 1) + "/" + String(count_)).c_str());
+  ctx_->ui->drawTile(
+    String(apps_[safe]->getTitle()),
+    appIcon(safe),
+    safe + 1,
+    count_);
+  ctx_->ui->status("UP/DN/< >/TAB:APP  1-0 open", TerminalUI::Dim);
+  ctx_->ui->footer("GO OPEN  HOLD GO:BACK");
 }

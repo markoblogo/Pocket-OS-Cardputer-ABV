@@ -120,6 +120,7 @@ void setup() {
   context.settings = &settings;
   context.power = &power;
   context.network = &network;
+  context.input = &input;
   registerApps();
 
   if (!storage.ready()) {
@@ -136,6 +137,7 @@ void loop() {
   InputEvent event;
   while (input.pollEvent(event)) {
     if (event.action == InputAction::Wake) {
+      Serial.println("[Power] wake requested");
       power.wakeDisplay();
       apps.onInput(event);
       continue;

@@ -1,5 +1,13 @@
 # First Real-Device Run
 
+## v0.1.1 Hardware Usability Patch
+
+- Default screen timeout is disabled (`screenTimeoutSec = 0`) for testing.
+- Wake behavior is fixed: first key wakes only and is not forwarded.
+- Navigation now works via red arrow punctuation keys (`;`,`,`,`.`,`/`) plus fallback `WASD`/`HJKL`.
+- Launcher uses a one-tile carousel layout with visible index and number shortcuts.
+- Music screen uses a cleaner track/status layout and visualizer.
+
 ## Required Hardware
 
 - M5Stack Cardputer-Adv.
@@ -74,6 +82,21 @@ Set:
 
 Never commit real API keys.
 
+## Launcher Controls
+
+- `1-0`: open app by index.
+- `↑/↓/←/→`: next/previous app.
+- `TAB`: next app.
+- `WASD`/`HJKL`: fallback navigation.
+- `GO` short: open.
+- `GO` hold (`700ms`): back to launcher.
+
+## Wake/Screen Behavior
+
+- `screenTimeoutSec = 0` disables auto-off by default.
+- `Input Test > ENT` can force screen-off for manual checks.
+- Any key wakes the screen and does not get forwarded on the same event.
+
 ## Build
 
 ```sh
@@ -121,6 +144,11 @@ Exit with `Ctrl+]`.
 - `HTTP error ...`: endpoint rejected the browser or AI request.
 - `error: MP3 open/output failed`: audio path or file format needs device validation.
 
+### Screen-off checks
+
+- If backlight is off, press any key first.
+- Expected serial message: `[Power] wake requested` followed by screen redraw.
+
 ## Known Limitations
 
 - Browser is text-only. No JavaScript or CSS rendering.
@@ -136,4 +164,3 @@ M5Unified microphone and speaker paths may need exclusive hardware use.
 - Stop Music before starting Recorder.
 - Timer beep during recording may be suppressed or delayed.
 - MusicApp and RecorderApp are the highest priority hardware validation targets.
-

@@ -23,12 +23,15 @@ void PowerManager::notifyUserActivity() {
 }
 
 void PowerManager::wakeDisplay() {
+  Serial.println("[Power] screen on");
   awake_ = true;
+  lastActivity_ = millis();
   if (input_) input_->setDisplayAwake(true);
   M5Cardputer.Display.setBrightness(settings_ ? settings_->get().brightness : 160);
 }
 
 void PowerManager::screenOff() {
+  Serial.println("[Power] screen off");
   awake_ = false;
   if (input_) input_->setDisplayAwake(false);
   M5Cardputer.Display.setBrightness(0);

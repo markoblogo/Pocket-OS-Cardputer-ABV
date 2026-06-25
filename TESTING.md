@@ -9,6 +9,9 @@ Use this matrix for the first Cardputer-Adv release-candidate pass.
 | Keyboard | Input Test: letters/arrows/backspace/enter | Semantic events appear correctly. |
 | BtnGO | Input Test: short press | `Select` event. |
 | BtnGO | Input Test: hold 700 ms+ | `Back` long event/menu behavior. |
+| Launcher | Number shortcuts 1-0 | opens selected app directly. |
+| Launcher | `TAB`, `←`, `→`, `;`,`,`,` .`,`/`, `WASD` | app navigation works when arrows differ. |
+| Input Test | Wake suppression | `Wake` appears, original input not forwarded. |
 | SD mount | System Info | SD shows mounted. |
 | Notes | Create/open/save note | `.txt` appears in `/notes`. |
 | Reader normal | Open `.txt`, scroll lines/pages | Text scrolls without blocking. |
@@ -46,4 +49,3 @@ MusicApp and RecorderApp need the most real hardware time:
 - Verify mic sample continuity.
 - Avoid recording while music is playing.
 - Timer beep may be delayed or suppressed while recording.
-

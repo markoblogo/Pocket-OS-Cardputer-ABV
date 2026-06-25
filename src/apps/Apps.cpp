@@ -106,6 +106,10 @@ void MusicApp::begin(AppContext& context) {
   shuffle_ = ctx_->settings->get().shuffle;
   output_ = new AudioOutputM5Speaker(&M5Cardputer.Speaker, 0);
   applyVolume();
+  Serial.printf("[Music] found %u mp3 files\n", files_.count());
+  for (uint16_t i = 0; i < files_.count() && i < 3; ++i) {
+    Serial.printf("[Music] file: /music/%s\n", files_.item(i).c_str());
+  }
 }
 
 void MusicApp::update() {
@@ -124,17 +128,34 @@ void MusicApp::update() {
 
 void MusicApp::draw() {
   ctx_->ui->header("Music");
-  ctx_->ui->line(2, files_.count() ? files_.selectedName() : "No MP3 files in /music", files_.count() ? TerminalUI::White : TerminalUI::Yellow);
-  ctx_->ui->line(4, String("State: ") + (playing_ ? "playing" : "paused") + "  Vol:" + volume_ + "  Shuffle:" + (shuffle_ ? "on" : "off"));
-  ctx_->ui->line(6, String("Track ") + (files_.selected() + 1) + "/" + files_.count());
+  uint16_t count = files_.count();
+  if (!count) {
+    ctx_->ui->line(2, "No MP3 files in /music", TerminalUI::Yellow);
+    ctx_->ui->line(4, "Add .mp3 files to /music and refresh.");
+    return;
+  }
+
+  String filename = files_.selectedName();
+  if (filename.length() > 26) filename = filename.substring(filename.length() - 26);
+
+  ctx_->ui->line(2, String("Track ") + (files_.selected() + 1) + "/" + count);
+  ctx_->ui->line(3, filename, TerminalUI::White);
+  ctx_->ui->line(5, String("Status: ") + (playing_ ? "PLAY" : "PAUSE") +
+                       String("  Vol:") + volume_ +
+                       String("  Shuffle:") + (shuffle_ ? "ON" : "OFF"));
+
+  ctx_->ui->drawValueBar(8, 86, 220, volume_, 15);
   String bars;
   for (uint8_t i = 0; i < 12; ++i) bars += (i <= viz_ && playing_) ? "|" : ".";
-  ctx_->ui->line(8, bars, TerminalUI::Green);
+  ctx_->ui->line(12, bars, TerminalUI::Green);
   ctx_->ui->line(10, status_, status_.startsWith("error") ? TerminalUI::Red : TerminalUI::Dim);
 }
 
 void MusicApp::onInput(const InputEvent& e) {
-  if (pressed(e, InputAction::Select)) {
+  if (!files_.count()) {
+    return;
+  }
+  if (pressed(e, InputAction::Select) || pressed(e, InputAction::Enter)) {
     if (playing_) playing_ = false;
     else if (mp3_) playing_ = true;
     else playing_ = startTrack();
@@ -838,18 +859,31 @@ void PaymentsApp::draw() {
 
 void InputDiagnosticsApp::draw() {
   ctx_->ui->header("Input Test");
+  InputEvent e = ctx_->input ? ctx_->input->lastEvent() : InputEvent{};
   if (!hasLast_) {
     ctx_->ui->line(3, "Press any key or GO.");
+    if (ctx_->input) {
+      ctx_->ui->line(5, String("raw: ") + (ctx_->input->lastRawText().length() ? ctx_->input->lastRawText() : String("<none>")));
+      ctx_->ui->line(6, String("fn: ") + String(ctx_->input->lastFnState() ? "on" : "off"));
+    }
     return;
   }
-  ctx_->ui->line(2, String("Action: ") + actionName(last_.action), TerminalUI::Green);
-  ctx_->ui->line(4, String("Type: ") + typeName(last_.type));
-  ctx_->ui->line(6, String("Text: ") + (last_.text ? String(last_.text) : String("-")));
-  ctx_->ui->line(8, String("Time: ") + last_.timestamp);
-  ctx_->ui->line(10, String("Wake suppressed: ") + (last_.action == InputAction::Wake ? "yes" : "no"), TerminalUI::Yellow);
+  if (ctx_->input) {
+    ctx_->ui->line(2, String("raw: ") + (ctx_->input->lastRawText().length() ? ctx_->input->lastRawText() : String("-")), TerminalUI::Dim);
+    ctx_->ui->line(3, String("fn: ") + String(ctx_->input->lastFnState() ? "on" : "off"), TerminalUI::Dim);
+  }
+  ctx_->ui->line(4, String("Action: ") + actionName(e.action), TerminalUI::Green);
+  ctx_->ui->line(5, String("Type: ") + typeName(e.type));
+  ctx_->ui->line(6, String("Text: ") + (e.text ? String(e.text) : String("-")));
+  ctx_->ui->line(7, String("Time: ") + e.timestamp);
+  ctx_->ui->line(8, String("Wake suppressed: ") + (e.wakeSuppressed ? "yes" : "no"), TerminalUI::Yellow);
 }
 
 void InputDiagnosticsApp::onInput(const InputEvent& event) {
+  if (event.action == InputAction::Enter && ctx_->power) {
+    ctx_->power->screenOff();
+    return;
+  }
   last_ = event;
   hasLast_ = true;
 }

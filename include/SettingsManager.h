@@ -5,7 +5,7 @@
 class StorageManager;
 
 struct Settings {
-  uint16_t screenTimeoutSec = 60;
+  uint16_t screenTimeoutSec = 0;
   uint8_t brightness = 160;
   uint8_t volume = 7;
   bool shuffle = false;

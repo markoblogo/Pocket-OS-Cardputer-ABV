@@ -18,7 +18,7 @@ public:
   void draw() override;
   void onInput(const InputEvent& event) override;
   const char* getTitle() const override { return "Music"; }
-  const char* getHelpLine() const override { return "GO:PAUSE  ->:NEXT  UP/DN:VOL  HOLD GO:MENU"; }
+  const char* getHelpLine() const override { return "GO PLAY/PAUSE  > NEXT  UP/DN VOL  HOLD GO:BACK"; }
   bool wantsBackgroundWork() const override { return playing_; }
 private:
   FileBrowser files_;
@@ -71,6 +71,7 @@ public:
   void update() override;
   void draw() override;
   void onInput(const InputEvent& event) override;
+  InputContext inputContext() const override { return editing_ ? InputContext::TextEntry : InputContext::Navigation; }
   const char* getTitle() const override { return "Notes"; }
   const char* getHelpLine() const override { return editing_ ? "GO:SAVE  ENT:NEWLINE  BSP:DEL  HOLD GO:BACK" : "GO/ENT:OPEN  N:NEW  UP/DN:MOVE"; }
 private:
@@ -129,6 +130,7 @@ public:
   void begin(AppContext& context) override;
   void draw() override;
   void onInput(const InputEvent& event) override;
+  InputContext inputContext() const override { return password_ ? InputContext::TextEntry : InputContext::Navigation; }
   const char* getTitle() const override { return "Network"; }
   const char* getHelpLine() const override { return password_ ? "TYPE PASS  ENT:CONNECT  HOLD GO:BACK" : "GO:SCAN  ENT:PASS  UP/DN:SSID"; }
 private:
@@ -186,6 +188,7 @@ public:
   void begin(AppContext& context) override;
   void draw() override;
   void onInput(const InputEvent& event) override;
+  InputContext inputContext() const override { return entering_ ? InputContext::TextEntry : InputContext::Navigation; }
   const char* getTitle() const override { return "Text Browser"; }
   const char* getHelpLine() const override { return entering_ ? "TYPE URL  ENT:LOAD  HOLD GO:BACK" : "ENT:URL  UP/DN:SCROLL  GO:SAVE"; }
 private:
@@ -211,6 +214,7 @@ public:
   void begin(AppContext& context) override;
   void draw() override;
   void onInput(const InputEvent& event) override;
+  InputContext inputContext() const override { return InputContext::TextEntry; }
   const char* getTitle() const override { return "AI Text"; }
   const char* getHelpLine() const override { return "TYPE PROMPT  ENT:SEND  UP/DN:SCROLL"; }
 private:
@@ -234,7 +238,7 @@ public:
   void draw() override;
   void onInput(const InputEvent& event) override;
   const char* getTitle() const override { return "Input Test"; }
-  const char* getHelpLine() const override { return "PRESS KEYS  HOLD GO:MENU"; }
+  const char* getHelpLine() const override { return "ENT:SCREEN-OFF  HOLD GO:MENU"; }
 
 private:
   InputEvent last_;

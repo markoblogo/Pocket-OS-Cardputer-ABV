@@ -9,19 +9,19 @@ ENV = "m5stack-cardputer-adv"
 
 FEATURE_STATUS = """\
 Feature status:
-- Working: shell, input, power, storage, settings, notes, reader, randomizer, diagnostics.
+- Working: input contract, wake/sleep handling, launcher, power, storage, settings, notes, reader, randomizer, diagnostics.
 - Partially working: music, recorder, network, web file manager, browser, AI text, clock.
 - Disabled: AI voice.
-- Informational only: payments.
+- Informational: payments.
 """
 
 KNOWN_LIMITS = """\
 Known limitations:
 - Music and recorder need real Cardputer-Adv audio validation.
+- Screen-off uses backlight-only; screen wake is key-first and does not forward first key.
 - Web File Manager is local-network only and may be unauthenticated.
 - Browser is text-only and ignores JavaScript/CSS.
-- AI provider schemas may need config tuning.
-- Deep sleep is not used; screen-off mode controls backlight.
+- AI provider schemas may need endpoint tuning.
 """
 
 SD_LAYOUT = """\
@@ -42,15 +42,15 @@ SD card layout:
 TEST_CHECKLIST = """\
 Test checklist:
 1. Boot to main menu.
-2. Open System Info and verify SD.
-3. Open Input Test and verify keys/GO.
-4. Save a note.
-5. Read a book.
-6. Play MP3 and test screen-off.
-7. Record WAV and validate on computer.
-8. Connect Wi-Fi.
-9. Test Web File Manager list/upload/download/delete.
-10. Test Browser, AI, Clock, Randomizer.
+2. Open Input Test and verify punctuation/Fn arrow mapping, BtnGO short/long.
+3. Verify wake suppression on first key after screen-off.
+4. Verify launcher number shortcuts 1-0, Tab, and Left/Right/Up/Down navigation.
+5. Play MP3 and check music UI, state, and volume control.
+6. Confirm no phantom track list state errors ("No MP3" when files exist).
+7. Open Notes and save text.
+8. Open Reader and scroll normal/speed modes.
+9. Scan/connect Wi-Fi and open Browser/AI.
+10. Open System Info, Randomizer, Web File Manager, and Recorder smoke test.
 """
 
 def main() -> int:
@@ -91,4 +91,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
