@@ -15,6 +15,10 @@
 #define FEATURE_INPUT_DIAGNOSTICS 1
 #define FEATURE_SYSTEM_INFO 1
 
+// Enable ultra-safe boot diagnostics for first-device bring-up.
+// Keeps firmware in a minimal state and avoids app/UI/SPI-heavy init paths.
+#define FEATURE_ULTRA_SAFE_BOOT 1
+
 #define FEATURE_SAFE_BOOT 1
 
-#define FIRMWARE_VERSION "v0.1.2"
+#define FIRMWARE_VERSION "v0.1.3b"
