@@ -1,0 +1,8 @@
+{
+  "screenTimeoutSec": 60,
+  "brightness": 160,
+  "volume": 7,
+  "shuffle": false,
+  "timezoneOffsetMin": 60,
+  "webPin": ""
+}

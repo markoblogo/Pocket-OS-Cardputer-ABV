@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "endpoint": "",
+  "apiKey": "",
+  "model": "",
+  "provider": "openai_compatible",
+  "systemPrompt": "You are a concise assistant.",
+  "insecureTlsForTesting": true,
+  "notes": "No credentials are bundled. Configure your own HTTPS endpoint."
+}

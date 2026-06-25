@@ -1,0 +1,32 @@
+.pio/
+release/
+work/
+outputs/
+
+# Local secrets and real device config
+.env
+.env.*
+secrets.*
+*_secret*
+*_secrets*
+local_config/
+config.local.*
+wifi.local.json
+ai.local.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+._*
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python/tooling cache
+__pycache__/
+*.pyc
+.pytest_cache/

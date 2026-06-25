@@ -1,0 +1,4 @@
+# One item per line. Empty lines and # comments are ignored.
+Tea
+Coffee
+Water
