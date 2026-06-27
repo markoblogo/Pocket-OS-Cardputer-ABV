@@ -2,26 +2,20 @@
 #include <M5Cardputer.h>
 #include <SD.h>
 #include <SPI.h>
+#include <cstring>
 
+#include "Features.h"
+
+#if !FEATURE_ULTRA_SAFE_BOOT
 #include "AppManager.h"
 #include "Apps.h"
-#include "Features.h"
 #include "InputManager.h"
 #include "NetworkManager.h"
 #include "PowerManager.h"
 #include "SettingsManager.h"
 #include "StorageManager.h"
 #include "TerminalUI.h"
-
-InputManager input;
-TerminalUI ui;
-StorageManager storage;
-SettingsManager settings;
-PowerManager power;
-NetworkManager network;
-AppManager apps;
-
-AppContext context;
+#endif
 
 #if FEATURE_ULTRA_SAFE_BOOT
 namespace {
@@ -33,6 +27,9 @@ constexpr uint32_t kSdSpeeds[] = {400000UL, 1000000UL, 4000000UL, 10000000UL, 25
 constexpr uint32_t kBootHeartbeatMs = 2000;
 constexpr uint32_t kBtnLongPressMs = 700;
 constexpr uint32_t kKeyDebounceMs = 100;
+constexpr size_t kLastRawMaxLen = 16;
+constexpr size_t kLastActionMaxLen = 16;
+constexpr size_t kLastLineMaxLen = 64;
 
 enum class UltraScreenMode : uint8_t {
   BootDiag,
@@ -45,26 +42,41 @@ uint32_t g_btnDownAtMs = 0;
 bool g_btnLongHandled = false;
 UltraScreenMode g_screenMode = UltraScreenMode::BootDiag;
 uint32_t g_lastKeyPressMs = 0;
-char g_lastHandledKey = '\0';
 bool g_keyHeld = false;
 String g_sdStatus = "SD: not tested";
+char g_lastRawLabel[kLastRawMaxLen] = "none";
+char g_lastActionLabel[kLastActionMaxLen] = "READY";
+char g_lastLine[kLastLineMaxLen] = "LAST: none -> READY";
+char g_renderedRawLabel[kLastRawMaxLen] = {};
+char g_renderedActionLabel[kLastActionMaxLen] = {};
+char g_renderedLine[kLastLineMaxLen] = {};
+UltraScreenMode g_renderedMode = UltraScreenMode::BootDiag;
+String g_renderedSdStatus;
 
-void drawBootDiagScreen(const String& sdStatus, const String& hintLine) {
+void setUltraSafeLastLine(const char rawLabel[16], const char* actionLabel) {
+  snprintf(g_lastRawLabel, kLastRawMaxLen, "%s", rawLabel && rawLabel[0] ? rawLabel : "?");
+  snprintf(g_lastActionLabel, kLastActionMaxLen, "%s", actionLabel && actionLabel[0] ? actionLabel : "IGNORED");
+  snprintf(g_lastLine, kLastLineMaxLen, "LAST: %s -> %s", g_lastRawLabel, g_lastActionLabel);
+}
+
+void drawBootDiagScreen(const String& sdStatus, const char* lastLine) {
   M5Cardputer.Display.fillScreen(0x0000);
   M5Cardputer.Display.setTextSize(1);
   M5Cardputer.Display.setTextColor(0xFFFF, 0x0000);
   M5Cardputer.Display.setCursor(8, 8);
   M5Cardputer.Display.println("CARDPUTER ABVx");
-  M5Cardputer.Display.println("v0.1.6 SAFE BOOT");
+  M5Cardputer.Display.println(FIRMWARE_VERSION);
+  M5Cardputer.Display.println("SAFE BOOT");
   M5Cardputer.Display.println("Serial: OK");
   M5Cardputer.Display.println("Display: OK");
   M5Cardputer.Display.println(sdStatus.c_str());
-  M5Cardputer.Display.setTextColor(0xFFE0, 0x0000);
-  M5Cardputer.Display.println(hintLine.c_str());
+  M5Cardputer.Display.setTextColor(0x07FF, 0x0000);
+  M5Cardputer.Display.println("GO: test SD");
   M5Cardputer.Display.println("1: launcher test");
+  M5Cardputer.Display.println(lastLine);
 }
 
-void drawLauncherTestScreen() {
+void drawLauncherTestScreen(const char* lastLine) {
   M5Cardputer.Display.fillScreen(0x0000);
   M5Cardputer.Display.setTextSize(1);
   M5Cardputer.Display.setTextColor(0xFFFF, 0x0000);
@@ -74,20 +86,40 @@ void drawLauncherTestScreen() {
   M5Cardputer.Display.setTextColor(0x07FF, 0x0000);
   M5Cardputer.Display.println("This is only a static screen.");
   M5Cardputer.Display.setTextColor(0xFFE0, 0x0000);
-  M5Cardputer.Display.println("0/B: back");
+  M5Cardputer.Display.println("0/B/b: back");
+  M5Cardputer.Display.println(lastLine);
 }
 
-char detectUltraSafeKey() {
-  auto keys = M5Cardputer.Keyboard.keysState();
+void renderUltraSafeScreenIfNeeded() {
+  const bool modeChanged = g_renderedMode != g_screenMode;
+  const bool lineChanged = strcmp(g_lastLine, g_renderedLine) != 0;
+  const bool statusChanged = (g_renderedSdStatus != g_sdStatus) && (g_screenMode == UltraScreenMode::BootDiag);
+
+  if (!modeChanged && !lineChanged && !statusChanged) {
+    return;
+  }
+
+  if (g_screenMode == UltraScreenMode::BootDiag) {
+    drawBootDiagScreen(g_sdStatus, g_lastLine);
+  } else {
+    drawLauncherTestScreen(g_lastLine);
+  }
+
+  g_renderedMode = g_screenMode;
+  strcpy(g_renderedRawLabel, g_lastRawLabel);
+  strcpy(g_renderedActionLabel, g_lastActionLabel);
+  strcpy(g_renderedLine, g_lastLine);
+  g_renderedSdStatus = g_sdStatus;
+}
+
+char getUltraSafePrintableKey() {
+  const auto keys = M5Cardputer.Keyboard.keysState();
   for (uint8_t i = 0; i < sizeof(keys.word); ++i) {
-    const char c = static_cast<char>(keys.word[i]);
-    if (c == 0 || c == '\n' || c == '\r' || c == '\t') {
+    const char raw = static_cast<char>(keys.word[i]);
+    if (raw == 0 || raw == '\n' || raw == '\r' || raw == '\t' || raw == ' ') {
       continue;
     }
-    if (c == '1' || c == '0' || c == 'b' || c == 'B') {
-      return c;
-    }
-    return '\0';
+    return raw;
   }
   return '\0';
 }
@@ -97,36 +129,45 @@ void applyUltraSafeKeyAction(char key) {
     return;
   }
 
-  if (key == 'B') {
-    key = 'b';
-  }
-  Serial.print("[KEY] ");
-  Serial.println(key);
-  Serial.flush();
-
-  if (g_screenMode == UltraScreenMode::BootDiag && key == '1') {
-    g_screenMode = UltraScreenMode::LauncherTest;
-    Serial.println("[SCREEN] LauncherTest");
-    Serial.flush();
-    drawLauncherTestScreen();
+  if (key == '1') {
+    if (g_screenMode == UltraScreenMode::BootDiag) {
+      g_screenMode = UltraScreenMode::LauncherTest;
+      setUltraSafeLastLine("1", "LAUNCHER");
+    } else {
+      setUltraSafeLastLine("1", "IGNORED");
+    }
     return;
   }
 
-  if (g_screenMode == UltraScreenMode::LauncherTest && (key == '0' || key == 'b')) {
+  if (g_screenMode == UltraScreenMode::LauncherTest && (key == '0' || key == 'b' || key == 'B')) {
     g_screenMode = UltraScreenMode::BootDiag;
-    Serial.println("[SCREEN] BootDiag");
-    Serial.flush();
-    drawBootDiagScreen(g_sdStatus, "GO: test SD");
+    const char rawKey[2] = {key, '\0'};
+    setUltraSafeLastLine(rawKey, "BOOT");
+    return;
   }
+
+  if (key == '0') {
+    setUltraSafeLastLine("0", "IGNORED");
+    return;
+  }
+
+  if (key == 'b' || key == 'B') {
+    const char rawKey[2] = {key, '\0'};
+    setUltraSafeLastLine(rawKey, "IGNORED");
+    return;
+  }
+
+  setUltraSafeLastLine("?", "IGNORED");
 }
 
 void testSdFromBoot() {
+  setUltraSafeLastLine("GO", "SD");
   Serial.println("[BOOT] GO pressed, testing SD");
   Serial.flush();
   bool ok = false;
   String status = g_sdStatus;
 
-  drawBootDiagScreen("SD: testing...", "GO: test SD");
+  drawBootDiagScreen("SD: testing...", g_lastLine);
   M5Cardputer.Display.setCursor(8, 72);
   M5Cardputer.Display.setTextColor(0x07FF, 0x0000);
   M5Cardputer.Display.println("testing... hold still");
@@ -166,51 +207,63 @@ void testSdFromBoot() {
     status = "SD: failed";
   }
   g_sdStatus = status;
-  drawBootDiagScreen(status, "GO: test SD");
+  setUltraSafeLastLine("GO", "SD");
+  renderUltraSafeScreenIfNeeded();
 }
 }  // namespace
 #endif
 
-#if FEATURE_MUSIC
-MusicApp musicApp;
-#endif
-#if FEATURE_RECORDER
-RecorderApp recorderApp;
-#endif
-#if FEATURE_NOTES
-NotesApp notesApp;
-#endif
-#if FEATURE_READER
-ReaderApp readerApp;
-#endif
-#if FEATURE_CLOCK
-ClockApp clockApp;
-#endif
-#if FEATURE_NETWORK
-NetworkApp networkApp;
-#endif
-#if FEATURE_WEB_FILE_MANAGER
-WebFileManagerApp webFileManagerApp;
-#endif
-#if FEATURE_RANDOMIZER
-RandomizerApp randomizerApp;
-#endif
-#if FEATURE_BROWSER
-BrowserApp browserApp;
-#endif
-#if FEATURE_AI_TEXT
-AIApp aiApp;
-#endif
-#if FEATURE_PAYMENTS_INFO
-PaymentsApp paymentsApp;
-#endif
-#if FEATURE_INPUT_DIAGNOSTICS
-InputDiagnosticsApp inputDiagnosticsApp;
-#endif
-#if FEATURE_SYSTEM_INFO
-SystemInfoApp systemInfoApp;
+#if !FEATURE_ULTRA_SAFE_BOOT
+InputManager input;
+TerminalUI ui;
+StorageManager storage;
+SettingsManager settings;
+PowerManager power;
+NetworkManager network;
+AppManager apps;
+AppContext context;
 #endif
 
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_MUSIC
+MusicApp musicApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_RECORDER
+RecorderApp recorderApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_NOTES
+NotesApp notesApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_READER
+ReaderApp readerApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_CLOCK
+ClockApp clockApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_NETWORK
+NetworkApp networkApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_WEB_FILE_MANAGER
+WebFileManagerApp webFileManagerApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_RANDOMIZER
+RandomizerApp randomizerApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_BROWSER
+BrowserApp browserApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_AI_TEXT
+AIApp aiApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_PAYMENTS_INFO
+PaymentsApp paymentsApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_INPUT_DIAGNOSTICS
+InputDiagnosticsApp inputDiagnosticsApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT && FEATURE_SYSTEM_INFO
+SystemInfoApp systemInfoApp;
+#endif
+#if !FEATURE_ULTRA_SAFE_BOOT
 static void registerApps() {
   apps.begin(context);
 #if FEATURE_MUSIC
@@ -253,6 +306,7 @@ static void registerApps() {
   apps.add(&systemInfoApp);
 #endif
 }
+#endif
 
 void setup() {
 #if FEATURE_ULTRA_SAFE_BOOT
@@ -269,7 +323,8 @@ void setup() {
   Serial.println("[BOOT] 020 M5Cardputer.begin done");
   Serial.flush();
 
-  drawBootDiagScreen("SD: not tested", "GO: test SD");
+  setUltraSafeLastLine("?", "READY");
+  renderUltraSafeScreenIfNeeded();
   Serial.println("[BOOT] 030 safe boot screen rendered");
   Serial.flush();
 
@@ -315,18 +370,19 @@ void setup() {
 void loop() {
 #if FEATURE_ULTRA_SAFE_BOOT
   M5Cardputer.update();
-  if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed() && !g_keyHeld) {
-    const uint32_t nowKey = millis();
-    const char key = detectUltraSafeKey();
-    if (key != '\0' && (key != g_lastHandledKey) && (nowKey - g_lastKeyPressMs >= kKeyDebounceMs)) {
-      g_lastKeyPressMs = nowKey;
-      g_lastHandledKey = key;
-      g_keyHeld = true;
-      applyUltraSafeKeyAction(key);
+  if (M5Cardputer.Keyboard.isChange()) {
+    if (M5Cardputer.Keyboard.isPressed() && !g_keyHeld) {
+      const uint32_t nowKey = millis();
+      const char key = getUltraSafePrintableKey();
+      if (key != '\0' && (nowKey - g_lastKeyPressMs >= kKeyDebounceMs)) {
+        g_lastKeyPressMs = nowKey;
+        g_keyHeld = true;
+        applyUltraSafeKeyAction(key);
+        renderUltraSafeScreenIfNeeded();
+      }
+    } else if (!M5Cardputer.Keyboard.isPressed()) {
+      g_keyHeld = false;
     }
-  } else if (!M5Cardputer.Keyboard.isPressed()) {
-    g_lastHandledKey = '\0';
-    g_keyHeld = false;
   }
 
   const uint32_t now = millis();
