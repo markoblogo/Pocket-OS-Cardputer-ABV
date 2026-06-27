@@ -3,6 +3,7 @@
 #include <SD.h>
 #include <SPI.h>
 #include <cstring>
+#include <type_traits>
 
 #include "Features.h"
 
@@ -30,6 +31,7 @@ constexpr uint32_t kKeyDebounceMs = 100;
 constexpr size_t kLastRawMaxLen = 16;
 constexpr size_t kLastActionMaxLen = 16;
 constexpr size_t kLastLineMaxLen = 64;
+constexpr size_t kTriStateLen = 8;
 
 enum class UltraScreenMode : uint8_t {
   BootDiag,
@@ -58,9 +60,15 @@ char g_keyScanRawLabel[kLastRawMaxLen] = "none";
 char g_keyScanPrintableLabel[kLastRawMaxLen] = "none";
 char g_keyScanHexLabel[kLastRawMaxLen] = "0x00";
 char g_keyScanMappedLabel[kLastRawMaxLen] = "UNKNOWN";
-char g_keyScanFnLabel[8] = "unknown";
-char g_keyScanEnterLabel[8] = "no";
-char g_keyScanDelLabel[8] = "no";
+char g_keyScanFnLabel[kTriStateLen] = "?";
+char g_keyScanShiftLabel[kTriStateLen] = "?";
+char g_keyScanCtrlLabel[kTriStateLen] = "?";
+char g_keyScanOptLabel[kTriStateLen] = "?";
+char g_keyScanAltLabel[kTriStateLen] = "?";
+char g_keyScanTabLabel[kTriStateLen] = "?";
+char g_keyScanEnterLabel[kTriStateLen] = "?";
+char g_keyScanDelLabel[kTriStateLen] = "?";
+bool g_keyScanCapturePending = false;
 uint32_t g_keyScanCount = 0;
 char g_renderedRawLabel[kLastRawMaxLen] = {};
 char g_renderedActionLabel[kLastActionMaxLen] = {};
@@ -69,9 +77,15 @@ char g_renderedKeyScanRawLabel[kLastRawMaxLen] = {};
 char g_renderedKeyScanPrintableLabel[kLastRawMaxLen] = {};
 char g_renderedKeyScanHexLabel[kLastRawMaxLen] = {};
 char g_renderedKeyScanMappedLabel[kLastRawMaxLen] = {};
-char g_renderedKeyScanFnLabel[8] = {};
-char g_renderedKeyScanEnterLabel[8] = {};
-char g_renderedKeyScanDelLabel[8] = {};
+char g_renderedKeyScanFnLabel[kTriStateLen] = {};
+char g_renderedKeyScanShiftLabel[kTriStateLen] = {};
+char g_renderedKeyScanCtrlLabel[kTriStateLen] = {};
+char g_renderedKeyScanOptLabel[kTriStateLen] = {};
+char g_renderedKeyScanAltLabel[kTriStateLen] = {};
+char g_renderedKeyScanTabLabel[kTriStateLen] = {};
+char g_renderedKeyScanEnterLabel[kTriStateLen] = {};
+char g_renderedKeyScanDelLabel[kTriStateLen] = {};
+bool g_renderedKeyScanCapturePending = false;
 uint32_t g_renderedKeyScanCount = 0xFFFFFFFFu;
 UltraScreenMode g_renderedMode = UltraScreenMode::BootDiag;
 UltraLauncherTile g_renderedLauncherTile = UltraLauncherTile::TileTwo;
@@ -132,28 +146,40 @@ void drawLauncherTestScreen(const char* lastLine) {
 
 void drawKeyScanScreen(const char* lastLine) {
   M5Cardputer.Display.fillScreen(0x0000);
-  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setTextSize(2);
   M5Cardputer.Display.setTextColor(0xFFFF, 0x0000);
-  M5Cardputer.Display.setCursor(8, 8);
-  M5Cardputer.Display.println("CARDPUTER ABVx");
+  M5Cardputer.Display.setCursor(8, 4);
   M5Cardputer.Display.println("KEY SCAN");
   M5Cardputer.Display.setTextColor(0x07FF, 0x0000);
-  M5Cardputer.Display.print("Last raw label: ");
-  M5Cardputer.Display.println(g_keyScanRawLabel);
-  M5Cardputer.Display.print("Printable char: ");
-  M5Cardputer.Display.println(g_keyScanPrintableLabel);
-  M5Cardputer.Display.printf("Hex: %s\n", g_keyScanHexLabel);
-  M5Cardputer.Display.print("Mapped guess: ");
-  M5Cardputer.Display.println(g_keyScanMappedLabel);
-  M5Cardputer.Display.print("Fn: ");
-  M5Cardputer.Display.println(g_keyScanFnLabel);
-  M5Cardputer.Display.print("Enter: ");
-  M5Cardputer.Display.println(g_keyScanEnterLabel);
-  M5Cardputer.Display.print("Del: ");
-  M5Cardputer.Display.println(g_keyScanDelLabel);
-  M5Cardputer.Display.printf("Count: %lu\n", static_cast<unsigned long>(g_keyScanCount));
+  M5Cardputer.Display.setCursor(8, 28);
+  M5Cardputer.Display.print("RAW:");
+  M5Cardputer.Display.setCursor(8, 44);
+  M5Cardputer.Display.printf("%s\n", g_keyScanRawLabel);
+  M5Cardputer.Display.setCursor(8, 64);
+  M5Cardputer.Display.print("HEX:");
+  M5Cardputer.Display.setCursor(8, 80);
+  M5Cardputer.Display.printf("%s\n", g_keyScanHexLabel);
+  M5Cardputer.Display.setCursor(8, 100);
+  M5Cardputer.Display.print("MAP:");
+  M5Cardputer.Display.setCursor(8, 116);
+  M5Cardputer.Display.printf("%s\n", g_keyScanMappedLabel);
+  M5Cardputer.Display.setCursor(8, 136);
+  M5Cardputer.Display.printf("CHAR:");
+  M5Cardputer.Display.setCursor(8, 152);
+  M5Cardputer.Display.printf("%s\n", g_keyScanPrintableLabel);
+  M5Cardputer.Display.setCursor(8, 172);
+  M5Cardputer.Display.printf("FN:%s ENTER:%s DEL:%s\n", g_keyScanFnLabel, g_keyScanEnterLabel, g_keyScanDelLabel);
+  M5Cardputer.Display.setCursor(8, 188);
+  M5Cardputer.Display.printf("MOD S:%s C:%s O:%s A:%s T:%s\n",
+                            g_keyScanShiftLabel, g_keyScanCtrlLabel, g_keyScanOptLabel, g_keyScanAltLabel, g_keyScanTabLabel);
+  M5Cardputer.Display.setCursor(8, 204);
+  M5Cardputer.Display.printf("CNT:%lu\n", static_cast<unsigned long>(g_keyScanCount));
+  M5Cardputer.Display.setTextSize(1);
   M5Cardputer.Display.setTextColor(0xFFE0, 0x0000);
-  M5Cardputer.Display.println("0/B/b: back");
+  M5Cardputer.Display.setCursor(8, 222);
+  M5Cardputer.Display.println("0/B: back");
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setCursor(8, 236);
   M5Cardputer.Display.println(lastLine);
 }
 
@@ -168,8 +194,14 @@ void renderUltraSafeScreenIfNeeded() {
        (strcmp(g_keyScanHexLabel, g_renderedKeyScanHexLabel) != 0) ||
        (strcmp(g_keyScanMappedLabel, g_renderedKeyScanMappedLabel) != 0) ||
        (strcmp(g_keyScanFnLabel, g_renderedKeyScanFnLabel) != 0) ||
-       (strcmp(g_keyScanEnterLabel, g_renderedKeyScanEnterLabel) != 0) ||
-       (strcmp(g_keyScanDelLabel, g_renderedKeyScanDelLabel) != 0) ||
+       (strcmp(g_keyScanShiftLabel, g_renderedKeyScanShiftLabel) != 0) ||
+       (strcmp(g_keyScanCtrlLabel, g_renderedKeyScanCtrlLabel) != 0) ||
+       (strcmp(g_keyScanOptLabel, g_renderedKeyScanOptLabel) != 0) ||
+       (strcmp(g_keyScanAltLabel, g_renderedKeyScanAltLabel) != 0) ||
+       (strcmp(g_keyScanTabLabel, g_renderedKeyScanTabLabel) != 0) ||
+        (strcmp(g_keyScanEnterLabel, g_renderedKeyScanEnterLabel) != 0) ||
+        (strcmp(g_keyScanDelLabel, g_renderedKeyScanDelLabel) != 0) ||
+       (g_keyScanCapturePending != g_renderedKeyScanCapturePending) ||
        (g_keyScanCount != g_renderedKeyScanCount));
 
   if (!modeChanged && !lineChanged && !statusChanged && !tileChanged && !keyScanChanged) {
@@ -195,19 +227,50 @@ void renderUltraSafeScreenIfNeeded() {
   strcpy(g_renderedKeyScanHexLabel, g_keyScanHexLabel);
   strcpy(g_renderedKeyScanMappedLabel, g_keyScanMappedLabel);
   strcpy(g_renderedKeyScanFnLabel, g_keyScanFnLabel);
+  strcpy(g_renderedKeyScanShiftLabel, g_keyScanShiftLabel);
+  strcpy(g_renderedKeyScanCtrlLabel, g_keyScanCtrlLabel);
+  strcpy(g_renderedKeyScanOptLabel, g_keyScanOptLabel);
+  strcpy(g_renderedKeyScanAltLabel, g_keyScanAltLabel);
+  strcpy(g_renderedKeyScanTabLabel, g_keyScanTabLabel);
   strcpy(g_renderedKeyScanEnterLabel, g_keyScanEnterLabel);
   strcpy(g_renderedKeyScanDelLabel, g_keyScanDelLabel);
+  g_renderedKeyScanCapturePending = g_keyScanCapturePending;
   g_renderedKeyScanCount = g_keyScanCount;
 }
 
+void setKeyScanModifierState(const Keyboard_Class::KeysState& keys) {
+  snprintf(g_keyScanFnLabel, kTriStateLen, keys.fn ? "1" : "0");
+  snprintf(g_keyScanShiftLabel, kTriStateLen, keys.shift ? "1" : "0");
+  snprintf(g_keyScanCtrlLabel, kTriStateLen, keys.ctrl ? "1" : "0");
+  snprintf(g_keyScanOptLabel, kTriStateLen, keys.opt ? "1" : "0");
+  snprintf(g_keyScanAltLabel, kTriStateLen, keys.alt ? "1" : "0");
+  snprintf(g_keyScanTabLabel, kTriStateLen, keys.tab ? "1" : "0");
+  snprintf(g_keyScanEnterLabel, kTriStateLen, keys.enter ? "1" : "0");
+  snprintf(g_keyScanDelLabel, kTriStateLen, keys.del ? "1" : "0");
+}
+
+void clearKeyScanCaptureMessage() {
+  snprintf(g_keyScanRawLabel, kLastRawMaxLen, "PRESS KEY...");
+  snprintf(g_keyScanPrintableLabel, kLastRawMaxLen, "none");
+  snprintf(g_keyScanHexLabel, kLastRawMaxLen, "--");
+  snprintf(g_keyScanMappedLabel, kLastRawMaxLen, "READY");
+  snprintf(g_keyScanFnLabel, kTriStateLen, "?");
+  snprintf(g_keyScanShiftLabel, kTriStateLen, "?");
+  snprintf(g_keyScanCtrlLabel, kTriStateLen, "?");
+  snprintf(g_keyScanOptLabel, kTriStateLen, "?");
+  snprintf(g_keyScanAltLabel, kTriStateLen, "?");
+  snprintf(g_keyScanTabLabel, kTriStateLen, "?");
+  snprintf(g_keyScanEnterLabel, kTriStateLen, "?");
+  snprintf(g_keyScanDelLabel, kTriStateLen, "?");
+}
+
 int16_t getUltraSafeRawKey() {
-  const auto keys = M5Cardputer.Keyboard.keysState();
-  for (uint8_t i = 0; i < sizeof(keys.word); ++i) {
-    const int16_t raw = static_cast<uint8_t>(keys.word[i]);
-    if (raw == 0) {
-      continue;
-    }
-    return raw;
+  const auto& keys = M5Cardputer.Keyboard.keysState();
+  if (!keys.word.empty()) {
+    return static_cast<int16_t>(static_cast<uint8_t>(keys.word[0]));
+  }
+  if (!keys.hid_keys.empty()) {
+    return static_cast<int16_t>(static_cast<uint8_t>(keys.hid_keys[0]));
   }
   return -1;
 }
@@ -218,151 +281,79 @@ void applyKeyScanEvent(int16_t rawKey) {
   }
 
   const uint8_t key = static_cast<uint8_t>(rawKey);
+  char rawLabel[16];
+  char printableLabel[16];
+  char mappedLabel[16];
+  bool isPrintable = (key >= 32U && key <= 126U);
+
   g_keyScanCount += 1;
   snprintf(g_keyScanHexLabel, sizeof(g_keyScanHexLabel), "0x%02X", key);
-
-  if (key == '\r' || key == '\n') {
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "ENTER");
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "none");
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "ENTER");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "yes");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine("ENTER", "ENTER");
-    return;
-  }
-
-  if (key == 27) {
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "ESC");
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "none");
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "ESC");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine("ESC", "ESC");
-    return;
-  }
-
-  if (key == '\t') {
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "TAB");
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "none");
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "TAB");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine("TAB", "TAB");
-    return;
-  }
-
-  if (key == 8 || key == 127) {
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "DEL");
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "none");
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "DEL");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "yes");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine("DEL", "DEL");
-    return;
-  }
-
-  if (key >= '0' && key <= '9') {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "DIGIT");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "DIGIT");
-    return;
-  }
-
-  if (key == ',' || key == '<') {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "LEFT_GUESS");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "LEFT_GUESS");
-    return;
-  }
-
-  if (key == '.' || key == '>') {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "DOWN_GUESS");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "DOWN_GUESS");
-    return;
-  }
-
-  if (key == ';' || key == ':') {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "UP_GUESS");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "UP_GUESS");
-    return;
-  }
-
-  if (key == '/' || key == '?') {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "RIGHT_GUESS");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "RIGHT_GUESS");
-    return;
-  }
-
-  if ((key >= 'A' && key <= 'Z') || (key >= 'a' && key <= 'z')) {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "LETTER");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "LETTER");
-    return;
-  }
-
-  if (key >= 32 && key <= 126) {
-    char rawKeyLabel[2] = {static_cast<char>(key), '\0'};
-    char printable[2] = {static_cast<char>(key), '\0'};
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawKeyLabel);
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printable);
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "UNKNOWN");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    setUltraSafeLastLine(rawKeyLabel, "UNKNOWN");
-    return;
-  }
-
   snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "0x%02X", key);
   snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "none");
   snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "UNKNOWN");
-  snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-  snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
-  snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-  setUltraSafeLastLine("?", "UNKNOWN");
+  snprintf(rawLabel, sizeof(rawLabel), "0x%02X", key);
+  snprintf(printableLabel, sizeof(printableLabel), "none");
+  snprintf(mappedLabel, sizeof(mappedLabel), "UNKNOWN");
+
+  if (key == '\r' || key == '\n') {
+    snprintf(rawLabel, sizeof(rawLabel), "ENTER");
+    snprintf(mappedLabel, sizeof(mappedLabel), "ENTER");
+  } else if (key == 27) {
+    snprintf(rawLabel, sizeof(rawLabel), "ESC");
+    snprintf(mappedLabel, sizeof(mappedLabel), "ESC");
+  } else if (key == '\t') {
+    snprintf(rawLabel, sizeof(rawLabel), "TAB");
+    snprintf(mappedLabel, sizeof(mappedLabel), "TAB");
+  } else if (key == 8 || key == 127) {
+    snprintf(rawLabel, sizeof(rawLabel), "DEL");
+    snprintf(mappedLabel, sizeof(mappedLabel), "DEL");
+  } else if (key >= '0' && key <= '9') {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+    snprintf(mappedLabel, sizeof(mappedLabel), "DIGIT");
+  } else if (key == ',' || key == '<') {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+    snprintf(mappedLabel, sizeof(mappedLabel), "LEFT_GUESS");
+  } else if (key == '.' || key == '>') {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+    snprintf(mappedLabel, sizeof(mappedLabel), "DOWN_GUESS");
+  } else if (key == ';' || key == ':') {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+    snprintf(mappedLabel, sizeof(mappedLabel), "UP_GUESS");
+  } else if (key == '/' || key == '?') {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+    snprintf(mappedLabel, sizeof(mappedLabel), "RIGHT_GUESS");
+  } else if ((key >= 'A' && key <= 'Z') || (key >= 'a' && key <= 'z')) {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+    snprintf(mappedLabel, sizeof(mappedLabel), "LETTER");
+  } else if (isPrintable) {
+    rawLabel[0] = static_cast<char>(key);
+    rawLabel[1] = '\0';
+    printableLabel[0] = rawLabel[0];
+    printableLabel[1] = '\0';
+  }
+
+  snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "%s", rawLabel);
+  snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "%s", printableLabel);
+  snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "%s", mappedLabel);
+  setUltraSafeLastLine(rawLabel, mappedLabel);
 }
 
 void applyUltraSafeKeyAction(int16_t rawKey) {
@@ -371,6 +362,8 @@ void applyUltraSafeKeyAction(int16_t rawKey) {
   }
 
   const char key = static_cast<char>(rawKey);
+  const auto& keys = M5Cardputer.Keyboard.keysState();
+  setKeyScanModifierState(keys);
 
   if (key == '1') {
     if (g_screenMode == UltraScreenMode::BootDiag) {
@@ -417,18 +410,23 @@ void applyUltraSafeKeyAction(int16_t rawKey) {
       setUltraSafeLastLine(rawKeyLabel, "BOOT");
       return;
     }
-    applyKeyScanEvent(rawKey);
+    if (g_keyScanCapturePending) {
+      g_keyScanCapturePending = false;
+      applyKeyScanEvent(rawKey);
+    } else {
+      setUltraSafeLastLine("?", "IGNORED");
+    }
     return;
   }
 
-  if (key == '0') {
+  if (key == '0' && g_screenMode == UltraScreenMode::BootDiag) {
     setUltraSafeLastLine("0", "IGNORED");
     return;
   }
 
-  if (key == 'b' || key == 'B') {
-    const char rawKey[2] = {key, '\0'};
-    setUltraSafeLastLine(rawKey, "IGNORED");
+  if ((key == 'b' || key == 'B') && g_screenMode == UltraScreenMode::BootDiag) {
+    const char rawKeyLabel[2] = {key, '\0'};
+    setUltraSafeLastLine(rawKeyLabel, "IGNORED");
     return;
   }
 
@@ -440,15 +438,9 @@ void selectCurrentLauncherTile() {
     setUltraSafeLastLine("GO", "SELECT");
     renderUltraSafeScreenIfNeeded();
   } else if (g_screenMode == UltraScreenMode::KeyScan) {
-    setUltraSafeLastLine("GO", "GO");
-    ++g_keyScanCount;
-    snprintf(g_keyScanHexLabel, sizeof(g_keyScanHexLabel), "0x%02X", 0);
-    snprintf(g_keyScanRawLabel, sizeof(g_keyScanRawLabel), "GO");
-    snprintf(g_keyScanPrintableLabel, sizeof(g_keyScanPrintableLabel), "none");
-    snprintf(g_keyScanMappedLabel, sizeof(g_keyScanMappedLabel), "GO");
-    snprintf(g_keyScanFnLabel, sizeof(g_keyScanFnLabel), "unknown");
-    snprintf(g_keyScanEnterLabel, sizeof(g_keyScanEnterLabel), "no");
-    snprintf(g_keyScanDelLabel, sizeof(g_keyScanDelLabel), "no");
+    g_keyScanCapturePending = true;
+    setUltraSafeLastLine("GO", "PRESS");
+    clearKeyScanCaptureMessage();
     renderUltraSafeScreenIfNeeded();
   } else {
     testSdFromBoot();
