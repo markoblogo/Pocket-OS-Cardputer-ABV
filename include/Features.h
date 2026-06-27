@@ -21,4 +21,4 @@
 
 #define FEATURE_SAFE_BOOT 1
 
-#define FIRMWARE_VERSION "v0.1.7b-two-static-tiles"
+#define FIRMWARE_VERSION "v0.1.7c-key-scan"
