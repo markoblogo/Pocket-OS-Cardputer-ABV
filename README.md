@@ -2,7 +2,7 @@
 
 Minimal ABVx firmware for M5Stack Cardputer ADV.
 
-Current focus: MP3-first offline shell with a simple recorder and TXT reader.
+Current focus: MP3-first offline shell with Music, Record, Reader, and Notes MVPs.
 
 ## Current working version
 
@@ -24,6 +24,11 @@ Confirmed on real Cardputer ADV:
   - opens English/Russian UTF-8 text best-effort;
   - line and page scrolling;
   - speed-reading mode: 1 word, 2 words, or line at 200-800 WPM.
+- Notes app:
+  - stores notes in `/sdcard/notes`;
+  - first list item `NEW NOTE` creates a new plain text note;
+  - saves files as `NOTE0001.TXT`, `NOTE0002.TXT`, etc.;
+  - opens saved notes using the same readable text viewer.
 - Record app:
   - stores recordings in `/sdcard/rec`;
   - first list item `NEW REC` starts recording;
@@ -41,6 +46,7 @@ Use FATFS 8.3-safe names for now.
 /sdcard/music/T01.MP3
 /sdcard/books/EN1.TXT
 /sdcard/books/RU1.TXT
+/sdcard/notes/NOTE0001.TXT
 /sdcard/rec/REC0001.WAV
 ```
 
@@ -100,6 +106,16 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 7. Test `OK` pause/resume, Up / Down WPM, Left / Right mode.
 8. Press `GO` to return to normal read mode, then list.
 
+### Notes
+
+1. Open Notes.
+2. Select `NEW NOTE`.
+3. Press `OK`.
+4. Type a short note.
+5. Press `OK` to save.
+6. Confirm `NOTE0001.TXT` appears.
+7. Press `OK` on the saved note to read it.
+
 ### Record
 
 1. Open Record.
@@ -113,8 +129,8 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 
 ## Known limitations
 
-- No Notes MVP yet.
-- Reader is MVP only: English/Russian best-effort, no saved position, no French/Ukrainian font support yet.
+- Reader/Notes text support is MVP only: English/Russian best-effort, no saved position, no French/Ukrainian font support yet.
+- Notes input is ASCII/latin keyboard-first; Russian note files can be opened if copied to SD.
 - Recordings use `/sdcard/rec` instead of `/sdcard/recordings` because FATFS long filenames are not enabled yet.
 - Music playback is chunk/blocking-based; controls may have small latency.
 - Screen-off playback/power optimization is not finalized yet.

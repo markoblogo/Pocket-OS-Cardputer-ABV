@@ -31,6 +31,7 @@ constexpr gpio_num_t PIN_SD_CS = GPIO_NUM_12;
 constexpr const char* MOUNT_POINT = "/sdcard";
 constexpr const char* MUSIC_DIR = "/sdcard/music";
 constexpr const char* BOOKS_DIR = "/sdcard/books";
+constexpr const char* NOTES_DIR = "/sdcard/notes";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
@@ -48,8 +49,8 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, RecorderList, RecorderRecording, RecorderPlaying, Message };
-enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One };
+enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, Message };
+enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
 
@@ -99,13 +100,16 @@ int launcher_index = 0;
 std::string message_title;
 std::string message_body;
 bool message_returns_music = false;
+bool message_returns_notes = false;
 uint32_t message_hold_until_ms = 0;
 
 std::vector<std::string> tracks;
 std::vector<std::string> books;
+std::vector<std::string> notes;
 std::vector<std::string> recordings;
 int selected_track = 0;
 int selected_book = 0;
+int notes_cursor = 0;
 int selected_recording = 0;
 bool shuffle_on = false;
 VolumeMode volume_mode = VolumeMode::Mid;
@@ -138,6 +142,8 @@ uint32_t rec_play_chunks = 0;
 int recorder_cursor = 0;
 std::string active_recording_name;
 std::string active_book_name;
+std::string active_note_name;
+std::string note_input;
 std::string reader_text;
 std::vector<std::string> reader_lines;
 std::vector<std::string> reader_words;
@@ -198,6 +204,7 @@ Key keyFromName(const char* name)
     if (!strcmp(name, "left") || !strcmp(name, ",")) return Key::Left;
     if (!strcmp(name, "right") || !strcmp(name, "/")) return Key::Right;
     if (!strcmp(name, "enter")) return Key::Ok;
+    if (!strcmp(name, "del")) return Key::Backspace;
     if (!strcmp(name, "'" ) || !strcmp(name, "esc")) return Key::Back;
     if (!strcmp(name, "1")) return Key::One;
     return Key::None;
@@ -436,6 +443,69 @@ std::string selectedBookPath()
     return std::string(BOOKS_DIR) + "/" + books[selected_book];
 }
 
+
+bool ensureNotesDir(std::string* err = nullptr)
+{
+    if (!initSd()) {
+        if (err) *err = "sd mount";
+        return false;
+    }
+    errno = 0;
+    if (mkdir(NOTES_DIR, 0775) != 0 && errno != EEXIST) {
+        if (err) {
+            *err = "mkdir ";
+            *err += std::to_string(errno);
+            *err += " ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    return true;
+}
+
+void scanNotes()
+{
+    notes.clear();
+    if (!ensureNotesDir()) return;
+    DIR* dir = opendir(NOTES_DIR);
+    if (!dir) return;
+    while (dirent* entry = readdir(dir)) {
+        std::string name = entry->d_name;
+        if (isHidden(name) || !hasTextExt(name)) continue;
+        if (entry->d_type == DT_DIR) continue;
+        notes.push_back(name);
+    }
+    closedir(dir);
+    std::sort(notes.begin(), notes.end());
+    const int total = static_cast<int>(notes.size()) + 1;
+    notes_cursor = std::max(0, std::min(notes_cursor, total - 1));
+}
+
+std::string selectedNotePath()
+{
+    if (notes_cursor <= 0 || notes.empty()) return "";
+    return std::string(NOTES_DIR) + "/" + notes[notes_cursor - 1];
+}
+
+std::string nextNoteName()
+{
+    bool used[10000] = {};
+    for (const auto& name : notes) {
+        if (name.size() == 12 && name.rfind("NOTE", 0) == 0 && lowerExt(name) == ".txt") {
+            int n = std::atoi(name.substr(4, 4).c_str());
+            if (n >= 0 && n < 10000) used[n] = true;
+        }
+    }
+    for (int i = 1; i < 10000; ++i) {
+        if (!used[i]) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "NOTE%04d.TXT", i);
+            return buf;
+        }
+    }
+    return "NOTE9999.TXT";
+}
+
 size_t utf8CharLen(unsigned char c)
 {
     if ((c & 0x80) == 0) return 1;
@@ -529,13 +599,8 @@ void wrapReaderText()
     if (reader_lines.empty()) reader_lines.push_back(" ");
 }
 
-bool loadSelectedBook(std::string* err = nullptr)
+bool loadTextFile(const std::string& path, const std::string& label, std::string* err = nullptr)
 {
-    if (books.empty()) {
-        if (err) *err = "no books";
-        return false;
-    }
-    const std::string path = selectedBookPath();
     struct stat st = {};
     if (stat(path.c_str(), &st) != 0) {
         if (err) {
@@ -549,7 +614,7 @@ bool loadSelectedBook(std::string* err = nullptr)
         return false;
     }
     if (static_cast<size_t>(st.st_size) > MAX_BOOK_BYTES) {
-        if (err) *err = "book too big";
+        if (err) *err = "file too big";
         return false;
     }
     FILE* f = fopen(path.c_str(), "rb");
@@ -564,7 +629,7 @@ bool loadSelectedBook(std::string* err = nullptr)
     size_t n = fread(reader_text.data(), 1, reader_text.size(), f);
     fclose(f);
     reader_text.resize(n);
-    active_book_name = books[selected_book];
+    active_book_name = label;
     reader_scroll = 0;
     speed_index = 0;
     speed_wpm = 200;
@@ -572,6 +637,60 @@ bool loadSelectedBook(std::string* err = nullptr)
     speed_paused = true;
     speed_next_ms = 0;
     wrapReaderText();
+    return true;
+}
+
+bool loadSelectedBook(std::string* err = nullptr)
+{
+    if (books.empty()) {
+        if (err) *err = "no books";
+        return false;
+    }
+    return loadTextFile(selectedBookPath(), books[selected_book], err);
+}
+
+bool loadSelectedNote(std::string* err = nullptr)
+{
+    if (notes_cursor <= 0 || notes.empty()) {
+        if (err) *err = "no note";
+        return false;
+    }
+    active_note_name = notes[notes_cursor - 1];
+    return loadTextFile(selectedNotePath(), active_note_name, err);
+}
+
+bool saveNewNote(std::string* out_name, std::string* err = nullptr)
+{
+    if (!ensureNotesDir(err)) return false;
+    scanNotes();
+    std::string name = nextNoteName();
+    std::string path = std::string(NOTES_DIR) + "/" + name;
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) {
+        if (err) {
+            *err = "open: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    std::string body = note_input;
+    body += "\n";
+    size_t n = fwrite(body.data(), 1, body.size(), f);
+    bool ok = n == body.size();
+    if (fflush(f) != 0) ok = false;
+    fclose(f);
+    if (!ok) {
+        if (err) *err = "write failed";
+        return false;
+    }
+    if (out_name) *out_name = name;
+    scanNotes();
+    for (int i = 0; i < static_cast<int>(notes.size()); ++i) {
+        if (notes[i] == name) {
+            notes_cursor = i + 1;
+            break;
+        }
+    }
     return true;
 }
 
@@ -1044,6 +1163,83 @@ void drawMusicPlaying()
     canvas.pushSprite(0, 0);
 }
 
+void drawNotesList()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.printf("NOTES %d/%d", notes_cursor + 1, static_cast<int>(notes.size()) + 1);
+    const int total = static_cast<int>(notes.size()) + 1;
+    int rows = 4;
+    int start = std::max(0, notes_cursor - 1);
+    start = std::min(start, std::max(0, total - rows));
+    int end = std::min(total, start + rows);
+    for (int i = start; i < end; ++i) {
+        canvas.setCursor(8, 34 + (i - start) * 21);
+        canvas.setTextColor(i == notes_cursor ? TFT_BLACK : TFT_WHITE, i == notes_cursor ? TFT_WHITE : TFT_BLACK);
+        if (i == 0) canvas.printf("%c NEW NOTE", i == notes_cursor ? '>' : ' ');
+        else canvas.printf("%c %.13s", i == notes_cursor ? '>' : ' ', notes[i - 1].c_str());
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 122);
+    canvas.print("OK NEW/OPEN   GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawNotesView()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 5);
+    canvas.printf("%.14s %d/%d", active_note_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
+        int idx = reader_scroll + row;
+        if (idx >= static_cast<int>(reader_lines.size())) break;
+        canvas.setCursor(8, 22 + row * 24);
+        canvas.print(reader_lines[idx].c_str());
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 122);
+    canvas.print("UP/DN LINE  L/R PAGE  GO LIST");
+    canvas.pushSprite(0, 0);
+}
+
+void drawNotesEdit()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.println("NEW NOTE");
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 34);
+    canvas.print("Type text, OK save");
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    std::string tail = note_input;
+    if (tail.size() > 57) tail = tail.substr(tail.size() - 57);
+    for (int row = 0; row < 3; ++row) {
+        canvas.setCursor(8, 52 + row * 22);
+        size_t off = row * 19;
+        if (off < tail.size()) canvas.print(tail.substr(off, 19).c_str());
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 112);
+    canvas.printf("%d/512", static_cast<int>(note_input.size()));
+    canvas.setCursor(8, 122);
+    canvas.print("OK SAVE  DEL  GO CANCEL");
+    canvas.pushSprite(0, 0);
+}
+
+
 void drawRecorderList()
 {
     canvas.fillScreen(TFT_BLACK);
@@ -1238,6 +1434,9 @@ void drawIfDirty()
     else if (screen == Screen::ReaderList) drawReaderList();
     else if (screen == Screen::ReaderView) drawReaderView();
     else if (screen == Screen::ReaderSpeed) drawReaderSpeed();
+    else if (screen == Screen::NotesList) drawNotesList();
+    else if (screen == Screen::NotesView) drawNotesView();
+    else if (screen == Screen::NotesEdit) drawNotesEdit();
     else if (screen == Screen::RecorderList) drawRecorderList();
     else if (screen == Screen::RecorderRecording) drawRecorderRecording();
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
@@ -1292,7 +1491,7 @@ void wakeDisplay()
 
 void handleKey(KeyEvent ev)
 {
-    if (ev.key == Key::None) return;
+    if (ev.key == Key::None && screen != Screen::NotesEdit) return;
     last_input_ms = M5.millis();
     if (display_off || display_dim) {
         wakeDisplay();
@@ -1306,6 +1505,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok) {
             if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
             else if (launcher_index == 1) { scanBooks(); screen = Screen::ReaderList; }
+            else if (launcher_index == 2) { scanNotes(); screen = Screen::NotesList; }
             else if (launcher_index == 3) { scanRecordings(); screen = Screen::RecorderList; }
             else { message_title = "Coming soon"; message_body = "Music/Reader/Record"; message_returns_music = false; screen = Screen::Message; }
         }
@@ -1368,6 +1568,7 @@ void handleKey(KeyEvent ev)
                     message_title = "Read failed";
                     message_body = err.empty() ? "open" : err;
                     message_returns_music = false;
+                    message_returns_notes = false;
                     screen = Screen::Message;
                     blockInput(350);
                 }
@@ -1423,6 +1624,92 @@ void handleKey(KeyEvent ev)
         return;
     }
 
+    if (screen == Screen::NotesList) {
+        const int total = static_cast<int>(notes.size()) + 1;
+        if (ev.key == Key::Up) notes_cursor = std::max(0, notes_cursor - 1);
+        else if (ev.key == Key::Down) notes_cursor = std::min(total - 1, notes_cursor + 1);
+        else if (ev.key == Key::Left) notes_cursor = std::max(0, notes_cursor - 4);
+        else if (ev.key == Key::Right) notes_cursor = std::min(total - 1, notes_cursor + 4);
+        else if (ev.key == Key::Ok) {
+            if (notes_cursor == 0) {
+                note_input.clear();
+                screen = Screen::NotesEdit;
+                blockInput(300);
+            } else {
+                std::string err;
+                if (loadSelectedNote(&err)) {
+                    screen = Screen::NotesView;
+                    blockInput(300);
+                } else {
+                    message_title = "Note failed";
+                    message_body = err.empty() ? "open" : err;
+                    message_returns_music = false;
+                    message_returns_notes = true;
+                    screen = Screen::Message;
+                }
+            }
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::NotesView) {
+        const int max_scroll = std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE);
+        if (ev.key == Key::Up) reader_scroll = std::max(0, reader_scroll - 1);
+        else if (ev.key == Key::Down) reader_scroll = std::min(max_scroll, reader_scroll + 1);
+        else if (ev.key == Key::Left) reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE);
+        else if (ev.key == Key::Right) reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE);
+        else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::NotesList;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::NotesEdit) {
+        if (ev.key == Key::Ok) {
+            if (note_input.empty()) {
+                message_title = "Note empty";
+                message_body = "not saved";
+                screen = Screen::NotesList;
+            } else {
+                std::string name;
+                std::string err;
+                if (saveNewNote(&name, &err)) {
+                    message_title = "Note saved";
+                    message_body = name;
+                    message_returns_music = false;
+                    message_returns_notes = true;
+                    screen = Screen::Message;
+                } else {
+                    message_title = "Save failed";
+                    message_body = err.empty() ? "write" : err;
+                    message_returns_music = false;
+                    message_returns_notes = true;
+                    screen = Screen::Message;
+                }
+            }
+            blockInput(400);
+        } else if (ev.key == Key::Backspace) {
+            if (!note_input.empty()) note_input.pop_back();
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            note_input.clear();
+            screen = Screen::NotesList;
+            blockInput(250);
+        } else if (ev.key == Key::None && ev.name && ev.name[0] && !ev.name[1]) {
+            char c = ev.name[0];
+            if (static_cast<unsigned char>(c) >= 32 && static_cast<unsigned char>(c) <= 126 && note_input.size() < 512) {
+                note_input.push_back(c);
+            }
+        }
+        dirty = true;
+        return;
+    }
+
     if (screen == Screen::RecorderList) {
         const int total = static_cast<int>(recordings.size()) + 1;
         if (ev.key == Key::Up) recorder_cursor = std::max(0, recorder_cursor - 1);
@@ -1434,6 +1721,7 @@ void handleKey(KeyEvent ev)
                     message_title = "Record failed";
                     message_body = err.empty() ? "start" : err;
                     message_returns_music = false;
+                    message_returns_notes = false;
                     screen = Screen::Message;
                 }
             } else {
@@ -1441,6 +1729,7 @@ void handleKey(KeyEvent ev)
                     message_title = "Play failed";
                     message_body = err.empty() ? "open" : err;
                     message_returns_music = false;
+                    message_returns_notes = false;
                     screen = Screen::Message;
                 }
             }
@@ -1467,6 +1756,10 @@ void handleKey(KeyEvent ev)
         if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
             message_returns_music = false;
             screen = Screen::MusicList;
+        } else if (message_returns_notes && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
+            message_returns_notes = false;
+            scanNotes();
+            screen = Screen::NotesList;
         } else if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
             screen = Screen::Launcher;
         }
