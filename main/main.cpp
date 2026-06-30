@@ -133,6 +133,7 @@ size_t test_mp3_input_len = 0;
 int test_frame_values = 0;
 int test_frame_rate = 44100;
 int test_frame_channels = 2;
+std::vector<int16_t> test_pcm_chunk;
 
 void flushKeyboardEvents()
 {
@@ -868,18 +869,70 @@ void advanceMp3Step()
             message_body = "no pcm";
             mp3_step_active = false;
         } else {
+            test_pcm_chunk.assign(test_frame_pcm, test_frame_pcm + test_frame_values);
+            message_title = "MP3 S6";
+            message_body = "CHUNK\n" + std::to_string(static_cast<int>(test_pcm_chunk.size()));
+        }
+    } else if (mp3_step == 7) {
+        if (test_mp3_input_len == 0) {
+            message_title = "MP3 FAIL";
+            message_body = "no input";
+            mp3_step_active = false;
+        } else {
+            mp3dec_init(&mp3_dec);
+            test_pcm_chunk.clear();
+            size_t pos = 0;
+            int frames = 0;
+            int rate = 44100;
+            int channels = 2;
+            while (frames < 10 && pos + 4 < test_mp3_input_len && test_pcm_chunk.size() < 22050) {
+                mp3dec_frame_info_t info = {};
+                const int samples = mp3dec_decode_frame(&mp3_dec, test_mp3_input + pos, static_cast<int>(test_mp3_input_len - pos), test_frame_pcm, &info);
+                if (info.frame_bytes <= 0) break;
+                if (samples > 0 && info.channels > 0 && info.hz > 0) {
+                    const int values = samples * info.channels;
+                    test_pcm_chunk.insert(test_pcm_chunk.end(), test_frame_pcm, test_frame_pcm + values);
+                    rate = info.hz;
+                    channels = info.channels;
+                    ++frames;
+                }
+                pos += info.frame_bytes;
+            }
+            test_frame_rate = rate;
+            test_frame_channels = channels;
+            if (test_pcm_chunk.empty()) {
+                message_title = "CHUNK FAIL";
+                message_body = "no pcm";
+                mp3_step_active = false;
+            } else {
+                message_title = "CHUNK OK";
+                message_body = "frames=" + std::to_string(frames) +
+                               "\npcm=" + std::to_string(static_cast<int>(test_pcm_chunk.size()));
+            }
+        }
+    } else if (mp3_step == 8) {
+        if (test_pcm_chunk.empty()) {
+            message_title = "SPK FAIL";
+            message_body = "no chunk";
+            mp3_step_active = false;
+        } else {
             message_title = "SPK";
-            message_body = "PLAY";
+            message_body = "CHUNK";
             screen = Screen::Message;
             drawMessage();
             M5.delay(900);
+            pcm_chunk = test_pcm_chunk;
+            pcm_rate = test_frame_rate;
+            pcm_channels = test_frame_channels;
+            drawMusicPlaying();
+            M5.delay(300);
             M5.Mic.end();
             M5.Speaker.begin();
             applyVolume();
-            M5.Speaker.playRaw(test_frame_pcm, test_frame_values, test_frame_rate, test_frame_channels == 2, 1, -1, true);
+            M5.Speaker.playRaw(test_pcm_chunk.data(), test_pcm_chunk.size(), test_frame_rate, test_frame_channels == 2, 1, -1, true);
             M5.Speaker.stop();
             message_title = "SPK OK";
-            message_body = "played\n" + std::to_string(test_frame_values);
+            message_body = "chunk\n" + std::to_string(static_cast<int>(test_pcm_chunk.size()));
             mp3_step_active = false;
             message_hold_until_ms = M5.millis() + 2000;
         }
