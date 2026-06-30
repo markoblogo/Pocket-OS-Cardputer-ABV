@@ -280,6 +280,14 @@ bool hasMp3Ext(const std::string& name)
     return lowerExt(name) == ".mp3";
 }
 
+size_t findSyncInBuffer(const std::vector<uint8_t>& buf, size_t len)
+{
+    for (size_t i = 0; i + 1 < len; ++i) {
+        if (buf[i] == 0xFF && (buf[i + 1] & 0xE0) == 0xE0) return i;
+    }
+    return std::string::npos;
+}
+
 bool hasRecordingExt(const std::string& name)
 {
     const std::string ext = lowerExt(name);
@@ -620,6 +628,91 @@ void drawMessage()
     canvas.pushSprite(0, 0);
 }
 
+void showImmediateMessage(const char* title, const std::string& body)
+{
+    message_title = title;
+    message_body = body;
+    screen = Screen::Message;
+    drawMessage();
+    dirty = false;
+}
+
+bool mp3ProbeSelected(std::string* result)
+{
+    if (tracks.empty()) {
+        if (result) *result = "no tracks";
+        return false;
+    }
+
+    const std::string path = selectedPath();
+    showImmediateMessage("MP3 PROBE", "stage: open\n" + path);
+    M5.delay(350);
+
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        if (result) {
+            *result = "open: ";
+            *result += std::strerror(errno);
+        }
+        return false;
+    }
+
+    fseek(f, 0, SEEK_END);
+    const long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> buf(INPUT_BUF_SIZE, 0);
+    const size_t len = fread(buf.data(), 1, buf.size(), f);
+    fclose(f);
+    if (len == 0) {
+        if (result) *result = "read: empty";
+        return false;
+    }
+
+    showImmediateMessage("MP3 PROBE", "stage: decode\nread=" + std::to_string(len));
+    M5.delay(350);
+
+    const size_t sync = findSyncInBuffer(buf, len);
+    if (sync == std::string::npos) {
+        if (result) *result = "sync: not found";
+        return false;
+    }
+
+    mp3dec_t dec;
+    mp3dec_init(&dec);
+    std::vector<mp3d_sample_t> frame_pcm(MINIMP3_MAX_SAMPLES_PER_FRAME);
+    mp3dec_frame_info_t info = {};
+    const int samples = mp3dec_decode_frame(&dec, buf.data() + sync, static_cast<int>(len - sync), frame_pcm.data(), &info);
+    if (samples <= 0 || info.frame_bytes <= 0 || info.channels <= 0 || info.hz <= 0) {
+        if (result) {
+            *result = "decode: no frame off=";
+            *result += std::to_string(sync);
+        }
+        return false;
+    }
+
+    const size_t values = static_cast<size_t>(samples) * info.channels;
+    showImmediateMessage("MP3 PROBE", "stage: speaker\nhz=" + std::to_string(info.hz) +
+                                      " ch=" + std::to_string(info.channels) +
+                                      " samples=" + std::to_string(samples));
+    M5.delay(350);
+
+    M5.Mic.end();
+    M5.Speaker.begin();
+    applyVolume();
+    M5.Speaker.playRaw(frame_pcm.data(), values, info.hz, info.channels == 2, 1, -1, true);
+    M5.Speaker.stop();
+
+    if (result) {
+        *result = "size=" + std::to_string(file_size) +
+                  "\noff=" + std::to_string(sync) +
+                  " hz=" + std::to_string(info.hz) +
+                  "\nch=" + std::to_string(info.channels) +
+                  " samples=" + std::to_string(samples) +
+                  "\nframe=" + std::to_string(info.frame_bytes);
+    }
+    return true;
+}
+
 void drawIfDirty()
 {
     if (!dirty || display_off) return;
@@ -688,13 +781,16 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::One) shuffle_on = !shuffle_on;
         else if (ev.key == Key::Ok) {
             if (!tracks.empty()) {
-                std::string err;
-                if (!startPlayback(&err)) {
-                    message_title = "Playback failed";
-                    message_body = err.empty() ? "open failed" : err;
-                    screen = Screen::Message;
-                    blockInput(350);
+                std::string result;
+                if (mp3ProbeSelected(&result)) {
+                    message_title = "MP3 Probe OK";
+                    message_body = result;
+                } else {
+                    message_title = "MP3 Probe FAIL";
+                    message_body = result.empty() ? "unknown" : result;
                 }
+                screen = Screen::Message;
+                blockInput(500);
             }
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
