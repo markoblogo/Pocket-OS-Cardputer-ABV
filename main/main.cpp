@@ -22,9 +22,6 @@
 #include "assets/abvx_splash.h"
 #include "lib/adafruit_tca8418/Adafruit_TCA8418.h"
 
-extern const uint8_t embedded_test01_mp3_start[] asm("_binary_test01_mp3_start");
-extern const uint8_t embedded_test01_mp3_end[] asm("_binary_test01_mp3_end");
-
 namespace {
 constexpr gpio_num_t PIN_KEYBOARD_INT = GPIO_NUM_11;
 constexpr gpio_num_t PIN_SPI_MISO = GPIO_NUM_39;
@@ -39,7 +36,6 @@ constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 8 * 1024;
 constexpr int CHUNK_MS = 120;
 constexpr uint32_t DEBOUNCE_MS = 180;
-constexpr size_t EMBEDDED_TEST01_SYNC_OFFSET = 44;
 constexpr float PI = 3.14159265358979323846f;
 
 Adafruit_TCA8418 keyboard;
@@ -111,11 +107,6 @@ uint32_t last_input_ms = 0;
 bool display_off = false;
 bool display_dim = false;
 bool dirty = true;
-bool mp3_probe_pending = false;
-uint32_t mp3_probe_due_ms = 0;
-bool mp3_step_active = false;
-int mp3_step = 0;
-bool mp3_step_use_sd = false;
 
 FILE* mp3_file = nullptr;
 mp3dec_t mp3_dec;
@@ -129,13 +120,6 @@ std::vector<int16_t> pcm_chunk;
 int pcm_rate = 44100;
 int pcm_channels = 2;
 int decoded_chunks = 0;
-mp3d_sample_t test_frame_pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
-uint8_t test_mp3_input[8192];
-size_t test_mp3_input_len = 0;
-int test_frame_values = 0;
-int test_frame_rate = 44100;
-int test_frame_channels = 2;
-std::vector<int16_t> test_pcm_chunk;
 
 void flushKeyboardEvents()
 {
@@ -682,329 +666,6 @@ void drawMessage()
     canvas.pushSprite(0, 0);
 }
 
-void showImmediateMessage(const char* title, const std::string& body)
-{
-    message_title = title;
-    message_body = body;
-    screen = Screen::Message;
-    drawMessage();
-    dirty = false;
-}
-
-bool mp3ProbeSelected(std::string* result)
-{
-    if (tracks.empty()) {
-        if (result) *result = "no tracks";
-        return false;
-    }
-
-    const std::string path = selectedPath();
-    showImmediateMessage("MP3 PROBE", "stage: open fd\n" + path);
-    M5.delay(350);
-
-    int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0) {
-        if (result) {
-            *result = "open fd: ";
-            *result += std::strerror(errno);
-        }
-        return false;
-    }
-
-    showImmediateMessage("MP3 PROBE", "stage: read\n" + path);
-    M5.delay(350);
-
-    std::vector<uint8_t> buf(INPUT_BUF_SIZE, 0);
-    const ssize_t read_len = read(fd, buf.data(), buf.size());
-    close(fd);
-    const size_t len = read_len > 0 ? static_cast<size_t>(read_len) : 0;
-    if (len == 0) {
-        if (result) {
-            *result = "read: ";
-            *result += read_len < 0 ? std::strerror(errno) : "empty";
-        }
-        return false;
-    }
-
-    showImmediateMessage("MP3 PROBE", "stage: decode\nread=" + std::to_string(len));
-    M5.delay(350);
-
-    const size_t sync = findSyncInBuffer(buf, len);
-    if (sync == std::string::npos) {
-        if (result) *result = "sync: not found";
-        return false;
-    }
-
-    mp3dec_t dec;
-    mp3dec_init(&dec);
-    std::vector<mp3d_sample_t> frame_pcm(MINIMP3_MAX_SAMPLES_PER_FRAME);
-    mp3dec_frame_info_t info = {};
-    const int samples = mp3dec_decode_frame(&dec, buf.data() + sync, static_cast<int>(len - sync), frame_pcm.data(), &info);
-    if (samples <= 0 || info.frame_bytes <= 0 || info.channels <= 0 || info.hz <= 0) {
-        if (result) {
-            *result = "decode: no frame off=";
-            *result += std::to_string(sync);
-        }
-        return false;
-    }
-
-    const size_t values = static_cast<size_t>(samples) * info.channels;
-    showImmediateMessage("MP3 PROBE", "stage: speaker\nhz=" + std::to_string(info.hz) +
-                                      " ch=" + std::to_string(info.channels) +
-                                      " samples=" + std::to_string(samples));
-    M5.delay(350);
-
-    M5.Mic.end();
-    M5.Speaker.begin();
-    applyVolume();
-    M5.Speaker.playRaw(frame_pcm.data(), values, info.hz, info.channels == 2, 1, -1, true);
-    M5.Speaker.stop();
-
-    if (result) {
-        *result = "read=" + std::to_string(len) +
-                  "\noff=" + std::to_string(sync) +
-                  " hz=" + std::to_string(info.hz) +
-                  "\nch=" + std::to_string(info.channels) +
-                  " samples=" + std::to_string(samples) +
-                  "\nframe=" + std::to_string(info.frame_bytes);
-    }
-    return true;
-}
-
-bool mp3ProbeEmbedded(std::string* result)
-{
-    const uint8_t* data = embedded_test01_mp3_start;
-    const size_t len = embedded_test01_mp3_end - embedded_test01_mp3_start;
-    if (!data || len == 0) {
-        if (result) *result = "embedded asset missing";
-        return false;
-    }
-
-    char first_bytes[64];
-    snprintf(first_bytes, sizeof(first_bytes), "%02X %02X %02X %02X",
-             data[0], data[1], data[2], data[3]);
-    showImmediateMessage("MP3 S1", "FIX\n" + std::to_string(len));
-    M5.delay(900);
-
-    showImmediateMessage("MP3 S2", "ALLOC");
-    M5.delay(1200);
-
-    const size_t sync = EMBEDDED_TEST01_SYNC_OFFSET;
-    mp3dec_t dec;
-    mp3dec_init(&dec);
-    mp3dec_frame_info_t info = {};
-
-    showImmediateMessage("MP3 S3", "DECODE");
-    M5.delay(1200);
-
-    const int samples = mp3dec_decode_frame(&dec, data + sync, static_cast<int>(len - sync), test_frame_pcm, &info);
-    if (samples <= 0 || info.frame_bytes <= 0 || info.channels <= 0 || info.hz <= 0) {
-        if (result) {
-            *result = "decode failed" +
-                      std::string("\noff=") + std::to_string(sync) +
-                      "\nsamples=" + std::to_string(samples) +
-                      "\nframe=" + std::to_string(info.frame_bytes);
-        }
-        return false;
-    }
-
-    if (result) {
-        *result = "bytes=" + std::to_string(len) +
-                  "\nsync=" + std::to_string(sync) +
-                  "\nhz=" + std::to_string(info.hz) +
-                  " ch=" + std::to_string(info.channels) +
-                  "\nsamples=" + std::to_string(samples) +
-                  "\nframe=" + std::to_string(info.frame_bytes);
-    }
-    return true;
-}
-
-void advanceMp3Step()
-{
-    const uint8_t* data = embedded_test01_mp3_start;
-    const size_t len = embedded_test01_mp3_end - embedded_test01_mp3_start;
-    ++mp3_step;
-    message_returns_music = true;
-
-    if (!mp3_step_use_sd && (!data || len == 0)) {
-        message_title = "MP3 FAIL";
-        message_body = "no asset";
-        mp3_step_active = false;
-        dirty = true;
-        return;
-    }
-
-    if (mp3_step == 1) {
-        if (mp3_step_use_sd) {
-            message_title = "SD S1";
-            message_body = "OPEN\n" + (tracks.empty() ? std::string("none") : tracks[selected_track]);
-        } else {
-            message_title = "MP3 S1";
-            message_body = "FIX\n" + std::to_string(len);
-        }
-    } else if (mp3_step == 2) {
-        if (mp3_step_use_sd) {
-            test_mp3_input_len = 0;
-            const std::string path = selectedPath();
-            FILE* f = fopen(path.c_str(), "rb");
-            if (!f) {
-                message_title = "SD FAIL";
-                message_body = "open\n" + std::string(std::strerror(errno));
-                mp3_step_active = false;
-            } else {
-                test_mp3_input_len = fread(test_mp3_input, 1, sizeof(test_mp3_input), f);
-                fclose(f);
-                message_title = "SD S2";
-                message_body = "READ\n" + std::to_string(test_mp3_input_len);
-            }
-        } else {
-            message_title = "MP3 S2";
-            message_body = "INIT";
-            mp3dec_init(&mp3_dec);
-        }
-    } else if (mp3_step == 3) {
-        if (mp3_step_use_sd) {
-            size_t sync = findSyncInBytes(test_mp3_input, test_mp3_input_len);
-            if (sync == std::string::npos) {
-                message_title = "SD FAIL";
-                message_body = "sync";
-                mp3_step_active = false;
-            } else {
-                if (sync > 0 && sync < test_mp3_input_len) {
-                    memmove(test_mp3_input, test_mp3_input + sync, test_mp3_input_len - sync);
-                    test_mp3_input_len -= sync;
-                }
-                mp3dec_init(&mp3_dec);
-                message_title = "SD S3";
-                message_body = "SYNC\n" + std::to_string(sync);
-            }
-        } else {
-            message_title = "MP3 S3";
-            message_body = "DECODE";
-        }
-    } else if (mp3_step == 4) {
-        if (mp3_step_use_sd) {
-            message_title = "SD S4";
-            message_body = "DECODE";
-        } else {
-            const size_t sync = EMBEDDED_TEST01_SYNC_OFFSET;
-            if (sync >= len) {
-                message_title = "MP3 FAIL";
-                message_body = "bad sync";
-                mp3_step_active = false;
-            } else {
-            test_mp3_input_len = std::min(sizeof(test_mp3_input), len - sync);
-            memcpy(test_mp3_input, data + sync, test_mp3_input_len);
-            message_title = "MP3 S4";
-            message_body = "COPY\n" + std::to_string(test_mp3_input_len);
-            }
-        }
-    } else if (mp3_step == 5) {
-        mp3dec_frame_info_t info = {};
-        if (test_mp3_input_len == 0) {
-            message_title = "MP3 FAIL";
-            message_body = "no input";
-            mp3_step_active = false;
-            dirty = true;
-            return;
-        }
-        const int samples = mp3dec_decode_frame(&mp3_dec, test_mp3_input, static_cast<int>(test_mp3_input_len), test_frame_pcm, &info);
-        if (samples > 0 && info.frame_bytes > 0 && info.channels > 0 && info.hz > 0) {
-            test_frame_values = samples * info.channels;
-            test_frame_rate = info.hz;
-            test_frame_channels = info.channels;
-            message_title = "MP3 OK";
-            message_body = "hz=" + std::to_string(info.hz) +
-                           "\nch=" + std::to_string(info.channels) +
-                           "\nsmp=" + std::to_string(samples);
-        } else {
-            message_title = "MP3 FAIL";
-            message_body = "decode\nsmp=" + std::to_string(samples) +
-                           "\nfrm=" + std::to_string(info.frame_bytes);
-        }
-    } else if (mp3_step == 6) {
-        if (test_frame_values <= 0) {
-            message_title = "SPK FAIL";
-            message_body = "no pcm";
-            mp3_step_active = false;
-        } else {
-            test_pcm_chunk.assign(test_frame_pcm, test_frame_pcm + test_frame_values);
-            message_title = "MP3 S6";
-            message_body = "CHUNK\n" + std::to_string(static_cast<int>(test_pcm_chunk.size()));
-        }
-    } else if (mp3_step == 7) {
-        if (test_mp3_input_len == 0) {
-            message_title = "MP3 FAIL";
-            message_body = "no input";
-            mp3_step_active = false;
-        } else {
-            mp3dec_init(&mp3_dec);
-            test_pcm_chunk.clear();
-            size_t pos = 0;
-            int frames = 0;
-            int rate = 44100;
-            int channels = 2;
-            while (frames < 10 && pos + 4 < test_mp3_input_len && test_pcm_chunk.size() < 22050) {
-                mp3dec_frame_info_t info = {};
-                const int samples = mp3dec_decode_frame(&mp3_dec, test_mp3_input + pos, static_cast<int>(test_mp3_input_len - pos), test_frame_pcm, &info);
-                if (info.frame_bytes <= 0) break;
-                if (samples > 0 && info.channels > 0 && info.hz > 0) {
-                    const int values = samples * info.channels;
-                    test_pcm_chunk.insert(test_pcm_chunk.end(), test_frame_pcm, test_frame_pcm + values);
-                    rate = info.hz;
-                    channels = info.channels;
-                    ++frames;
-                }
-                pos += info.frame_bytes;
-            }
-            test_frame_rate = rate;
-            test_frame_channels = channels;
-            if (test_pcm_chunk.empty()) {
-                message_title = "CHUNK FAIL";
-                message_body = "no pcm";
-                mp3_step_active = false;
-            } else {
-                message_title = "CHUNK OK";
-                message_body = "frames=" + std::to_string(frames) +
-                               "\npcm=" + std::to_string(static_cast<int>(test_pcm_chunk.size()));
-            }
-        }
-    } else if (mp3_step == 8) {
-        if (test_pcm_chunk.empty()) {
-            message_title = "SPK FAIL";
-            message_body = "no chunk";
-            mp3_step_active = false;
-        } else {
-            message_title = "SPK";
-            message_body = "CHUNK";
-            screen = Screen::Message;
-            drawMessage();
-            M5.delay(900);
-            pcm_chunk = test_pcm_chunk;
-            pcm_rate = test_frame_rate;
-            pcm_channels = test_frame_channels;
-            drawMusicPlaying();
-            M5.delay(300);
-            M5.Mic.end();
-            M5.Speaker.begin();
-            applyVolume();
-            M5.Speaker.playRaw(test_pcm_chunk.data(), test_pcm_chunk.size(), test_frame_rate, test_frame_channels == 2, 1, -1, true);
-            M5.Speaker.stop();
-            message_title = "SPK OK";
-            message_body = "chunk\n" + std::to_string(static_cast<int>(test_pcm_chunk.size()));
-            mp3_step_active = false;
-            message_hold_until_ms = M5.millis() + 2000;
-        }
-    } else {
-        message_title = "MP3 STEP";
-        message_body = "done";
-        mp3_step_active = false;
-    }
-    screen = Screen::Message;
-    dirty = true;
-    blockInput(800);
-}
-
 void drawIfDirty()
 {
     if (!dirty || display_off) return;
@@ -1014,24 +675,6 @@ void drawIfDirty()
     else if (screen == Screen::RecorderList) drawRecorderList();
     else drawMessage();
     dirty = false;
-}
-
-void processPendingProbe()
-{
-    if (!mp3_probe_pending || M5.millis() < mp3_probe_due_ms) return;
-    mp3_probe_pending = false;
-
-    std::string result;
-    if (mp3ProbeEmbedded(&result)) {
-        message_title = "Embed Probe OK";
-        message_body = result;
-    } else {
-        message_title = "Embed Probe FAIL";
-        message_body = result.empty() ? "unknown" : result;
-    }
-    screen = Screen::Message;
-    dirty = true;
-    blockInput(500);
 }
 
 void updatePower()
@@ -1134,14 +777,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Message) {
         if (M5.millis() < message_hold_until_ms) return;
-        if (mp3_step_active && ev.key == Key::Ok) {
-            advanceMp3Step();
-            return;
-        }
-        if (mp3_step_active && (ev.key == Key::Home || ev.key == Key::Back)) {
-            mp3_step_active = false;
-            screen = Screen::MusicList;
-        } else if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
+        if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
             message_returns_music = false;
             screen = Screen::MusicList;
         } else if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
@@ -1174,7 +810,6 @@ extern "C" void app_main(void)
         drawIfDirty();
         updateAudio();
         updatePower();
-        processPendingProbe();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
