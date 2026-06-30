@@ -13,4 +13,6 @@ idf_component_register(
         esp_driver_gpio
         fatfs
         sdmmc
+    EMBED_FILES
+        "assets/test01.mp3"
 )

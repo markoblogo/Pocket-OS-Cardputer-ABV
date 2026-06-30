@@ -22,6 +22,9 @@
 #include "assets/abvx_splash.h"
 #include "lib/adafruit_tca8418/Adafruit_TCA8418.h"
 
+extern const uint8_t embedded_test01_mp3_start[] asm("_binary_test01_mp3_start");
+extern const uint8_t embedded_test01_mp3_end[] asm("_binary_test01_mp3_end");
+
 namespace {
 constexpr gpio_num_t PIN_KEYBOARD_INT = GPIO_NUM_11;
 constexpr gpio_num_t PIN_SPI_MISO = GPIO_NUM_39;
@@ -287,12 +290,17 @@ bool hasMp3Ext(const std::string& name)
     return lowerExt(name) == ".mp3";
 }
 
-size_t findSyncInBuffer(const std::vector<uint8_t>& buf, size_t len)
+size_t findSyncInBytes(const uint8_t* data, size_t len)
 {
     for (size_t i = 0; i + 1 < len; ++i) {
-        if (buf[i] == 0xFF && (buf[i + 1] & 0xE0) == 0xE0) return i;
+        if (data[i] == 0xFF && (data[i + 1] & 0xE0) == 0xE0) return i;
     }
     return std::string::npos;
+}
+
+size_t findSyncInBuffer(const std::vector<uint8_t>& buf, size_t len)
+{
+    return findSyncInBytes(buf.data(), len);
 }
 
 bool hasRecordingExt(const std::string& name)
@@ -724,6 +732,63 @@ bool mp3ProbeSelected(std::string* result)
     return true;
 }
 
+bool mp3ProbeEmbedded(std::string* result)
+{
+    const uint8_t* data = embedded_test01_mp3_start;
+    const size_t len = embedded_test01_mp3_end - embedded_test01_mp3_start;
+    if (!data || len == 0) {
+        if (result) *result = "embedded asset missing";
+        return false;
+    }
+
+    showImmediateMessage("EMBED MP3", "stage: sync\nbytes=" + std::to_string(len));
+    M5.delay(350);
+
+    const size_t sync = findSyncInBytes(data, len);
+    if (sync == std::string::npos) {
+        if (result) *result = "sync: not found";
+        return false;
+    }
+
+    showImmediateMessage("EMBED MP3", "stage: decode\noff=" + std::to_string(sync));
+    M5.delay(350);
+
+    mp3dec_t dec;
+    mp3dec_init(&dec);
+    std::vector<mp3d_sample_t> frame_pcm(MINIMP3_MAX_SAMPLES_PER_FRAME);
+    mp3dec_frame_info_t info = {};
+    const int samples = mp3dec_decode_frame(&dec, data + sync, static_cast<int>(len - sync), frame_pcm.data(), &info);
+    if (samples <= 0 || info.frame_bytes <= 0 || info.channels <= 0 || info.hz <= 0) {
+        if (result) {
+            *result = "decode: no frame off=";
+            *result += std::to_string(sync);
+        }
+        return false;
+    }
+
+    const size_t values = static_cast<size_t>(samples) * info.channels;
+    showImmediateMessage("EMBED MP3", "stage: speaker\nhz=" + std::to_string(info.hz) +
+                                      " ch=" + std::to_string(info.channels) +
+                                      " samples=" + std::to_string(samples));
+    M5.delay(350);
+
+    M5.Mic.end();
+    M5.Speaker.begin();
+    applyVolume();
+    M5.Speaker.playRaw(frame_pcm.data(), values, info.hz, info.channels == 2, 1, -1, true);
+    M5.Speaker.stop();
+
+    if (result) {
+        *result = "bytes=" + std::to_string(len) +
+                  "\noff=" + std::to_string(sync) +
+                  " hz=" + std::to_string(info.hz) +
+                  "\nch=" + std::to_string(info.channels) +
+                  " samples=" + std::to_string(samples) +
+                  "\nframe=" + std::to_string(info.frame_bytes);
+    }
+    return true;
+}
+
 void drawIfDirty()
 {
     if (!dirty || display_off) return;
@@ -741,11 +806,11 @@ void processPendingProbe()
     mp3_probe_pending = false;
 
     std::string result;
-    if (mp3ProbeSelected(&result)) {
-        message_title = "MP3 Probe OK";
+    if (mp3ProbeEmbedded(&result)) {
+        message_title = "Embed Probe OK";
         message_body = result;
     } else {
-        message_title = "MP3 Probe FAIL";
+        message_title = "Embed Probe FAIL";
         message_body = result.empty() ? "unknown" : result;
     }
     screen = Screen::Message;
