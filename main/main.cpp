@@ -540,10 +540,21 @@ void updateAudio()
     if (M5.Speaker.isPlaying()) return;
     std::string err;
     if (!decodeChunk(&err)) {
-        stopPlayback();
-        message_title = "Playback failed";
-        message_body = err.empty() ? "decode failed" : err;
-        screen = Screen::Message;
+        const bool eof = mp3_eof && err.find("eof") != std::string::npos;
+        if (eof) {
+            if (tracks.size() > 1) {
+                nextTrack(1);
+            } else {
+                stopPlayback();
+                screen = Screen::MusicList;
+            }
+        } else {
+            stopPlayback();
+            message_title = "Playback failed";
+            message_body = err.empty() ? "decode failed" : err;
+            message_returns_music = true;
+            screen = Screen::Message;
+        }
         dirty = true;
         blockInput(350);
         return;
@@ -615,7 +626,7 @@ void drawMusicPlaying()
     canvas.setCursor(8, 34);
     canvas.printf("%.14s", tracks.empty() ? "" : tracks[selected_track].c_str());
     canvas.setCursor(8, 58);
-    canvas.printf("VOL:%s  SHUF:%s  C:%d", volumeName(), shuffle_on ? "ON" : "OFF", decoded_chunks);
+    canvas.printf("V:%s S:%s C:%d", volumeName(), shuffle_on ? "ON" : "OFF", decoded_chunks);
     drawWaveform(pcm_chunk, pcm_channels);
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
