@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "lib/adafruit_tca8418/Adafruit_TCA8418.cpp"
+    INCLUDE_DIRS
+        "."
+        "assets"
+        "lib/adafruit_tca8418"
+    REQUIRES
+        M5Unified
+        minimp3
+        esp_driver_spi
+        esp_driver_gpio
+        fatfs
+        sdmmc
+)
