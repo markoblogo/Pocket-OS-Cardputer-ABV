@@ -30,11 +30,14 @@ constexpr gpio_num_t PIN_SPI_SCLK = GPIO_NUM_40;
 constexpr gpio_num_t PIN_SD_CS = GPIO_NUM_12;
 constexpr const char* MOUNT_POINT = "/sdcard";
 constexpr const char* MUSIC_DIR = "/sdcard/music";
+constexpr const char* BOOKS_DIR = "/sdcard/books";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 8 * 1024;
 constexpr int CHUNK_MS = 120;
+constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
+constexpr int READER_LINES_PER_PAGE = 4;
 constexpr uint32_t DEBOUNCE_MS = 180;
 constexpr float PI = 3.14159265358979323846f;
 
@@ -45,9 +48,10 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, RecorderList, RecorderRecording, RecorderPlaying, Message };
+enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, RecorderList, RecorderRecording, RecorderPlaying, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
+enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -98,8 +102,10 @@ bool message_returns_music = false;
 uint32_t message_hold_until_ms = 0;
 
 std::vector<std::string> tracks;
+std::vector<std::string> books;
 std::vector<std::string> recordings;
 int selected_track = 0;
+int selected_book = 0;
 int selected_recording = 0;
 bool shuffle_on = false;
 VolumeMode volume_mode = VolumeMode::Mid;
@@ -131,6 +137,16 @@ uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
 int recorder_cursor = 0;
 std::string active_recording_name;
+std::string active_book_name;
+std::string reader_text;
+std::vector<std::string> reader_lines;
+std::vector<std::string> reader_words;
+int reader_scroll = 0;
+int speed_index = 0;
+int speed_wpm = 200;
+SpeedMode speed_mode = SpeedMode::OneWord;
+bool speed_paused = true;
+uint32_t speed_next_ms = 0;
 
 void flushKeyboardEvents()
 {
@@ -299,6 +315,11 @@ bool hasMp3Ext(const std::string& name)
     return lowerExt(name) == ".mp3";
 }
 
+bool hasTextExt(const std::string& name)
+{
+    return lowerExt(name) == ".txt";
+}
+
 size_t findSyncInBytes(const uint8_t* data, size_t len)
 {
     for (size_t i = 0; i + 1 < len; ++i) {
@@ -389,6 +410,192 @@ std::string nextRecordingName()
         }
     }
     return "REC9999.WAV";
+}
+
+
+void scanBooks()
+{
+    books.clear();
+    if (!initSd()) return;
+    DIR* dir = opendir(BOOKS_DIR);
+    if (!dir) return;
+    while (dirent* entry = readdir(dir)) {
+        std::string name = entry->d_name;
+        if (isHidden(name) || !hasTextExt(name)) continue;
+        if (entry->d_type == DT_DIR) continue;
+        books.push_back(name);
+    }
+    closedir(dir);
+    std::sort(books.begin(), books.end());
+    if (selected_book >= static_cast<int>(books.size())) selected_book = std::max(0, static_cast<int>(books.size()) - 1);
+}
+
+std::string selectedBookPath()
+{
+    if (books.empty()) return "";
+    return std::string(BOOKS_DIR) + "/" + books[selected_book];
+}
+
+size_t utf8CharLen(unsigned char c)
+{
+    if ((c & 0x80) == 0) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+void appendWrappedLine(std::vector<std::string>& out, std::string line)
+{
+    while (!line.empty() && (line.back() == ' ' || line.back() == '\r' || line.back() == '\t')) line.pop_back();
+    out.push_back(line.empty() ? " " : line);
+}
+
+void wrapReaderText()
+{
+    reader_lines.clear();
+    reader_words.clear();
+    std::string line;
+    std::string word;
+    int line_cols = 0;
+    int word_cols = 0;
+    constexpr int max_cols = 19;
+    auto flush_word = [&]() {
+        if (word.empty()) return;
+        if (line_cols > 0 && line_cols + 1 + word_cols > max_cols) {
+            appendWrappedLine(reader_lines, line);
+            line.clear();
+            line_cols = 0;
+        }
+        if (word_cols > max_cols) {
+            if (!line.empty()) {
+                appendWrappedLine(reader_lines, line);
+                line.clear();
+                line_cols = 0;
+            }
+            std::string part;
+            int cols = 0;
+            for (size_t i = 0; i < word.size();) {
+                size_t len = utf8CharLen(static_cast<unsigned char>(word[i]));
+                if (i + len > word.size()) len = 1;
+                if (cols >= max_cols) {
+                    appendWrappedLine(reader_lines, part);
+                    part.clear();
+                    cols = 0;
+                }
+                part.append(word, i, len);
+                ++cols;
+                i += len;
+            }
+            line = part;
+            line_cols = cols;
+        } else {
+            if (line_cols > 0) {
+                line += ' ';
+                ++line_cols;
+            }
+            line += word;
+            line_cols += word_cols;
+        }
+        reader_words.push_back(word);
+        word.clear();
+        word_cols = 0;
+    };
+
+    for (size_t i = 0; i < reader_text.size();) {
+        unsigned char c = static_cast<unsigned char>(reader_text[i]);
+        if (c == '\r') { ++i; continue; }
+        if (c == '\n') {
+            flush_word();
+            appendWrappedLine(reader_lines, line);
+            line.clear();
+            line_cols = 0;
+            ++i;
+            continue;
+        }
+        if (c == ' ' || c == '\t') {
+            flush_word();
+            ++i;
+            continue;
+        }
+        size_t len = utf8CharLen(c);
+        if (i + len > reader_text.size()) len = 1;
+        word.append(reader_text, i, len);
+        ++word_cols;
+        i += len;
+    }
+    flush_word();
+    if (!line.empty()) appendWrappedLine(reader_lines, line);
+    if (reader_lines.empty()) reader_lines.push_back(" ");
+}
+
+bool loadSelectedBook(std::string* err = nullptr)
+{
+    if (books.empty()) {
+        if (err) *err = "no books";
+        return false;
+    }
+    const std::string path = selectedBookPath();
+    struct stat st = {};
+    if (stat(path.c_str(), &st) != 0) {
+        if (err) {
+            *err = "stat: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    if (st.st_size <= 0) {
+        if (err) *err = "empty file";
+        return false;
+    }
+    if (static_cast<size_t>(st.st_size) > MAX_BOOK_BYTES) {
+        if (err) *err = "book too big";
+        return false;
+    }
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        if (err) {
+            *err = "open: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    reader_text.assign(static_cast<size_t>(st.st_size), '\0');
+    size_t n = fread(reader_text.data(), 1, reader_text.size(), f);
+    fclose(f);
+    reader_text.resize(n);
+    active_book_name = books[selected_book];
+    reader_scroll = 0;
+    speed_index = 0;
+    speed_wpm = 200;
+    speed_mode = SpeedMode::OneWord;
+    speed_paused = true;
+    speed_next_ms = 0;
+    wrapReaderText();
+    return true;
+}
+
+int speedStepWords()
+{
+    return speed_mode == SpeedMode::TwoWords ? 2 : 1;
+}
+
+uint32_t speedIntervalMs()
+{
+    if (speed_mode == SpeedMode::Line) {
+        int words = 1;
+        if (speed_index >= 0 && speed_index < static_cast<int>(reader_lines.size())) {
+            words = 1;
+            bool in_word = false;
+            for (unsigned char c : reader_lines[speed_index]) {
+                bool ws = c == ' ' || c == '\t' || c == '\r' || c == '\n';
+                if (!ws && !in_word) { ++words; in_word = true; }
+                if (ws) in_word = false;
+            }
+        }
+        return std::max<uint32_t>(120, static_cast<uint32_t>(60000UL * words / speed_wpm));
+    }
+    return std::max<uint32_t>(120, static_cast<uint32_t>(60000UL * speedStepWords() / speed_wpm));
 }
 
 
@@ -903,6 +1110,108 @@ void drawRecorderPlaying()
     canvas.pushSprite(0, 0);
 }
 
+void drawReaderList()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.printf("BOOKS %d/%d", books.empty() ? 0 : selected_book + 1, static_cast<int>(books.size()));
+    if (books.empty()) {
+        canvas.setCursor(8, 42);
+        canvas.println(sd_ready ? "No books" : "No SD");
+        canvas.setTextSize(1);
+        canvas.setCursor(8, 76);
+        canvas.println("/sdcard/books/EN1.TXT");
+        canvas.setCursor(8, 90);
+        canvas.println("/sdcard/books/RU1.TXT");
+    } else {
+        int rows = 4;
+        int start = std::max(0, selected_book - 1);
+        start = std::min(start, std::max(0, static_cast<int>(books.size()) - rows));
+        int end = std::min(static_cast<int>(books.size()), start + rows);
+        for (int i = start; i < end; ++i) {
+            canvas.setCursor(8, 34 + (i - start) * 21);
+            canvas.setTextColor(i == selected_book ? TFT_BLACK : TFT_WHITE, i == selected_book ? TFT_WHITE : TFT_BLACK);
+            canvas.printf("%c %.13s", i == selected_book ? '>' : ' ', books[i].c_str());
+        }
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 122);
+    canvas.print("OK READ   GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawReaderView()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 5);
+    canvas.printf("%.14s %d/%d", active_book_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
+        int idx = reader_scroll + row;
+        if (idx >= static_cast<int>(reader_lines.size())) break;
+        canvas.setCursor(8, 22 + row * 24);
+        canvas.print(reader_lines[idx].c_str());
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 122);
+    canvas.print("UP/DN LINE  L/R PAGE  1 SPEED");
+    canvas.pushSprite(0, 0);
+}
+
+const char* speedModeName()
+{
+    if (speed_mode == SpeedMode::TwoWords) return "2W";
+    if (speed_mode == SpeedMode::Line) return "LINE";
+    return "1W";
+}
+
+std::string currentSpeedText()
+{
+    if (speed_mode == SpeedMode::Line) {
+        if (reader_lines.empty()) return "";
+        return reader_lines[std::max(0, std::min(speed_index, static_cast<int>(reader_lines.size()) - 1))];
+    }
+    if (reader_words.empty()) return "";
+    int idx = std::max(0, std::min(speed_index, static_cast<int>(reader_words.size()) - 1));
+    std::string out = reader_words[idx];
+    if (speed_mode == SpeedMode::TwoWords && idx + 1 < static_cast<int>(reader_words.size())) {
+        out += " ";
+        out += reader_words[idx + 1];
+    }
+    return out;
+}
+
+void drawReaderSpeed()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.printf("SPEED %s", speedModeName());
+    canvas.setCursor(8, 32);
+    canvas.printf("%d WPM", speed_wpm);
+    canvas.setTextColor(speed_paused ? TFT_DARKGREY : TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 66);
+    std::string text = currentSpeedText();
+    canvas.printf("%.18s", text.c_str());
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 104);
+    canvas.printf("%s %d/%d", speed_paused ? "PAUSE" : "RUN", speed_index + 1,
+                  speed_mode == SpeedMode::Line ? static_cast<int>(reader_lines.size()) : static_cast<int>(reader_words.size()));
+    canvas.setCursor(8, 122);
+    canvas.print("OK PAUSE  UP/DN WPM  L/R MODE");
+    canvas.pushSprite(0, 0);
+}
+
+
 void drawMessage()
 {
     canvas.fillScreen(TFT_BLACK);
@@ -926,11 +1235,32 @@ void drawIfDirty()
     if (screen == Screen::Launcher) drawLauncher();
     else if (screen == Screen::MusicList) drawMusicList();
     else if (screen == Screen::MusicPlaying) drawMusicPlaying();
+    else if (screen == Screen::ReaderList) drawReaderList();
+    else if (screen == Screen::ReaderView) drawReaderView();
+    else if (screen == Screen::ReaderSpeed) drawReaderSpeed();
     else if (screen == Screen::RecorderList) drawRecorderList();
     else if (screen == Screen::RecorderRecording) drawRecorderRecording();
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
     else drawMessage();
     dirty = false;
+}
+
+void updateSpeedReader()
+{
+    if (screen != Screen::ReaderSpeed || speed_paused) return;
+    uint32_t now = M5.millis();
+    if (now < speed_next_ms) return;
+    int total = speed_mode == SpeedMode::Line ? static_cast<int>(reader_lines.size()) : static_cast<int>(reader_words.size());
+    if (total <= 0) {
+        speed_paused = true;
+        dirty = true;
+        return;
+    }
+    int step = speed_mode == SpeedMode::Line ? 1 : speedStepWords();
+    speed_index = std::min(total - 1, speed_index + step);
+    if (speed_index >= total - 1) speed_paused = true;
+    speed_next_ms = now + speedIntervalMs();
+    if (!display_off) dirty = true;
 }
 
 void updatePower()
@@ -975,8 +1305,9 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; }
         else if (ev.key == Key::Ok) {
             if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
+            else if (launcher_index == 1) { scanBooks(); screen = Screen::ReaderList; }
             else if (launcher_index == 3) { scanRecordings(); screen = Screen::RecorderList; }
-            else { message_title = "Coming soon"; message_body = "Music now; Recorder v0.2"; message_returns_music = false; screen = Screen::Message; }
+            else { message_title = "Coming soon"; message_body = "Music/Reader/Record"; message_returns_music = false; screen = Screen::Message; }
         }
         dirty = true;
         return;
@@ -1018,6 +1349,76 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Up) { volume_mode = static_cast<VolumeMode>(std::min(2, static_cast<int>(volume_mode) + 1)); applyVolume(); }
         else if (ev.key == Key::Down) { volume_mode = static_cast<VolumeMode>(std::max(0, static_cast<int>(volume_mode) - 1)); applyVolume(); }
         else if (ev.key == Key::One) shuffle_on = !shuffle_on;
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::ReaderList) {
+        if (ev.key == Key::Up && !books.empty()) selected_book = std::max(0, selected_book - 1);
+        else if (ev.key == Key::Down && !books.empty()) selected_book = std::min(static_cast<int>(books.size()) - 1, selected_book + 1);
+        else if (ev.key == Key::Left && !books.empty()) selected_book = std::max(0, selected_book - 4);
+        else if (ev.key == Key::Right && !books.empty()) selected_book = std::min(static_cast<int>(books.size()) - 1, selected_book + 4);
+        else if (ev.key == Key::Ok) {
+            if (!books.empty()) {
+                std::string err;
+                if (loadSelectedBook(&err)) {
+                    screen = Screen::ReaderView;
+                    blockInput(300);
+                } else {
+                    message_title = "Read failed";
+                    message_body = err.empty() ? "open" : err;
+                    message_returns_music = false;
+                    screen = Screen::Message;
+                    blockInput(350);
+                }
+            }
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::ReaderView) {
+        const int max_scroll = std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE);
+        if (ev.key == Key::Up) reader_scroll = std::max(0, reader_scroll - 1);
+        else if (ev.key == Key::Down) reader_scroll = std::min(max_scroll, reader_scroll + 1);
+        else if (ev.key == Key::Left) reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE);
+        else if (ev.key == Key::Right) reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE);
+        else if (ev.key == Key::One) {
+            speed_index = std::min(reader_scroll, std::max(0, static_cast<int>(reader_words.size()) - 1));
+            speed_paused = true;
+            speed_next_ms = M5.millis() + speedIntervalMs();
+            screen = Screen::ReaderSpeed;
+            blockInput(300);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::ReaderList;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::ReaderSpeed) {
+        if (ev.key == Key::Ok) {
+            speed_paused = !speed_paused;
+            speed_next_ms = M5.millis() + speedIntervalMs();
+        } else if (ev.key == Key::Up) speed_wpm = std::min(800, speed_wpm + 50);
+        else if (ev.key == Key::Down) speed_wpm = std::max(200, speed_wpm - 50);
+        else if (ev.key == Key::Left) {
+            int mode = static_cast<int>(speed_mode);
+            speed_mode = static_cast<SpeedMode>((mode + 2) % 3);
+            speed_index = std::min(speed_index, speed_mode == SpeedMode::Line ? std::max(0, static_cast<int>(reader_lines.size()) - 1) : std::max(0, static_cast<int>(reader_words.size()) - 1));
+        } else if (ev.key == Key::Right) {
+            int mode = static_cast<int>(speed_mode);
+            speed_mode = static_cast<SpeedMode>((mode + 1) % 3);
+            speed_index = std::min(speed_index, speed_mode == SpeedMode::Line ? std::max(0, static_cast<int>(reader_lines.size()) - 1) : std::max(0, static_cast<int>(reader_words.size()) - 1));
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            if (speed_mode == SpeedMode::Line) reader_scroll = std::min(speed_index, std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE));
+            screen = Screen::ReaderView;
+            blockInput(250);
+        }
         dirty = true;
         return;
     }
@@ -1097,6 +1498,7 @@ extern "C" void app_main(void)
         updateAudio();
         updateRecording();
         updateRecordingPlayback();
+        updateSpeedReader();
         updatePower();
         vTaskDelay(pdMS_TO_TICKS(5));
     }

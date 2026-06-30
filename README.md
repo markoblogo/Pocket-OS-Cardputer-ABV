@@ -2,7 +2,7 @@
 
 Minimal ABVx firmware for M5Stack Cardputer ADV.
 
-Current focus: MP3-first offline shell with a simple recorder.
+Current focus: MP3-first offline shell with a simple recorder and TXT reader.
 
 ## Current working version
 
@@ -19,6 +19,11 @@ Confirmed on real Cardputer ADV:
   - Left / Right track navigation;
   - `1` shuffle toggle;
   - EOF auto-next when multiple tracks exist.
+- Reader app:
+  - scans `/sdcard/books` for `.TXT` / `.txt` files;
+  - opens English/Russian UTF-8 text best-effort;
+  - line and page scrolling;
+  - speed-reading mode: 1 word, 2 words, or line at 200-800 WPM.
 - Record app:
   - stores recordings in `/sdcard/rec`;
   - first list item `NEW REC` starts recording;
@@ -34,6 +39,8 @@ Use FATFS 8.3-safe names for now.
 ```text
 /sdcard/music/A.MP3
 /sdcard/music/T01.MP3
+/sdcard/books/EN1.TXT
+/sdcard/books/RU1.TXT
 /sdcard/rec/REC0001.WAV
 ```
 
@@ -82,6 +89,17 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 7. Test Left / Right track change.
 8. Test `1` shuffle toggle.
 
+### Reader
+
+1. Open Reader.
+2. Select `EN1.TXT` or `RU1.TXT`.
+3. Press `OK` to read.
+4. Test Up / Down line scroll.
+5. Test Left / Right page scroll.
+6. Press `1` for speed-reading mode.
+7. Test `OK` pause/resume, Up / Down WPM, Left / Right mode.
+8. Press `GO` to return to normal read mode, then list.
+
 ### Record
 
 1. Open Record.
@@ -95,7 +113,8 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 
 ## Known limitations
 
-- No Reader/Notes MVP yet.
+- No Notes MVP yet.
+- Reader is MVP only: English/Russian best-effort, no saved position, no French/Ukrainian font support yet.
 - Recordings use `/sdcard/rec` instead of `/sdcard/recordings` because FATFS long filenames are not enabled yet.
 - Music playback is chunk/blocking-based; controls may have small latency.
 - Screen-off playback/power optimization is not finalized yet.
