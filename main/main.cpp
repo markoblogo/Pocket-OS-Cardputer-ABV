@@ -7,6 +7,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <map>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -150,6 +151,7 @@ std::string note_input;
 std::string reader_text;
 std::vector<std::string> reader_lines;
 std::vector<std::string> reader_words;
+std::map<std::string, int> reader_bookmarks;
 int reader_scroll = 0;
 int speed_index = 0;
 int speed_wpm = SPEED_WPM_MIN;
@@ -643,13 +645,38 @@ bool loadTextFile(const std::string& path, const std::string& label, std::string
     return true;
 }
 
+int lineIndexForWord(int word_idx);
+
+int clampReaderLine(int line)
+{
+    int max_scroll = std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE);
+    return std::max(0, std::min(line, max_scroll));
+}
+
+int currentReaderLineForBookmark()
+{
+    if (screen == Screen::ReaderSpeed) {
+        return speed_mode == SpeedMode::Line ? speed_index : lineIndexForWord(speed_index);
+    }
+    return reader_scroll;
+}
+
+void saveReaderBookmark()
+{
+    if (active_book_name.empty() || reader_lines.empty()) return;
+    reader_bookmarks[active_book_name] = clampReaderLine(currentReaderLineForBookmark());
+}
+
 bool loadSelectedBook(std::string* err = nullptr)
 {
     if (books.empty()) {
         if (err) *err = "no books";
         return false;
     }
-    return loadTextFile(selectedBookPath(), books[selected_book], err);
+    if (!loadTextFile(selectedBookPath(), books[selected_book], err)) return false;
+    auto it = reader_bookmarks.find(active_book_name);
+    if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
+    return true;
 }
 
 bool loadSelectedNote(std::string* err = nullptr)
@@ -1384,7 +1411,7 @@ void drawReaderList()
         for (int i = start; i < end; ++i) {
             canvas.setCursor(8, 34 + (i - start) * 21);
             canvas.setTextColor(i == selected_book ? TFT_BLACK : TFT_WHITE, i == selected_book ? TFT_WHITE : TFT_BLACK);
-            canvas.printf("%c %.13s", i == selected_book ? '>' : ' ', books[i].c_str());
+            canvas.printf("%c%c%.12s", i == selected_book ? '>' : ' ', reader_bookmarks.count(books[i]) ? '*' : ' ', books[i].c_str());
         }
     }
     canvas.setTextSize(1);
@@ -1530,6 +1557,7 @@ void updateSpeedReader()
     int step = speed_mode == SpeedMode::Line ? 1 : speedStepWords();
     speed_index = std::min(total - 1, speed_index + step);
     if (speed_index >= total - 1) speed_paused = true;
+    saveReaderBookmark();
     speed_next_ms = now + speedIntervalMs();
     if (!display_off) dirty = true;
 }
@@ -1655,10 +1683,10 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::ReaderView) {
         const int max_scroll = std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE);
-        if (ev.key == Key::Up) reader_scroll = std::max(0, reader_scroll - 1);
-        else if (ev.key == Key::Down) reader_scroll = std::min(max_scroll, reader_scroll + 1);
-        else if (ev.key == Key::Left) reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE);
-        else if (ev.key == Key::Right) reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE);
+        if (ev.key == Key::Up) { reader_scroll = std::max(0, reader_scroll - 1); saveReaderBookmark(); }
+        else if (ev.key == Key::Down) { reader_scroll = std::min(max_scroll, reader_scroll + 1); saveReaderBookmark(); }
+        else if (ev.key == Key::Left) { reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE); saveReaderBookmark(); }
+        else if (ev.key == Key::Right) { reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE); saveReaderBookmark(); }
         else if (ev.key == Key::One) {
             speed_mode = SpeedMode::OneWord;
             speed_index = wordIndexForLine(reader_scroll);
@@ -1667,6 +1695,7 @@ void handleKey(KeyEvent ev)
             screen = Screen::ReaderSpeed;
             blockInput(300);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            saveReaderBookmark();
             screen = Screen::ReaderList;
             blockInput(250);
         }
@@ -1683,12 +1712,15 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Left) {
             int mode = static_cast<int>(speed_mode);
             setSpeedMode(static_cast<SpeedMode>((mode + 2) % 3));
+            saveReaderBookmark();
         } else if (ev.key == Key::Right) {
             int mode = static_cast<int>(speed_mode);
             setSpeedMode(static_cast<SpeedMode>((mode + 1) % 3));
+            saveReaderBookmark();
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             reader_scroll = speed_mode == SpeedMode::Line ? speed_index : lineIndexForWord(speed_index);
             reader_scroll = std::min(reader_scroll, std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE));
+            saveReaderBookmark();
             screen = Screen::ReaderView;
             blockInput(250);
         }
@@ -1730,10 +1762,10 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::NotesView) {
         const int max_scroll = std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE);
-        if (ev.key == Key::Up) reader_scroll = std::max(0, reader_scroll - 1);
-        else if (ev.key == Key::Down) reader_scroll = std::min(max_scroll, reader_scroll + 1);
-        else if (ev.key == Key::Left) reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE);
-        else if (ev.key == Key::Right) reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE);
+        if (ev.key == Key::Up) { reader_scroll = std::max(0, reader_scroll - 1); saveReaderBookmark(); }
+        else if (ev.key == Key::Down) { reader_scroll = std::min(max_scroll, reader_scroll + 1); saveReaderBookmark(); }
+        else if (ev.key == Key::Left) { reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE); saveReaderBookmark(); }
+        else if (ev.key == Key::Right) { reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE); saveReaderBookmark(); }
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::NotesList;
             blockInput(250);

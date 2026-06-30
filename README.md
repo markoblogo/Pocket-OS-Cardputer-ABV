@@ -23,6 +23,7 @@ Confirmed on real Cardputer ADV:
   - scans `/sdcard/books` for `.TXT` / `.txt` files;
   - opens English/Russian UTF-8 text best-effort;
   - line and page scrolling;
+  - in-RAM bookmarks restore the last line while the device remains on;
   - speed-reading mode: 1 word, 2 words, or line at 350-1000 WPM.
 - Notes app:
   - stores notes in `/sdcard/notes`;
@@ -129,7 +130,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 
 ## Known limitations
 
-- Reader/Notes text support is MVP only: English/Russian best-effort, no saved position, no French/Ukrainian font support yet.
+- Reader/Notes text support is MVP only: English/Russian best-effort, in-RAM Reader bookmarks only, no persistent saved position, no French/Ukrainian font support yet.
 - Notes input is ASCII/latin keyboard-first; Russian note files can be opened if copied to SD.
 - Recordings use `/sdcard/rec` instead of `/sdcard/recordings` because FATFS long filenames are not enabled yet.
 - Music playback is chunk/blocking-based; controls may have small latency.
