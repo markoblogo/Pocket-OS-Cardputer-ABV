@@ -115,6 +115,7 @@ bool mp3_probe_pending = false;
 uint32_t mp3_probe_due_ms = 0;
 bool mp3_step_active = false;
 int mp3_step = 0;
+bool mp3_step_use_sd = false;
 
 FILE* mp3_file = nullptr;
 mp3dec_t mp3_dec;
@@ -810,7 +811,7 @@ void advanceMp3Step()
     ++mp3_step;
     message_returns_music = true;
 
-    if (!data || len == 0) {
+    if (!mp3_step_use_sd && (!data || len == 0)) {
         message_title = "MP3 FAIL";
         message_body = "no asset";
         mp3_step_active = false;
@@ -819,26 +820,69 @@ void advanceMp3Step()
     }
 
     if (mp3_step == 1) {
-        message_title = "MP3 S1";
-        message_body = "FIX\n" + std::to_string(len);
-    } else if (mp3_step == 2) {
-        message_title = "MP3 S2";
-        message_body = "INIT";
-        mp3dec_init(&mp3_dec);
-    } else if (mp3_step == 3) {
-        message_title = "MP3 S3";
-        message_body = "DECODE";
-    } else if (mp3_step == 4) {
-        const size_t sync = EMBEDDED_TEST01_SYNC_OFFSET;
-        if (sync >= len) {
-            message_title = "MP3 FAIL";
-            message_body = "bad sync";
-            mp3_step_active = false;
+        if (mp3_step_use_sd) {
+            message_title = "SD S1";
+            message_body = "OPEN\n" + (tracks.empty() ? std::string("none") : tracks[selected_track]);
         } else {
+            message_title = "MP3 S1";
+            message_body = "FIX\n" + std::to_string(len);
+        }
+    } else if (mp3_step == 2) {
+        if (mp3_step_use_sd) {
+            test_mp3_input_len = 0;
+            const std::string path = selectedPath();
+            FILE* f = fopen(path.c_str(), "rb");
+            if (!f) {
+                message_title = "SD FAIL";
+                message_body = "open\n" + std::string(std::strerror(errno));
+                mp3_step_active = false;
+            } else {
+                test_mp3_input_len = fread(test_mp3_input, 1, sizeof(test_mp3_input), f);
+                fclose(f);
+                message_title = "SD S2";
+                message_body = "READ\n" + std::to_string(test_mp3_input_len);
+            }
+        } else {
+            message_title = "MP3 S2";
+            message_body = "INIT";
+            mp3dec_init(&mp3_dec);
+        }
+    } else if (mp3_step == 3) {
+        if (mp3_step_use_sd) {
+            size_t sync = findSyncInBytes(test_mp3_input, test_mp3_input_len);
+            if (sync == std::string::npos) {
+                message_title = "SD FAIL";
+                message_body = "sync";
+                mp3_step_active = false;
+            } else {
+                if (sync > 0 && sync < test_mp3_input_len) {
+                    memmove(test_mp3_input, test_mp3_input + sync, test_mp3_input_len - sync);
+                    test_mp3_input_len -= sync;
+                }
+                mp3dec_init(&mp3_dec);
+                message_title = "SD S3";
+                message_body = "SYNC\n" + std::to_string(sync);
+            }
+        } else {
+            message_title = "MP3 S3";
+            message_body = "DECODE";
+        }
+    } else if (mp3_step == 4) {
+        if (mp3_step_use_sd) {
+            message_title = "SD S4";
+            message_body = "DECODE";
+        } else {
+            const size_t sync = EMBEDDED_TEST01_SYNC_OFFSET;
+            if (sync >= len) {
+                message_title = "MP3 FAIL";
+                message_body = "bad sync";
+                mp3_step_active = false;
+            } else {
             test_mp3_input_len = std::min(sizeof(test_mp3_input), len - sync);
             memcpy(test_mp3_input, data + sync, test_mp3_input_len);
             message_title = "MP3 S4";
             message_body = "COPY\n" + std::to_string(test_mp3_input_len);
+            }
         }
     } else if (mp3_step == 5) {
         mp3dec_frame_info_t info = {};
@@ -1033,6 +1077,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok) {
             if (!tracks.empty()) {
                 mp3_step_active = true;
+                mp3_step_use_sd = true;
                 mp3_step = 0;
                 advanceMp3Step();
             }
