@@ -28,6 +28,7 @@ constexpr gpio_num_t PIN_SPI_SCLK = GPIO_NUM_40;
 constexpr gpio_num_t PIN_SD_CS = GPIO_NUM_12;
 constexpr const char* MOUNT_POINT = "/sdcard";
 constexpr const char* MUSIC_DIR = "/sdcard/music";
+constexpr const char* RECORDINGS_DIR = "/sdcard/recordings";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 64 * 1024;
@@ -42,7 +43,7 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, Message };
+enum class Screen { Launcher, MusicList, MusicPlaying, RecorderList, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 
@@ -92,7 +93,9 @@ std::string message_title;
 std::string message_body;
 
 std::vector<std::string> tracks;
+std::vector<std::string> recordings;
 int selected_track = 0;
+int selected_recording = 0;
 bool shuffle_on = false;
 VolumeMode volume_mode = VolumeMode::Mid;
 uint32_t last_input_ms = 0;
@@ -241,12 +244,24 @@ bool isHidden(const std::string& name)
     return name.empty() || name[0] == '.' || name.rfind("._", 0) == 0 || name == ".DS_Store";
 }
 
+std::string lowerExt(const std::string& name)
+{
+    const auto dot = name.find_last_of('.');
+    if (dot == std::string::npos) return "";
+    std::string ext = name.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+    return ext;
+}
+
 bool hasMp3Ext(const std::string& name)
 {
-    if (name.size() < 4) return false;
-    std::string ext = name.substr(name.size() - 4);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
-    return ext == ".mp3";
+    return lowerExt(name) == ".mp3";
+}
+
+bool hasRecordingExt(const std::string& name)
+{
+    const std::string ext = lowerExt(name);
+    return ext == ".wav" || ext == ".pcm";
 }
 
 void scanMusic()
@@ -264,6 +279,23 @@ void scanMusic()
     closedir(dir);
     std::sort(tracks.begin(), tracks.end());
     if (selected_track >= static_cast<int>(tracks.size())) selected_track = std::max(0, static_cast<int>(tracks.size()) - 1);
+}
+
+void scanRecordings()
+{
+    recordings.clear();
+    if (!initSd()) return;
+    DIR* dir = opendir(RECORDINGS_DIR);
+    if (!dir) return;
+    while (dirent* entry = readdir(dir)) {
+        std::string name = entry->d_name;
+        if (isHidden(name) || !hasRecordingExt(name)) continue;
+        if (entry->d_type == DT_DIR) continue;
+        recordings.push_back(name);
+    }
+    closedir(dir);
+    std::sort(recordings.begin(), recordings.end());
+    if (selected_recording >= static_cast<int>(recordings.size())) selected_recording = std::max(0, static_cast<int>(recordings.size()) - 1);
 }
 
 std::string selectedPath()
@@ -490,6 +522,37 @@ void drawMusicPlaying()
     canvas.pushSprite(0, 0);
 }
 
+void drawRecorderList()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.printf("RECORDER %d/%d", recordings.empty() ? 0 : selected_recording + 1, static_cast<int>(recordings.size()));
+    canvas.setCursor(8, 24);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.println("/sdcard/recordings");
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    if (recordings.empty()) {
+        canvas.setCursor(8, 48);
+        canvas.println(sd_ready ? "No WAV/PCM files" : "No SD / mount failed");
+        canvas.setCursor(8, 64);
+        canvas.println("Record/play in v0.2");
+    } else {
+        int start = std::max(0, selected_recording - 3);
+        int end = std::min(static_cast<int>(recordings.size()), start + 6);
+        for (int i = start; i < end; ++i) {
+            canvas.setCursor(8, 46 + (i - start) * 13);
+            canvas.setTextColor(i == selected_recording ? TFT_BLACK : TFT_WHITE, i == selected_recording ? TFT_WHITE : TFT_BLACK);
+            canvas.printf("%c %.24s", i == selected_recording ? '>' : ' ', recordings[i].c_str());
+        }
+    }
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 122);
+    canvas.print("REC/PLAY v0.2   GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
 void drawMessage()
 {
     canvas.fillScreen(TFT_BLACK);
@@ -511,6 +574,7 @@ void drawIfDirty()
     if (screen == Screen::Launcher) drawLauncher();
     else if (screen == Screen::MusicList) drawMusicList();
     else if (screen == Screen::MusicPlaying) drawMusicPlaying();
+    else if (screen == Screen::RecorderList) drawRecorderList();
     else drawMessage();
     dirty = false;
 }
@@ -557,7 +621,8 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; }
         else if (ev.key == Key::Ok) {
             if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
-            else { message_title = "Coming soon"; message_body = "Only MUSIC in v0.1"; screen = Screen::Message; }
+            else if (launcher_index == 3) { scanRecordings(); screen = Screen::RecorderList; }
+            else { message_title = "Coming soon"; message_body = "Music now; Recorder v0.2"; screen = Screen::Message; }
         }
         dirty = true;
         return;
@@ -585,6 +650,15 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Up) { volume_mode = static_cast<VolumeMode>(std::min(2, static_cast<int>(volume_mode) + 1)); applyVolume(); }
         else if (ev.key == Key::Down) { volume_mode = static_cast<VolumeMode>(std::max(0, static_cast<int>(volume_mode) - 1)); applyVolume(); }
         else if (ev.key == Key::One) shuffle_on = !shuffle_on;
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::RecorderList) {
+        if (ev.key == Key::Up && !recordings.empty()) selected_recording = std::max(0, selected_recording - 1);
+        else if (ev.key == Key::Down && !recordings.empty()) selected_recording = std::min(static_cast<int>(recordings.size()) - 1, selected_recording + 1);
+        else if (ev.key == Key::Ok) { message_title = "Recorder"; message_body = "Record/play in v0.2"; screen = Screen::Message; }
+        else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Launcher;
         dirty = true;
         return;
     }
