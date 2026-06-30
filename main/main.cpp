@@ -98,6 +98,8 @@ Screen screen = Screen::Launcher;
 int launcher_index = 0;
 std::string message_title;
 std::string message_body;
+bool message_returns_music = false;
+uint32_t message_hold_until_ms = 0;
 
 std::vector<std::string> tracks;
 std::vector<std::string> recordings;
@@ -805,6 +807,7 @@ void advanceMp3Step()
     const uint8_t* data = embedded_test01_mp3_start;
     const size_t len = embedded_test01_mp3_end - embedded_test01_mp3_start;
     ++mp3_step;
+    message_returns_music = true;
 
     if (!data || len == 0) {
         message_title = "MP3 FAIL";
@@ -869,6 +872,7 @@ void advanceMp3Step()
             message_body = "PLAY";
             screen = Screen::Message;
             drawMessage();
+            M5.delay(900);
             M5.Mic.end();
             M5.Speaker.begin();
             applyVolume();
@@ -877,6 +881,7 @@ void advanceMp3Step()
             message_title = "SPK OK";
             message_body = "played\n" + std::to_string(test_frame_values);
             mp3_step_active = false;
+            message_hold_until_ms = M5.millis() + 2000;
         }
     } else {
         message_title = "MP3 STEP";
@@ -885,7 +890,7 @@ void advanceMp3Step()
     }
     screen = Screen::Message;
     dirty = true;
-    blockInput(300);
+    blockInput(800);
 }
 
 void drawIfDirty()
@@ -960,7 +965,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok) {
             if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
             else if (launcher_index == 3) { scanRecordings(); screen = Screen::RecorderList; }
-            else { message_title = "Coming soon"; message_body = "Music now; Recorder v0.2"; screen = Screen::Message; }
+            else { message_title = "Coming soon"; message_body = "Music now; Recorder v0.2"; message_returns_music = false; screen = Screen::Message; }
         }
         dirty = true;
         return;
@@ -1004,19 +1009,23 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::RecorderList) {
         if (ev.key == Key::Up && !recordings.empty()) selected_recording = std::max(0, selected_recording - 1);
         else if (ev.key == Key::Down && !recordings.empty()) selected_recording = std::min(static_cast<int>(recordings.size()) - 1, selected_recording + 1);
-        else if (ev.key == Key::Ok) { message_title = "Recorder"; message_body = "Record/play in v0.2"; screen = Screen::Message; }
+        else if (ev.key == Key::Ok) { message_title = "Recorder"; message_body = "Record/play in v0.2"; message_returns_music = false; screen = Screen::Message; }
         else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Launcher;
         dirty = true;
         return;
     }
 
     if (screen == Screen::Message) {
+        if (M5.millis() < message_hold_until_ms) return;
         if (mp3_step_active && ev.key == Key::Ok) {
             advanceMp3Step();
             return;
         }
         if (mp3_step_active && (ev.key == Key::Home || ev.key == Key::Back)) {
             mp3_step_active = false;
+            screen = Screen::MusicList;
+        } else if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
+            message_returns_music = false;
             screen = Screen::MusicList;
         } else if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
             screen = Screen::Launcher;
