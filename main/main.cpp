@@ -36,8 +36,8 @@ constexpr const char* MUSIC_DIR = "/sdcard/music";
 constexpr const char* RECORDINGS_DIR = "/sdcard/recordings";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
-constexpr int INPUT_BUF_SIZE = 64 * 1024;
-constexpr int CHUNK_MS = 220;
+constexpr int INPUT_BUF_SIZE = 8 * 1024;
+constexpr int CHUNK_MS = 120;
 constexpr uint32_t DEBOUNCE_MS = 180;
 constexpr size_t EMBEDDED_TEST01_SYNC_OFFSET = 44;
 constexpr float PI = 3.14159265358979323846f;
@@ -124,6 +124,7 @@ size_t mp3_len = 0;
 size_t mp3_pos = 0;
 bool mp3_eof = false;
 bool playing = false;
+uint32_t playback_decode_after_ms = 0;
 std::vector<int16_t> pcm_chunk;
 int pcm_rate = 44100;
 int pcm_channels = 2;
@@ -392,6 +393,7 @@ void stopPlayback()
     mp3_pos = 0;
     mp3_eof = false;
     decoded_chunks = 0;
+    playback_decode_after_ms = 0;
 }
 
 bool refillInput()
@@ -446,6 +448,7 @@ bool startPlayback(std::string* err = nullptr)
     M5.Speaker.begin();
     applyVolume();
     playing = true;
+    playback_decode_after_ms = M5.millis() + 800;
     screen = Screen::MusicPlaying;
     dirty = true;
     blockInput(400);
@@ -533,6 +536,7 @@ bool decodeChunk(std::string* err = nullptr)
 void updateAudio()
 {
     if (!playing) return;
+    if (M5.millis() < playback_decode_after_ms) return;
     if (M5.Speaker.isPlaying()) return;
     std::string err;
     if (!decodeChunk(&err)) {
@@ -1156,9 +1160,9 @@ extern "C" void app_main(void)
         M5.update();
         KeyEvent ev = pollKey();
         handleKey(ev);
+        drawIfDirty();
         updateAudio();
         updatePower();
-        drawIfDirty();
         processPendingProbe();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
