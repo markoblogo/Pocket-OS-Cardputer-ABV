@@ -541,15 +541,18 @@ void drawLauncher()
 {
     static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] TOOLS"};
     canvas.fillScreen(TFT_BLACK);
-    canvas.setTextSize(1);
+    canvas.setTextSize(2);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(8, 8);
     canvas.println("ABVx");
-    for (int i = 0; i < 6; ++i) {
-        canvas.setCursor(12, 30 + i * 14);
+    int start = std::max(0, launcher_index - 1);
+    start = std::min(start, 3);
+    for (int i = start; i < std::min(6, start + 3); ++i) {
+        canvas.setCursor(8, 38 + (i - start) * 24);
         canvas.setTextColor(i == launcher_index ? TFT_BLACK : TFT_WHITE, i == launcher_index ? TFT_WHITE : TFT_BLACK);
         canvas.printf("%c %s", i == launcher_index ? '>' : ' ', labels[i]);
     }
+    canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN   GO MUSIC");
@@ -559,24 +562,27 @@ void drawLauncher()
 void drawMusicList()
 {
     canvas.fillScreen(TFT_BLACK);
-    canvas.setTextSize(1);
+    canvas.setTextSize(2);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(8, 8);
     canvas.printf("MUSIC  %d/%d", tracks.empty() ? 0 : selected_track + 1, static_cast<int>(tracks.size()));
     if (tracks.empty()) {
-        canvas.setCursor(8, 36);
-        canvas.println(sd_ready ? "No MP3 files" : "No SD / mount failed");
-        canvas.setCursor(8, 52);
-        canvas.println("Use /sdcard/music/A.MP3");
+        canvas.setCursor(8, 42);
+        canvas.println(sd_ready ? "No MP3" : "No SD");
+        canvas.setTextSize(1);
+        canvas.setCursor(8, 76);
+        canvas.println("/sdcard/music/A.MP3");
     } else {
-        int start = std::max(0, selected_track - 3);
-        int end = std::min(static_cast<int>(tracks.size()), start + 7);
+        int start = std::max(0, selected_track - 1);
+        start = std::min(start, std::max(0, static_cast<int>(tracks.size()) - 3));
+        int end = std::min(static_cast<int>(tracks.size()), start + 3);
         for (int i = start; i < end; ++i) {
-            canvas.setCursor(8, 30 + (i - start) * 13);
+            canvas.setCursor(8, 38 + (i - start) * 24);
             canvas.setTextColor(i == selected_track ? TFT_BLACK : TFT_WHITE, i == selected_track ? TFT_WHITE : TFT_BLACK);
-            canvas.printf("%c %.24s", i == selected_track ? '>' : ' ', tracks[i].c_str());
+            canvas.printf("%c %.13s", i == selected_track ? '>' : ' ', tracks[i].c_str());
         }
     }
+    canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 122);
     canvas.printf("OK PLAY  1 SHUF:%s  GO BACK", shuffle_on ? "ON" : "OFF");
@@ -586,15 +592,16 @@ void drawMusicList()
 void drawMusicPlaying()
 {
     canvas.fillScreen(TFT_BLACK);
-    canvas.setTextSize(1);
+    canvas.setTextSize(2);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(8, 8);
     canvas.println("PLAYING");
-    canvas.setCursor(8, 24);
-    canvas.printf("%.28s", tracks.empty() ? "" : tracks[selected_track].c_str());
-    canvas.setCursor(8, 46);
+    canvas.setCursor(8, 34);
+    canvas.printf("%.14s", tracks.empty() ? "" : tracks[selected_track].c_str());
+    canvas.setCursor(8, 58);
     canvas.printf("VOL:%s  SHUF:%s  C:%d", volumeName(), shuffle_on ? "ON" : "OFF", decoded_chunks);
     drawWaveform(pcm_chunk, pcm_channels);
+    canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 122);
     canvas.print("OK/GO STOP  UP/DN VOL  L/R TRACK");
@@ -604,28 +611,27 @@ void drawMusicPlaying()
 void drawRecorderList()
 {
     canvas.fillScreen(TFT_BLACK);
-    canvas.setTextSize(1);
+    canvas.setTextSize(2);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(8, 8);
-    canvas.printf("RECORDER %d/%d", recordings.empty() ? 0 : selected_recording + 1, static_cast<int>(recordings.size()));
-    canvas.setCursor(8, 24);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    canvas.println("/sdcard/recordings");
+    canvas.printf("REC %d/%d", recordings.empty() ? 0 : selected_recording + 1, static_cast<int>(recordings.size()));
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     if (recordings.empty()) {
-        canvas.setCursor(8, 48);
-        canvas.println(sd_ready ? "No WAV/PCM files" : "No SD / mount failed");
-        canvas.setCursor(8, 64);
-        canvas.println("Record/play in v0.2");
+        canvas.setCursor(8, 42);
+        canvas.println(sd_ready ? "No WAV" : "No SD");
+        canvas.setCursor(8, 68);
+        canvas.println("v0.2");
     } else {
-        int start = std::max(0, selected_recording - 3);
-        int end = std::min(static_cast<int>(recordings.size()), start + 6);
+        int start = std::max(0, selected_recording - 1);
+        start = std::min(start, std::max(0, static_cast<int>(recordings.size()) - 3));
+        int end = std::min(static_cast<int>(recordings.size()), start + 3);
         for (int i = start; i < end; ++i) {
-            canvas.setCursor(8, 46 + (i - start) * 13);
+            canvas.setCursor(8, 38 + (i - start) * 24);
             canvas.setTextColor(i == selected_recording ? TFT_BLACK : TFT_WHITE, i == selected_recording ? TFT_WHITE : TFT_BLACK);
-            canvas.printf("%c %.24s", i == selected_recording ? '>' : ' ', recordings[i].c_str());
+            canvas.printf("%c %.13s", i == selected_recording ? '>' : ' ', recordings[i].c_str());
         }
     }
+    canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 122);
     canvas.print("REC/PLAY v0.2   GO BACK");
