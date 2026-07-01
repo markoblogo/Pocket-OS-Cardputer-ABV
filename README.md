@@ -248,7 +248,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 
 ## Known limitations
 
-- FATFS long filename support is not finalized; use 8.3-safe names.
+- FATFS long filename support is not finalized; use 8.3-safe names. macOS AppleDouble sidecar aliases are hidden from SD lists.
 - Reader/Notes text layer is English/Russian best-effort. French accents and Ukrainian-specific polish are postponed.
 - Notes RU input is translit-save, not a native Cyrillic keyboard.
 - Reader bookmarks are RAM-only for now.

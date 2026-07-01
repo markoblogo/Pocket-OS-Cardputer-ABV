@@ -526,7 +526,11 @@ bool initSd()
 
 bool isHidden(const std::string& name)
 {
-    return name.empty() || name[0] == '.' || name.rfind("._", 0) == 0 || name == ".DS_Store";
+    if (name.empty() || name[0] == '.' || name.rfind("._", 0) == 0 || name == ".DS_Store") return true;
+    // FATFS without long filename support exposes macOS AppleDouble "._FILE.EXT"
+    // sidecars as short aliases like "_FILE_~1.TXT". Hide that pattern from all
+    // user-facing SD lists while still allowing deliberate normal "_NAME" files.
+    return name[0] == '_' && name.find('~') != std::string::npos;
 }
 
 std::string lowerExt(const std::string& name)
