@@ -1352,6 +1352,96 @@ void drawNotesList()
     canvas.pushSprite(0, 0);
 }
 
+
+uint32_t nextUtf8Codepoint(const std::string& text, size_t& i)
+{
+    unsigned char c = static_cast<unsigned char>(text[i]);
+    if (c < 0x80) return text[i++];
+    if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
+        uint32_t cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(text[i + 1]) & 0x3F);
+        i += 2;
+        return cp;
+    }
+    if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
+        uint32_t cp = ((c & 0x0F) << 12) | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6) |
+                      (static_cast<unsigned char>(text[i + 2]) & 0x3F);
+        i += 3;
+        return cp;
+    }
+    ++i;
+    return '?';
+}
+
+bool isCyrillicCodepoint(uint32_t cp)
+{
+    return (cp >= 0x0400 && cp <= 0x04FF);
+}
+
+bool containsCyrillic(const std::string& text)
+{
+    for (size_t i = 0; i < text.size();) {
+        if (isCyrillicCodepoint(nextUtf8Codepoint(text, i))) return true;
+    }
+    return false;
+}
+
+std::string cyrillicToTranslit(const std::string& text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size();) {
+        uint32_t cp = nextUtf8Codepoint(text, i);
+        switch (cp) {
+            case 0x0410: case 0x0430: out += "a"; break;
+            case 0x0411: case 0x0431: out += "b"; break;
+            case 0x0412: case 0x0432: out += "v"; break;
+            case 0x0413: case 0x0433: out += "g"; break;
+            case 0x0414: case 0x0434: out += "d"; break;
+            case 0x0415: case 0x0435: out += "e"; break;
+            case 0x0401: case 0x0451: out += "yo"; break;
+            case 0x0416: case 0x0436: out += "zh"; break;
+            case 0x0417: case 0x0437: out += "z"; break;
+            case 0x0418: case 0x0438: out += "i"; break;
+            case 0x0419: case 0x0439: out += "j"; break;
+            case 0x041A: case 0x043A: out += "k"; break;
+            case 0x041B: case 0x043B: out += "l"; break;
+            case 0x041C: case 0x043C: out += "m"; break;
+            case 0x041D: case 0x043D: out += "n"; break;
+            case 0x041E: case 0x043E: out += "o"; break;
+            case 0x041F: case 0x043F: out += "p"; break;
+            case 0x0420: case 0x0440: out += "r"; break;
+            case 0x0421: case 0x0441: out += "s"; break;
+            case 0x0422: case 0x0442: out += "t"; break;
+            case 0x0423: case 0x0443: out += "u"; break;
+            case 0x0424: case 0x0444: out += "f"; break;
+            case 0x0425: case 0x0445: out += "h"; break;
+            case 0x0426: case 0x0446: out += "ts"; break;
+            case 0x0427: case 0x0447: out += "ch"; break;
+            case 0x0428: case 0x0448: out += "sh"; break;
+            case 0x0429: case 0x0449: out += "shch"; break;
+            case 0x042A: case 0x044A: out += ""; break;
+            case 0x042B: case 0x044B: out += "y"; break;
+            case 0x042C: case 0x044C: out += ""; break;
+            case 0x042D: case 0x044D: out += "e"; break;
+            case 0x042E: case 0x044E: out += "yu"; break;
+            case 0x042F: case 0x044F: out += "ya"; break;
+            default:
+                if (cp < 128) out.push_back(static_cast<char>(cp));
+                else out += "?";
+                break;
+        }
+    }
+    return out;
+}
+
+void drawTextLineSmart(int x, int y, const std::string& text)
+{
+    if (containsCyrillic(text)) {
+        canvas.print(cyrillicToTranslit(text).c_str());
+    } else {
+        canvas.print(text.c_str());
+    }
+}
+
 void drawNotesView()
 {
     canvas.fillScreen(TFT_BLACK);
@@ -1365,7 +1455,7 @@ void drawNotesView()
         int idx = reader_scroll + row;
         if (idx >= static_cast<int>(reader_lines.size())) break;
         canvas.setCursor(8, 22 + row * 24);
-        canvas.print(reader_lines[idx].c_str());
+        drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
     }
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
@@ -1516,7 +1606,7 @@ void drawReaderView()
         int idx = reader_scroll + row;
         if (idx >= static_cast<int>(reader_lines.size())) break;
         canvas.setCursor(8, 22 + row * 24);
-        canvas.print(reader_lines[idx].c_str());
+        drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
     }
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
@@ -1574,6 +1664,7 @@ void drawReaderSpeed()
     canvas.print(speed_paused ? "PAUSE" : "RUN");
 
     std::string text = currentSpeedText();
+    if (containsCyrillic(text)) text = cyrillicToTranslit(text);
     int cols = utf8Columns(text);
     int size = cols <= 10 ? 3 : 2;
     if (text.size() > 48) text = text.substr(0, 48);
