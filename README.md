@@ -21,7 +21,7 @@ Working blocks:
 - Habits checklist with manual day rollover and 7D/30D stats.
 - Randomizer: `YES / NO / MB`.
 - Settings: theme, sound, timeout, power-save preset, SD/config status.
-- Connections: Wi-Fi AP ping/status MVP.
+- Connections: Wi-Fi AP read-only list/download MVP.
 
 ## Apps
 
@@ -167,7 +167,7 @@ Options:
 
 ### Connections
 
-Current MVP starts a Cardputer Wi-Fi AP and exposes read-only diagnostic endpoints.
+Current MVP starts a Cardputer Wi-Fi AP and exposes read-only SD browsing endpoints.
 
 AP:
 
@@ -180,8 +180,10 @@ Endpoints:
 - `/` simple status page.
 - `/api/ping` returns `OK PING`.
 - `/api/status` returns AP/HTTP/request status.
+- `/api/list?path=/music` lists a whitelisted SD folder.
+- `/api/download?path=/notes/NOTE0001.TXT` downloads a whitelisted SD file.
 
-No file list, download, upload, or delete yet. This step intentionally proves Wi-Fi AP lifecycle before adding SD operations.
+Upload and delete are intentionally not implemented yet.
 
 ## SD card layout
 
@@ -242,7 +244,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 8. Open Files, browse SD and open a known `.TXT` or `.MP3`.
 9. Open Habits, check an item, reopen, confirm state remains.
 10. Open Settings, change theme, reboot if needed, confirm config loads.
-11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, stop with GO.
+11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, and one `/api/download?...`, stop with GO.
 
 ## Known limitations
 
@@ -252,17 +254,16 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Reader bookmarks are RAM-only for now.
 - Music playback is stable enough for MVP but still uses chunked blocking playback.
 - Files is read/open only; delete/rename need confirmation UX later.
-- Connections is ping/status only; file list/download/upload are next steps.
+- Connections is read-only: list/download only. Upload/delete are next steps.
 - Clock does not persist through full power-off.
 - Habits use manual day rollover, not calendar dates.
 - Browser, AI, Mac companion sync, and full Agent are postponed.
 
 ## Near-term roadmap
 
-1. Connections v2: read-only HTTP SD list/download.
-2. Connections v3: safe upload with 8.3 validation and queued SD writes.
-3. Files v2: size/details and unsupported-file screen polish.
-4. Reader v2: persistent bookmarks.
-5. Notes v2: edit existing notes.
-6. Time sync through future Mac/transfer flow.
-7. Agent quick-actions menu after app actions are stable.
+1. Connections v3: safe upload with 8.3 validation and queued SD writes.
+2. Files v2: size/details and unsupported-file screen polish.
+3. Reader v2: persistent bookmarks.
+4. Notes v2: edit existing notes.
+5. Time sync through future Mac/transfer flow.
+6. Agent quick-actions menu after app actions are stable.

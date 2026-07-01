@@ -2726,6 +2726,89 @@ void setConnectionStatus(const char* endpoint, const char* err)
     dirty = true;
 }
 
+bool hexVal(char c, char* out)
+{
+    if (c >= '0' && c <= '9') { *out = c - '0'; return true; }
+    if (c >= 'a' && c <= 'f') { *out = c - 'a' + 10; return true; }
+    if (c >= 'A' && c <= 'F') { *out = c - 'A' + 10; return true; }
+    return false;
+}
+
+std::string urlDecode(const char* text)
+{
+    std::string out;
+    if (!text) return out;
+    for (size_t i = 0; text[i] && out.size() < 160; ++i) {
+        if (text[i] == '%' && text[i + 1] && text[i + 2]) {
+            char hi = 0, lo = 0;
+            if (hexVal(text[i + 1], &hi) && hexVal(text[i + 2], &lo)) {
+                out.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back(text[i] == '+' ? ' ' : text[i]);
+    }
+    return out;
+}
+
+bool getRequestPath(httpd_req_t* req, std::string* api_path, const char* fallback = nullptr)
+{
+    char query[192] = {};
+    char value[176] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "path", value, sizeof(value)) == ESP_OK) {
+        *api_path = urlDecode(value);
+    } else if (fallback) {
+        *api_path = fallback;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+bool isAllowedApiPath(const std::string& path)
+{
+    static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/cardputer"};
+    if (path == "/") return true;
+    for (const char* root : roots) {
+        size_t n = std::strlen(root);
+        if (path == root || (path.rfind(root, 0) == 0 && path.size() > n && path[n] == '/')) return true;
+    }
+    return false;
+}
+
+bool apiPathToSdPath(const std::string& api_path, std::string* full_path, char* err, size_t err_len)
+{
+    if (api_path.empty() || api_path[0] != '/') {
+        snprintf(err, err_len, "bad path");
+        return false;
+    }
+    if (api_path.find("..") != std::string::npos || api_path.find('\\') != std::string::npos) {
+        snprintf(err, err_len, "bad path");
+        return false;
+    }
+    for (char c : api_path) {
+        if (static_cast<unsigned char>(c) < 32) {
+            snprintf(err, err_len, "bad char");
+            return false;
+        }
+    }
+    if (!isAllowedApiPath(api_path)) {
+        snprintf(err, err_len, "path blocked");
+        return false;
+    }
+    *full_path = api_path == "/" ? std::string(MOUNT_POINT) : std::string(MOUNT_POINT) + api_path;
+    return true;
+}
+
+void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, httpd_err_code_t code = HTTPD_400_BAD_REQUEST)
+{
+    setConnectionStatus(endpoint, reason);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send_err(req, code, reason);
+}
+
 esp_err_t connectionRootHandler(httpd_req_t* req)
 {
     ++connection_req_count;
@@ -2734,12 +2817,18 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
     const char* body =
         "<!doctype html><html><body>"
         "<h1>ABVx Connections</h1>"
-        "<p>Wi-Fi AP ping MVP.</p>"
+        "<p>Wi-Fi AP read-only MVP.</p>"
         "<ul>"
         "<li><a href=\"/api/ping\">/api/ping</a></li>"
         "<li><a href=\"/api/status\">/api/status</a></li>"
+        "<li><a href=\"/api/list?path=/\">/api/list?path=/</a></li>"
+        "<li><a href=\"/api/list?path=/music\">/api/list?path=/music</a></li>"
+        "<li><a href=\"/api/list?path=/books\">/api/list?path=/books</a></li>"
+        "<li><a href=\"/api/list?path=/notes\">/api/list?path=/notes</a></li>"
+        "<li><a href=\"/api/list?path=/rec\">/api/list?path=/rec</a></li>"
         "</ul>"
-        "<p>File transfer later.</p>"
+        "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
+        "<p>Upload/delete later.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
 }
@@ -2766,6 +2855,125 @@ esp_err_t connectionStatusHandler(httpd_req_t* req)
              connection_last_error);
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, body);
+}
+
+esp_err_t connectionListHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    std::string api_path;
+    if (!getRequestPath(req, &api_path, "/")) {
+        sendHttpError(req, "/api/list", "missing path");
+        return ESP_OK;
+    }
+    char err[48] = {};
+    std::string full_path;
+    if (!apiPathToSdPath(api_path, &full_path, err, sizeof(err))) {
+        sendHttpError(req, "/api/list", err);
+        return ESP_OK;
+    }
+    if (!initSd()) {
+        sendHttpError(req, "/api/list", "no sd", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    DIR* dir = nullptr;
+    if (api_path != "/") {
+        dir = opendir(full_path.c_str());
+        if (!dir) {
+            snprintf(err, sizeof(err), "open %s", std::strerror(errno));
+            sendHttpError(req, "/api/list", err, HTTPD_500_INTERNAL_SERVER_ERROR);
+            return ESP_OK;
+        }
+    }
+
+    setConnectionStatus("/api/list", "none");
+    httpd_resp_set_type(req, "text/plain");
+    char line[224];
+    snprintf(line, sizeof(line), "OK LIST %s\n", api_path.c_str());
+    httpd_resp_sendstr_chunk(req, line);
+
+    if (api_path == "/") {
+        static const char* roots[] = {"music", "books", "notes", "rec", "cardputer"};
+        for (const char* root : roots) {
+            snprintf(line, sizeof(line), "D 0 %s\n", root);
+            httpd_resp_sendstr_chunk(req, line);
+        }
+        httpd_resp_sendstr_chunk(req, "END\n");
+        httpd_resp_sendstr_chunk(req, nullptr);
+        return ESP_OK;
+    }
+
+    while (dirent* entry = readdir(dir)) {
+        std::string name = entry->d_name;
+        if (isHidden(name)) continue;
+        std::string child = full_path + "/" + name;
+        struct stat st = {};
+        if (stat(child.c_str(), &st) != 0) continue;
+        bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
+        snprintf(line, sizeof(line), "%c %lu %.96s\n", dir_flag ? 'D' : 'F', static_cast<unsigned long>(dir_flag ? 0 : st.st_size), name.c_str());
+        httpd_resp_sendstr_chunk(req, line);
+    }
+    closedir(dir);
+    httpd_resp_sendstr_chunk(req, "END\n");
+    httpd_resp_sendstr_chunk(req, nullptr);
+    return ESP_OK;
+}
+
+esp_err_t connectionDownloadHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    std::string api_path;
+    if (!getRequestPath(req, &api_path, nullptr)) {
+        sendHttpError(req, "/api/download", "missing path");
+        return ESP_OK;
+    }
+    char err[64] = {};
+    std::string full_path;
+    if (!apiPathToSdPath(api_path, &full_path, err, sizeof(err)) || api_path == "/") {
+        sendHttpError(req, "/api/download", err[0] ? err : "bad file");
+        return ESP_OK;
+    }
+    if (!initSd()) {
+        sendHttpError(req, "/api/download", "no sd", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    struct stat st = {};
+    if (stat(full_path.c_str(), &st) != 0 || S_ISDIR(st.st_mode)) {
+        sendHttpError(req, "/api/download", "not file", HTTPD_404_NOT_FOUND);
+        return ESP_OK;
+    }
+    FILE* f = fopen(full_path.c_str(), "rb");
+    if (!f) {
+        snprintf(err, sizeof(err), "open %s", std::strerror(errno));
+        sendHttpError(req, "/api/download", err, HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    setConnectionStatus("/api/download", "none");
+    httpd_resp_set_type(req, "application/octet-stream");
+    char disp[144];
+    snprintf(disp, sizeof(disp), "attachment; filename=\"%.96s\"", baseName(api_path).c_str());
+    httpd_resp_set_hdr(req, "Content-Disposition", disp);
+    uint8_t buf[1024];
+    bool ok = true;
+    while (true) {
+        size_t n = fread(buf, 1, sizeof(buf), f);
+        if (n > 0 && httpd_resp_send_chunk(req, reinterpret_cast<const char*>(buf), n) != ESP_OK) {
+            ok = false;
+            break;
+        }
+        if (n < sizeof(buf)) {
+            if (ferror(f)) ok = false;
+            break;
+        }
+        vTaskDelay(1);
+    }
+    fclose(f);
+    if (ok) {
+        httpd_resp_send_chunk(req, nullptr, 0);
+    } else {
+        setConnectionStatus("/api/download", "send/read failed");
+    }
+    return ESP_OK;
 }
 
 bool ensureConnectionStack(char* err, size_t err_len)
@@ -2839,6 +3047,18 @@ bool startConnectionHttp(char* err, size_t err_len)
     status.method = HTTP_GET;
     status.handler = connectionStatusHandler;
     httpd_register_uri_handler(connection_httpd, &status);
+
+    httpd_uri_t list = {};
+    list.uri = "/api/list";
+    list.method = HTTP_GET;
+    list.handler = connectionListHandler;
+    httpd_register_uri_handler(connection_httpd, &list);
+
+    httpd_uri_t download = {};
+    download.uri = "/api/download";
+    download.method = HTTP_GET;
+    download.handler = connectionDownloadHandler;
+    httpd_register_uri_handler(connection_httpd, &download);
 
     connection_http_on = true;
     return true;
@@ -2918,7 +3138,7 @@ void drawConnections()
         canvas.printf("ERR: %.24s", connection_last_error);
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 122);
-        canvas.print("PING/STATUS ONLY       GO STOP");
+        canvas.print("LIST/DOWNLOAD ONLY     GO STOP");
         canvas.pushSprite(0, 0);
         return;
     }
