@@ -57,7 +57,8 @@ enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, R
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
-enum class TimeMode { Clock = 0, Stopwatch = 1, Timer = 2 };
+enum class TimeMode { Clock = 0, Stopwatch = 1, Timer = 2, Alarm = 3 };
+enum class TimeSetField { Hours = 0, Minutes = 1, Seconds = 2 };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -171,6 +172,13 @@ uint32_t timer_remaining_ms = 300000;
 uint32_t timer_started_ms = 0;
 bool timer_running = false;
 bool timer_done = false;
+TimeSetField time_set_field = TimeSetField::Minutes;
+int alarm_seconds = 7 * 3600;
+bool alarm_enabled = false;
+bool alarm_ringing = false;
+uint32_t last_alarm_day = 999999;
+uint32_t alert_until_ms = 0;
+uint32_t last_alert_beep_ms = 0;
 
 void flushKeyboardEvents()
 {
@@ -1796,6 +1804,38 @@ void drawBigTime(const char* text, int y)
     canvas.print(text);
 }
 
+
+const char* timeFieldName()
+{
+    if (time_set_field == TimeSetField::Hours) return "HOUR";
+    if (time_set_field == TimeSetField::Seconds) return "SEC";
+    return "MIN";
+}
+
+int timeFieldStepSeconds()
+{
+    if (time_set_field == TimeSetField::Hours) return 3600;
+    if (time_set_field == TimeSetField::Seconds) return 1;
+    return 60;
+}
+
+void startAlert(uint32_t ms)
+{
+    alert_until_ms = M5.millis() + ms;
+    last_alert_beep_ms = 0;
+    M5.Speaker.begin();
+}
+
+void updateAlert()
+{
+    uint32_t now = M5.millis();
+    if (alert_until_ms == 0 || now > alert_until_ms) return;
+    if (last_alert_beep_ms == 0 || now - last_alert_beep_ms > 650) {
+        M5.Speaker.tone(880, 160);
+        last_alert_beep_ms = now;
+    }
+}
+
 void drawTimeApp()
 {
     canvas.fillScreen(TFT_BLACK);
@@ -1804,7 +1844,7 @@ void drawTimeApp()
     canvas.setCursor(8, 6);
     canvas.print("TIME");
     canvas.setCursor(88, 6);
-    const char* mode = time_mode == TimeMode::Clock ? "CLOCK" : (time_mode == TimeMode::Stopwatch ? "STOP" : "TIMER");
+    const char* mode = time_mode == TimeMode::Clock ? "CLOCK" : (time_mode == TimeMode::Stopwatch ? "STOP" : (time_mode == TimeMode::Timer ? "TIMER" : "ALARM"));
     canvas.print(mode);
 
     char buf[16];
@@ -1814,29 +1854,39 @@ void drawTimeApp()
         canvas.setTextSize(1);
         canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
         canvas.setCursor(8, 96);
-        canvas.print("UP/DN HOUR  L/R MODE");
+        canvas.printf("SET:%s  1 FIELD", timeFieldName());
     } else if (time_mode == TimeMode::Stopwatch) {
         uint32_t ms = stopwatchDisplayMs();
         uint32_t sec = ms / 1000;
-        snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60));
-        drawBigTime(buf, 48);
+        snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu.%lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60), static_cast<unsigned long>((ms / 100) % 10));
+        canvas.setTextSize(2);
+        canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+        canvas.setCursor(8, 52);
+        canvas.print(buf);
         canvas.setTextSize(1);
         canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
         canvas.setCursor(8, 96);
         canvas.print(stopwatch_running ? "RUN" : "PAUSE");
-    } else {
+    } else if (time_mode == TimeMode::Timer) {
         uint32_t sec = (timerDisplayMs() + 999) / 1000;
-        snprintf(buf, sizeof(buf), "%02lu:%02lu", static_cast<unsigned long>(sec / 60), static_cast<unsigned long>(sec % 60));
+        snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
         canvas.setTextColor(timer_done ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
         canvas.setCursor(8, 96);
-        canvas.print(timer_done ? "DONE" : (timer_running ? "RUN" : "SET"));
+        canvas.printf("%s SET:%s", timer_done ? "DONE" : (timer_running ? "RUN" : "SET"), timeFieldName());
+    } else {
+        formatHMS(alarm_seconds, buf, sizeof(buf));
+        drawBigTime(buf, 48);
+        canvas.setTextSize(1);
+        canvas.setTextColor((alarm_enabled || alarm_ringing) ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
+        canvas.setCursor(8, 96);
+        canvas.printf("%s SET:%s", alarm_ringing ? "RING" : (alarm_enabled ? "ON" : "OFF"), timeFieldName());
     }
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 122);
-    canvas.print("OK START/STOP  UP/DN SET  L/R MODE");
+    canvas.print("OK ON/START  1 FIELD/RST  L/R MODE");
     canvas.pushSprite(0, 0);
 }
 
@@ -1849,11 +1899,22 @@ void updateTimeApp()
         timer_running = false;
         timer_remaining_ms = 0;
         timer_done = true;
-        M5.Speaker.begin();
-        M5.Speaker.tone(880, 180);
+        startAlert(6000);
         dirty = true;
     }
-    if (now - last_time_redraw >= 1000) {
+    updateAlert();
+    if (alarm_enabled && !alarm_ringing) {
+        uint32_t now_clock = elapsedClockSeconds();
+        uint32_t day = now_clock / 86400;
+        int today_sec = now_clock % 86400;
+        if (today_sec >= alarm_seconds && day != last_alarm_day) {
+            alarm_ringing = true;
+            last_alarm_day = day;
+            startAlert(12000);
+            dirty = true;
+        }
+    }
+    if (now - last_time_redraw >= (time_mode == TimeMode::Stopwatch && stopwatch_running ? 100 : 1000)) {
         last_time_redraw = now;
         if (!display_off) dirty = true;
     }
@@ -1985,6 +2046,8 @@ void handleKey(KeyEvent ev)
                 }
             }
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            alarm_ringing = false;
+            alert_until_ms = 0;
             screen = Screen::Launcher;
             blockInput(250);
         }
@@ -2215,9 +2278,9 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::TimeApp) {
         if (ev.key == Key::Left) {
-            time_mode = static_cast<TimeMode>((static_cast<int>(time_mode) + 2) % 3);
+            time_mode = static_cast<TimeMode>((static_cast<int>(time_mode) + 3) % 4);
         } else if (ev.key == Key::Right) {
-            time_mode = static_cast<TimeMode>((static_cast<int>(time_mode) + 1) % 3);
+            time_mode = static_cast<TimeMode>((static_cast<int>(time_mode) + 1) % 4);
         } else if (ev.key == Key::Ok) {
             if (time_mode == TimeMode::Stopwatch) {
                 if (stopwatch_running) {
@@ -2237,25 +2300,43 @@ void handleKey(KeyEvent ev)
                     timer_running = true;
                     timer_done = false;
                 }
+            } else if (time_mode == TimeMode::Alarm) {
+                if (alarm_ringing) {
+                    alarm_ringing = false;
+                    alert_until_ms = 0;
+                } else {
+                    alarm_enabled = !alarm_enabled;
+                    if (alarm_enabled) last_alarm_day = 999999;
+                }
             }
         } else if (ev.key == Key::One) {
             if (time_mode == TimeMode::Stopwatch) {
                 stopwatch_running = false;
                 stopwatch_elapsed_ms = 0;
             } else if (time_mode == TimeMode::Timer) {
-                timer_running = false;
-                timer_done = false;
-                timer_remaining_ms = timer_seconds * 1000UL;
+                if (timer_running || timer_done) {
+                    timer_running = false;
+                    timer_done = false;
+                    timer_remaining_ms = timer_seconds * 1000UL;
+                    alert_until_ms = 0;
+                } else {
+                    time_set_field = static_cast<TimeSetField>((static_cast<int>(time_set_field) + 1) % 3);
+                }
+            } else if (time_mode == TimeMode::Alarm) {
+                time_set_field = static_cast<TimeSetField>((static_cast<int>(time_set_field) + 1) % 3);
             } else {
-                clock_seconds = 0;
-                clock_base_ms = M5.millis();
+                time_set_field = static_cast<TimeSetField>((static_cast<int>(time_set_field) + 1) % 3);
             }
         } else if (ev.key == Key::Up) {
-            if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + 3600) % 86400; clock_base_ms = M5.millis(); }
-            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::min(99 * 60, timer_seconds + 60); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+            int step = timeFieldStepSeconds();
+            if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + step) % 86400; clock_base_ms = M5.millis(); }
+            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::min(23 * 3600 + 59 * 60 + 59, timer_seconds + step); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+            else if (time_mode == TimeMode::Alarm) { alarm_seconds = (alarm_seconds + step) % 86400; alarm_ringing = false; }
         } else if (ev.key == Key::Down) {
-            if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + 86400 - 3600) % 86400; clock_base_ms = M5.millis(); }
-            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::max(60, timer_seconds - 60); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+            int step = timeFieldStepSeconds();
+            if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + 86400 - step) % 86400; clock_base_ms = M5.millis(); }
+            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::max(1, timer_seconds - step); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+            else if (time_mode == TimeMode::Alarm) { alarm_seconds = (alarm_seconds + 86400 - step) % 86400; alarm_ringing = false; }
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);

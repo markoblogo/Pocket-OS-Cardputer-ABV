@@ -32,9 +32,10 @@ Confirmed on real Cardputer ADV:
   - saves files as `NOTE0001.TXT`, `NOTE0002.TXT`, etc.;
   - opens saved notes using the same readable text viewer.
 - Time app:
-  - includes Clock, Stopwatch, and Timer modes;
+  - includes Clock, Stopwatch, Timer, and Alarm modes;
   - Left / Right switches mode;
-  - Stopwatch and Timer use `OK` start/stop and `1` reset;
+  - Stopwatch shows tenths of seconds;
+  - Timer and Alarm support hour/minute/second fields selected with `1`;
   - Clock is manual/runtime-only for now.
 - Record app:
   - stores recordings in `/sdcard/rec`;
@@ -126,10 +127,11 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 ### Time
 
 1. Open Time.
-2. Test Left / Right mode switching: Clock, Stop, Timer.
-3. Stopwatch: `OK` start/stop, `1` reset.
-4. Timer: Up / Down set minutes, `OK` start/stop, `1` reset.
-5. Clock: Up / Down adjusts hours manually.
+2. Test Left / Right mode switching: Clock, Stop, Timer, Alarm.
+3. Stopwatch: `OK` start/stop, `1` reset, tenths visible.
+4. Timer: `1` selects hour/min/sec, Up / Down changes selected field, `OK` start/stop, `1` reset when running/done.
+5. Clock: `1` selects hour/min/sec, Up / Down adjusts manually.
+6. Alarm: `1` selects hour/min/sec, Up / Down adjusts, `OK` arms/disarms or stops ringing.
 
 ### Record
 
