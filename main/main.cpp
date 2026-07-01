@@ -2831,8 +2831,9 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "<li><a href=\"/api/list?path=/notes\">/api/list?path=/notes</a></li>"
         "<li><a href=\"/api/list?path=/rec\">/api/list?path=/rec</a></li>"
         "</ul>"
+        "<form action=\"/api/write-test\" method=\"post\"><button>write-test</button></form>"
         "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
-        "<p>Upload/delete later.</p>"
+        "<p>Upload/delete later. Write-test creates /cardputer/WTEST.TXT.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
 }
@@ -2980,6 +2981,40 @@ esp_err_t connectionDownloadHandler(httpd_req_t* req)
     return ESP_OK;
 }
 
+esp_err_t connectionWriteTestHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/write-test";
+    if (!ensureConfigDir()) {
+        sendHttpError(req, endpoint, "no sd/dir", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    const char* path = "/sdcard/cardputer/WTEST.TXT";
+    FILE* f = fopen(path, "wb");
+    if (!f) {
+        char err[64];
+        snprintf(err, sizeof(err), "open %s", std::strerror(errno));
+        sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    const char* body = "write test\n";
+    size_t wanted = std::strlen(body);
+    size_t n = fwrite(body, 1, wanted, f);
+    bool ok = n == wanted;
+    if (fflush(f) != 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        sendHttpError(req, endpoint, "write failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    setConnectionStatus(endpoint, "none");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "OK WRITE\npath=/cardputer/WTEST.TXT\n");
+}
+
 bool ensureConnectionStack(char* err, size_t err_len)
 {
     if (connection_stack_ready) return true;
@@ -3064,6 +3099,12 @@ bool startConnectionHttp(char* err, size_t err_len)
     download.handler = connectionDownloadHandler;
     httpd_register_uri_handler(connection_httpd, &download);
 
+    httpd_uri_t write_test = {};
+    write_test.uri = "/api/write-test";
+    write_test.method = HTTP_POST;
+    write_test.handler = connectionWriteTestHandler;
+    httpd_register_uri_handler(connection_httpd, &write_test);
+
     connection_http_on = true;
     return true;
 }
@@ -3142,7 +3183,7 @@ void drawConnections()
         canvas.printf("ERR: %.24s", connection_last_error);
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 122);
-        canvas.print("LIST/DOWNLOAD ONLY     GO STOP");
+        canvas.print("LIST/DL/WRTEST       GO STOP");
         canvas.pushSprite(0, 0);
         return;
     }

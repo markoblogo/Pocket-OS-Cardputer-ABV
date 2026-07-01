@@ -182,6 +182,7 @@ Endpoints:
 - `/api/status` returns AP/HTTP/request status.
 - `/api/list?path=/music` lists a whitelisted SD folder.
 - `/api/download?path=/notes/NOTE0001.TXT` downloads a whitelisted SD file.
+- `POST /api/write-test` writes `/sdcard/cardputer/WTEST.TXT` for SD write diagnostics.
 
 Upload and delete are intentionally not implemented yet.
 
@@ -244,7 +245,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 8. Open Files, browse SD and open a known `.TXT` or `.MP3`.
 9. Open Habits, check an item, reopen, confirm state remains.
 10. Open Settings, change theme, reboot if needed, confirm config loads.
-11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, and one `/api/download?...`, stop with GO.
+11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, one `/api/download?...`, and `POST /api/write-test`, stop with GO.
 
 ## Known limitations
 
@@ -254,14 +255,14 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Reader bookmarks are RAM-only for now.
 - Music playback is stable enough for MVP but still uses chunked blocking playback.
 - Files is read/open only; delete/rename need confirmation UX later.
-- Connections is read-only: list/download only. Upload/delete are next steps.
+- Connections supports list/download plus a small write-test endpoint. Full upload/delete are next steps.
 - Clock does not persist through full power-off.
 - Habits use manual day rollover, not calendar dates.
 - Browser, AI, Mac companion sync, and full Agent are postponed.
 
 ## Near-term roadmap
 
-1. Connections v3: safe upload with 8.3 validation and queued SD writes.
+1. Connections v3: safe upload with 8.3 validation and queued SD writes after write-test is confirmed stable.
 2. Files v2: size/details and unsupported-file screen polish.
 3. Reader v2: persistent bookmarks.
 4. Notes v2: edit existing notes.
