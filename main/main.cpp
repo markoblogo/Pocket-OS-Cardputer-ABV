@@ -1351,12 +1351,12 @@ int batteryPercent()
 void drawBatteryWidget(int x, int y)
 {
     int level = batteryPercent();
-    canvas.drawLine(x + 5, y, x, y + 8, TFT_WHITE);
-    canvas.drawLine(x, y + 8, x + 6, y + 8, TFT_WHITE);
-    canvas.drawLine(x + 6, y + 8, x + 2, y + 16, TFT_WHITE);
-    canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    canvas.setCursor(x + 12, y + 4);
+    canvas.drawLine(x + 4, y, x, y + 7, TFT_WHITE);
+    canvas.drawLine(x, y + 7, x + 5, y + 7, TFT_WHITE);
+    canvas.drawLine(x + 5, y + 7, x + 2, y + 13, TFT_WHITE);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(x + 11, y);
     if (level >= 0) canvas.printf("%d%%", level);
     else canvas.print("--%");
 }
@@ -1403,7 +1403,8 @@ void drawLauncher()
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(8, 8);
     canvas.println("ABVx");
-    drawBatteryWidget(176, 6);
+    drawBatteryWidget(166, 8);
+    canvas.setTextSize(2);
     int start = std::max(0, launcher_index - 1);
     start = std::min(start, 3);
     for (int i = start; i < std::min(6, start + 3); ++i) {
