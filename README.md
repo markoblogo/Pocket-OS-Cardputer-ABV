@@ -31,6 +31,11 @@ Confirmed on real Cardputer ADV:
   - editor supports `LAT` mode and `RU` translit-save mode toggled by `1`;
   - saves files as `NOTE0001.TXT`, `NOTE0002.TXT`, etc.;
   - opens saved notes using the same readable text viewer.
+- Time app:
+  - includes Clock, Stopwatch, and Timer modes;
+  - Left / Right switches mode;
+  - Stopwatch and Timer use `OK` start/stop and `1` reset;
+  - Clock is manual/runtime-only for now.
 - Record app:
   - stores recordings in `/sdcard/rec`;
   - first list item `NEW REC` starts recording;
@@ -118,6 +123,14 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 6. Confirm `NOTE0001.TXT` appears.
 7. Press `OK` on the saved note to read it.
 
+### Time
+
+1. Open Time.
+2. Test Left / Right mode switching: Clock, Stop, Timer.
+3. Stopwatch: `OK` start/stop, `1` reset.
+4. Timer: Up / Down set minutes, `OK` start/stop, `1` reset.
+5. Clock: Up / Down adjusts hours manually.
+
 ### Record
 
 1. Open Record.
@@ -135,5 +148,6 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Notes input supports latin text plus RU transliteration save mode; the edit screen shows latin translit because the current large font does not render Cyrillic. Punctuation is still limited by Cardputer arrow-key mappings.
 - Recordings use `/sdcard/rec` instead of `/sdcard/recordings` because FATFS long filenames are not enabled yet.
 - Music playback is chunk/blocking-based; controls may have small latency.
+- Time clock is runtime/manual only; no Mac sync or RTC persistence yet.
 - Screen-off playback/power optimization is not finalized yet.
 - Dev diagnostics were removed from the normal build after proving MP3 decode/speaker path.

@@ -53,10 +53,11 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, Message };
+enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
+enum class TimeMode { Clock = 0, Stopwatch = 1, Timer = 2 };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -159,6 +160,17 @@ int speed_wpm = SPEED_WPM_MIN;
 SpeedMode speed_mode = SpeedMode::OneWord;
 bool speed_paused = true;
 uint32_t speed_next_ms = 0;
+TimeMode time_mode = TimeMode::Clock;
+int clock_seconds = 0;
+uint32_t clock_base_ms = 0;
+bool stopwatch_running = false;
+uint32_t stopwatch_started_ms = 0;
+uint32_t stopwatch_elapsed_ms = 0;
+int timer_seconds = 300;
+uint32_t timer_remaining_ms = 300000;
+uint32_t timer_started_ms = 0;
+bool timer_running = false;
+bool timer_done = false;
 
 void flushKeyboardEvents()
 {
@@ -1749,6 +1761,104 @@ void drawReaderSpeed()
     canvas.pushSprite(0, 0);
 }
 
+
+uint32_t elapsedClockSeconds()
+{
+    return clock_seconds + (M5.millis() - clock_base_ms) / 1000;
+}
+
+void formatHMS(uint32_t total, char* out, size_t out_len)
+{
+    uint32_t h = (total / 3600) % 24;
+    uint32_t m = (total / 60) % 60;
+    uint32_t sec = total % 60;
+    snprintf(out, out_len, "%02lu:%02lu:%02lu", static_cast<unsigned long>(h), static_cast<unsigned long>(m), static_cast<unsigned long>(sec));
+}
+
+uint32_t stopwatchDisplayMs()
+{
+    return stopwatch_elapsed_ms + (stopwatch_running ? M5.millis() - stopwatch_started_ms : 0);
+}
+
+uint32_t timerDisplayMs()
+{
+    if (!timer_running) return timer_remaining_ms;
+    uint32_t elapsed = M5.millis() - timer_started_ms;
+    return elapsed >= timer_remaining_ms ? 0 : timer_remaining_ms - elapsed;
+}
+
+void drawBigTime(const char* text, int y)
+{
+    canvas.setTextSize(3);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    int width = std::strlen(text) * 18;
+    canvas.setCursor(std::max(0, (SCREEN_W - width) / 2), y);
+    canvas.print(text);
+}
+
+void drawTimeApp()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 6);
+    canvas.print("TIME");
+    canvas.setCursor(88, 6);
+    const char* mode = time_mode == TimeMode::Clock ? "CLOCK" : (time_mode == TimeMode::Stopwatch ? "STOP" : "TIMER");
+    canvas.print(mode);
+
+    char buf[16];
+    if (time_mode == TimeMode::Clock) {
+        formatHMS(elapsedClockSeconds(), buf, sizeof(buf));
+        drawBigTime(buf, 48);
+        canvas.setTextSize(1);
+        canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        canvas.setCursor(8, 96);
+        canvas.print("UP/DN HOUR  L/R MODE");
+    } else if (time_mode == TimeMode::Stopwatch) {
+        uint32_t ms = stopwatchDisplayMs();
+        uint32_t sec = ms / 1000;
+        snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60));
+        drawBigTime(buf, 48);
+        canvas.setTextSize(1);
+        canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        canvas.setCursor(8, 96);
+        canvas.print(stopwatch_running ? "RUN" : "PAUSE");
+    } else {
+        uint32_t sec = (timerDisplayMs() + 999) / 1000;
+        snprintf(buf, sizeof(buf), "%02lu:%02lu", static_cast<unsigned long>(sec / 60), static_cast<unsigned long>(sec % 60));
+        drawBigTime(buf, 48);
+        canvas.setTextSize(1);
+        canvas.setTextColor(timer_done ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
+        canvas.setCursor(8, 96);
+        canvas.print(timer_done ? "DONE" : (timer_running ? "RUN" : "SET"));
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 122);
+    canvas.print("OK START/STOP  UP/DN SET  L/R MODE");
+    canvas.pushSprite(0, 0);
+}
+
+void updateTimeApp()
+{
+    if (screen != Screen::TimeApp) return;
+    static uint32_t last_time_redraw = 0;
+    uint32_t now = M5.millis();
+    if (timer_running && now - timer_started_ms >= timer_remaining_ms) {
+        timer_running = false;
+        timer_remaining_ms = 0;
+        timer_done = true;
+        M5.Speaker.begin();
+        M5.Speaker.tone(880, 180);
+        dirty = true;
+    }
+    if (now - last_time_redraw >= 1000) {
+        last_time_redraw = now;
+        if (!display_off) dirty = true;
+    }
+}
+
 void drawMessage()
 {
     canvas.fillScreen(TFT_BLACK);
@@ -1781,6 +1891,7 @@ void drawIfDirty()
     else if (screen == Screen::RecorderList) drawRecorderList();
     else if (screen == Screen::RecorderRecording) drawRecorderRecording();
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
+    else if (screen == Screen::TimeApp) drawTimeApp();
     else drawMessage();
     dirty = false;
 }
@@ -1849,6 +1960,7 @@ void handleKey(KeyEvent ev)
             else if (launcher_index == 1) { scanBooks(); screen = Screen::ReaderList; }
             else if (launcher_index == 2) { scanNotes(); screen = Screen::NotesList; }
             else if (launcher_index == 3) { scanRecordings(); screen = Screen::RecorderList; }
+            else if (launcher_index == 4) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; blockInput(250); }
             else { message_title = "Coming soon"; message_body = "Music/Reader/Record"; message_returns_music = false; screen = Screen::Message; }
         }
         dirty = true;
@@ -2101,6 +2213,57 @@ void handleKey(KeyEvent ev)
         return;
     }
 
+    if (screen == Screen::TimeApp) {
+        if (ev.key == Key::Left) {
+            time_mode = static_cast<TimeMode>((static_cast<int>(time_mode) + 2) % 3);
+        } else if (ev.key == Key::Right) {
+            time_mode = static_cast<TimeMode>((static_cast<int>(time_mode) + 1) % 3);
+        } else if (ev.key == Key::Ok) {
+            if (time_mode == TimeMode::Stopwatch) {
+                if (stopwatch_running) {
+                    stopwatch_elapsed_ms = stopwatchDisplayMs();
+                    stopwatch_running = false;
+                } else {
+                    stopwatch_started_ms = M5.millis();
+                    stopwatch_running = true;
+                }
+            } else if (time_mode == TimeMode::Timer) {
+                if (timer_running) {
+                    timer_remaining_ms = timerDisplayMs();
+                    timer_running = false;
+                } else {
+                    if (timer_remaining_ms == 0) timer_remaining_ms = timer_seconds * 1000UL;
+                    timer_started_ms = M5.millis();
+                    timer_running = true;
+                    timer_done = false;
+                }
+            }
+        } else if (ev.key == Key::One) {
+            if (time_mode == TimeMode::Stopwatch) {
+                stopwatch_running = false;
+                stopwatch_elapsed_ms = 0;
+            } else if (time_mode == TimeMode::Timer) {
+                timer_running = false;
+                timer_done = false;
+                timer_remaining_ms = timer_seconds * 1000UL;
+            } else {
+                clock_seconds = 0;
+                clock_base_ms = M5.millis();
+            }
+        } else if (ev.key == Key::Up) {
+            if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + 3600) % 86400; clock_base_ms = M5.millis(); }
+            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::min(99 * 60, timer_seconds + 60); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+        } else if (ev.key == Key::Down) {
+            if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + 86400 - 3600) % 86400; clock_base_ms = M5.millis(); }
+            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::max(60, timer_seconds - 60); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
     if (screen == Screen::Message) {
         if (M5.millis() < message_hold_until_ms) return;
         if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
@@ -2142,6 +2305,7 @@ extern "C" void app_main(void)
         updateRecording();
         updateRecordingPlayback();
         updateSpeedReader();
+        updateTimeApp();
         updatePower();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
