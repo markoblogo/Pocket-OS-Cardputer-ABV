@@ -706,6 +706,10 @@ std::string translitToRussian(const std::string& src)
     for (size_t i = 0; i < src.size();) {
         unsigned char c = static_cast<unsigned char>(src[i]);
         if (c < 128 && std::isalpha(c)) {
+            if (consumeTranslit(src, i, "etot")) { out += "этот"; i += 4; continue; }
+            if (consumeTranslit(src, i, "eto")) { out += "это"; i += 3; continue; }
+            if (consumeTranslit(src, i, "eta")) { out += "эта"; i += 3; continue; }
+            if (consumeTranslit(src, i, "eti")) { out += "эти"; i += 3; continue; }
             if (consumeTranslit(src, i, "shch")) { out += "щ"; i += 4; continue; }
             if (consumeTranslit(src, i, "yo")) { out += "ё"; i += 2; continue; }
             if (consumeTranslit(src, i, "yu")) { out += "ю"; i += 2; continue; }
@@ -1385,73 +1389,84 @@ bool containsCyrillic(const std::string& text)
     return false;
 }
 
-void drawSegmentGlyph(int x, int y, int scale, const char* segs, uint16_t color)
+const char** cyrillicBitmap(uint32_t cp)
 {
-    const int t = std::max(1, scale);
-    auto line = [&](int x1, int y1, int x2, int y2) {
-        canvas.drawLine(x + x1 * scale, y + y1 * scale, x + x2 * scale, y + y2 * scale, color);
-        if (t > 1) canvas.drawLine(x + x1 * scale, y + y1 * scale + 1, x + x2 * scale, y + y2 * scale + 1, color);
-    };
-    for (const char* p = segs; *p; ++p) {
-        switch (*p) {
-            case 'A': line(0, 0, 4, 0); break;
-            case 'B': line(0, 3, 4, 3); break;
-            case 'C': line(0, 7, 4, 7); break;
-            case 'D': line(0, 0, 0, 3); break;
-            case 'E': line(4, 0, 4, 3); break;
-            case 'F': line(0, 3, 0, 7); break;
-            case 'G': line(4, 3, 4, 7); break;
-            case 'H': line(0, 0, 4, 7); break;
-            case 'I': line(4, 0, 0, 7); break;
-            case 'J': line(2, 0, 2, 7); break;
-            case 'K': line(0, 3, 4, 0); break;
-            case 'L': line(0, 3, 4, 7); break;
-        }
+    static const char* A[]  = {"01110","10001","10001","11111","10001","10001","10001"};
+    static const char* Be[] = {"11111","10000","10000","11110","10001","10001","11110"};
+    static const char* Ve[] = {"11110","10001","10001","11110","10001","10001","11110"};
+    static const char* Ge[] = {"11111","10000","10000","10000","10000","10000","10000"};
+    static const char* De[] = {"01110","01010","01010","01010","01010","11111","10001"};
+    static const char* E[]  = {"11111","10000","10000","11110","10000","10000","11111"};
+    static const char* Zh[] = {"10101","10101","01110","00100","01110","10101","10101"};
+    static const char* Ze[] = {"11110","00001","00001","01110","00001","00001","11110"};
+    static const char* I[]  = {"10001","10011","10101","10101","11001","10001","10001"};
+    static const char* K[]  = {"10001","10010","10100","11000","10100","10010","10001"};
+    static const char* L[]  = {"00111","01001","01001","01001","01001","10001","10001"};
+    static const char* M[]  = {"10001","11011","10101","10101","10001","10001","10001"};
+    static const char* N[]  = {"10001","10001","10001","11111","10001","10001","10001"};
+    static const char* O[]  = {"01110","10001","10001","10001","10001","10001","01110"};
+    static const char* P[]  = {"11111","10001","10001","10001","10001","10001","10001"};
+    static const char* R[]  = {"11110","10001","10001","11110","10000","10000","10000"};
+    static const char* S[]  = {"01111","10000","10000","10000","10000","10000","01111"};
+    static const char* T[]  = {"11111","00100","00100","00100","00100","00100","00100"};
+    static const char* U[]  = {"10001","10001","10001","01111","00001","10001","01110"};
+    static const char* F[]  = {"00100","01110","10101","10101","01110","00100","00100"};
+    static const char* H[]  = {"10001","10001","01010","00100","01010","10001","10001"};
+    static const char* Ts[]= {"10010","10010","10010","10010","10010","11111","00001"};
+    static const char* Ch[]= {"10001","10001","10001","01111","00001","00001","00001"};
+    static const char* Sh[]= {"10101","10101","10101","10101","10101","10101","11111"};
+    static const char* Sch[]={"10101","10101","10101","10101","10101","11111","00001"};
+    static const char* Y[]  = {"10001","10001","10001","11101","10011","10011","11101"};
+    static const char* Soft[]={"10000","10000","10000","11110","10001","10001","11110"};
+    static const char* Ee[] = {"11110","00001","00001","01111","00001","00001","11110"};
+    static const char* Yu[]= {"10010","10101","10101","11101","10101","10101","10010"};
+    static const char* Ya[]= {"01111","10001","10001","01111","00101","01001","10001"};
+    static const char* Ii[]= {"00100","00000","01100","00100","00100","00100","01110"};
+    static const char* Ie[]= {"01111","10000","10000","11110","10000","10000","01111"};
+    switch (cp) {
+        case 0x0410: case 0x0430: return A;
+        case 0x0411: case 0x0431: return Be;
+        case 0x0412: case 0x0432: return Ve;
+        case 0x0413: case 0x0433: case 0x0490: case 0x0491: return Ge;
+        case 0x0414: case 0x0434: return De;
+        case 0x0415: case 0x0435: case 0x0401: case 0x0451: return E;
+        case 0x0416: case 0x0436: return Zh;
+        case 0x0417: case 0x0437: return Ze;
+        case 0x0418: case 0x0438: case 0x0419: case 0x0439: return I;
+        case 0x041A: case 0x043A: return K;
+        case 0x041B: case 0x043B: return L;
+        case 0x041C: case 0x043C: return M;
+        case 0x041D: case 0x043D: return N;
+        case 0x041E: case 0x043E: return O;
+        case 0x041F: case 0x043F: return P;
+        case 0x0420: case 0x0440: return R;
+        case 0x0421: case 0x0441: return S;
+        case 0x0422: case 0x0442: return T;
+        case 0x0423: case 0x0443: return U;
+        case 0x0424: case 0x0444: return F;
+        case 0x0425: case 0x0445: return H;
+        case 0x0426: case 0x0446: return Ts;
+        case 0x0427: case 0x0447: return Ch;
+        case 0x0428: case 0x0448: return Sh;
+        case 0x0429: case 0x0449: return Sch;
+        case 0x042A: case 0x044A: case 0x042C: case 0x044C: return Soft;
+        case 0x042B: case 0x044B: return Y;
+        case 0x042D: case 0x044D: return Ee;
+        case 0x042E: case 0x044E: return Yu;
+        case 0x042F: case 0x044F: return Ya;
+        case 0x0406: case 0x0456: case 0x0407: case 0x0457: return Ii;
+        case 0x0404: case 0x0454: return Ie;
+        default: return nullptr;
     }
 }
 
-const char* cyrillicSegments(uint32_t cp)
+void drawBitmapGlyph(int x, int y, int scale, const char** rows, uint16_t color)
 {
-    switch (cp) {
-        case 0x0410: case 0x0430: return "ABDFEG";       // А
-        case 0x0411: case 0x0431: return "ADFBCG";        // Б
-        case 0x0412: case 0x0432: return "ADFBEGCG";      // В
-        case 0x0413: case 0x0433: return "ADF";           // Г
-        case 0x0414: case 0x0434: return "ADEFGLC";       // Д approx
-        case 0x0415: case 0x0435: return "ADFBC";         // Е
-        case 0x0401: case 0x0451: return "ADFBC";         // Ё approx
-        case 0x0416: case 0x0436: return "HIDJEGF";       // Ж
-        case 0x0417: case 0x0437: return "ABEGC";         // З
-        case 0x0418: case 0x0438: return "DFGEH";         // И
-        case 0x0419: case 0x0439: return "DFGEH";         // Й approx
-        case 0x041A: case 0x043A: return "DFKL";          // К
-        case 0x041B: case 0x043B: return "ADEF";          // Л approx
-        case 0x041C: case 0x043C: return "DFGEHI";        // М
-        case 0x041D: case 0x043D: return "DFBEG";         // Н
-        case 0x041E: case 0x043E: return "ADFEGC";        // О
-        case 0x041F: case 0x043F: return "ADFEG";         // П
-        case 0x0420: case 0x0440: return "ADFBE";         // Р
-        case 0x0421: case 0x0441: return "ADFC";          // С
-        case 0x0422: case 0x0442: return "AJ";            // Т
-        case 0x0423: case 0x0443: return "DEBCG";         // У approx
-        case 0x0424: case 0x0444: return "ABCFDGJ";       // Ф approx
-        case 0x0425: case 0x0445: return "HI";            // Х
-        case 0x0426: case 0x0446: return "DFGC";          // Ц approx
-        case 0x0427: case 0x0447: return "EGB";           // Ч
-        case 0x0428: case 0x0448: return "DFGCJ";         // Ш
-        case 0x0429: case 0x0449: return "DFGCJL";        // Щ approx
-        case 0x042A: case 0x044A: return "DFBCG";         // Ъ approx
-        case 0x042B: case 0x044B: return "DFBCGJ";        // Ы approx
-        case 0x042C: case 0x044C: return "DFBCG";         // Ь
-        case 0x042D: case 0x044D: return "ABEGC";         // Э approx
-        case 0x042E: case 0x044E: return "DFBEGC";        // Ю approx
-        case 0x042F: case 0x044F: return "ABEGL";         // Я approx
-        // Ukrainian extras
-        case 0x0406: case 0x0456: return "J";             // І
-        case 0x0407: case 0x0457: return "J";             // Ї approx
-        case 0x0404: case 0x0454: return "ADFC";          // Є approx
-        case 0x0490: case 0x0491: return "ADF";           // Ґ approx
-        default: return nullptr;
+    int dot = std::max(1, scale - 1);
+    for (int yy = 0; yy < 7; ++yy) {
+        for (int xx = 0; xx < 5; ++xx) {
+            if (rows[yy][xx] == '1') canvas.fillRect(x + xx * scale, y + yy * scale, dot, dot, color);
+        }
     }
 }
 
@@ -1463,13 +1478,10 @@ void drawMixedTextLine(int x, int y, const std::string& text, int scale = 2)
     for (size_t i = 0; i < text.size();) {
         size_t before = i;
         uint32_t cp = nextUtf8Codepoint(text, i);
-        if (cp == ' ') {
-            cx += 6 * scale;
-            continue;
-        }
-        const char* seg = cyrillicSegments(cp);
-        if (seg) {
-            drawSegmentGlyph(cx, y + 1, scale, seg, TFT_WHITE);
+        if (cp == ' ') { cx += 6 * scale; continue; }
+        const char** glyph = cyrillicBitmap(cp);
+        if (glyph) {
+            drawBitmapGlyph(cx, y + 2, scale, glyph, TFT_WHITE);
             cx += 6 * scale;
         } else if (cp < 128) {
             char b[2] = {static_cast<char>(cp), 0};
@@ -1484,6 +1496,7 @@ void drawMixedTextLine(int x, int y, const std::string& text, int scale = 2)
         if (cx > SCREEN_W - 8) break;
     }
 }
+
 void drawTextLineSmart(int x, int y, const std::string& text)
 {
     if (containsCyrillic(text)) {
