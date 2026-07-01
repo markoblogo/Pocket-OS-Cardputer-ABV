@@ -39,6 +39,8 @@ constexpr const char* HABITS_DIR = "/sdcard/habits";
 constexpr const char* HABITS_FILE = "/sdcard/habits/HABITS.TXT";
 constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
 constexpr const char* HABIT_STATE_FILE = "/sdcard/habits/STATE.TXT";
+constexpr const char* CONFIG_DIR = "/sdcard/cardputer";
+constexpr const char* CONFIG_FILE = "/sdcard/cardputer/CONFIG.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 8 * 1024;
@@ -58,12 +60,13 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Message };
+enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
 enum class TimeMode { Clock = 0, Stopwatch = 1, Timer = 2, Alarm = 3 };
 enum class TimeSetField { Hours = 0, Minutes = 1, Seconds = 2 };
+enum class ThemeMode { White = 0, Green = 1, Yellow = 2, Invert = 3 };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -141,6 +144,9 @@ int habit_day = 1;
 int habit_stats_window = 7;
 int habits_manage_cursor = 0;
 std::string habit_input;
+int settings_cursor = 0;
+ThemeMode theme_mode = ThemeMode::White;
+std::string config_status = "RAM";
 int selected_track = 0;
 std::string override_music_path;
 int selected_book = 0;
@@ -209,6 +215,89 @@ uint32_t last_alarm_day = 999999;
 uint32_t alert_until_ms = 0;
 uint32_t last_alert_beep_ms = 0;
 std::string random_result = "READY";
+
+bool initSd();
+
+uint16_t uiBg()
+{
+    return theme_mode == ThemeMode::Invert ? 0xFFFF : 0x0000;
+}
+
+uint16_t uiFg()
+{
+    if (theme_mode == ThemeMode::Green) return 0x07E0;
+    if (theme_mode == ThemeMode::Yellow) return 0xFFE0;
+    return theme_mode == ThemeMode::Invert ? 0x0000 : 0xFFFF;
+}
+
+uint16_t uiDim()
+{
+    if (theme_mode == ThemeMode::Green) return 0x05E0;
+    if (theme_mode == ThemeMode::Yellow) return 0xBDE0;
+    return theme_mode == ThemeMode::Invert ? 0x8410 : 0x7BEF;
+}
+
+const char* themeName()
+{
+    if (theme_mode == ThemeMode::Green) return "GREEN";
+    if (theme_mode == ThemeMode::Yellow) return "YELLOW";
+    if (theme_mode == ThemeMode::Invert) return "INVERT";
+    return "WHITE";
+}
+
+void setThemeByName(const std::string& value)
+{
+    if (value == "GREEN") theme_mode = ThemeMode::Green;
+    else if (value == "YELLOW") theme_mode = ThemeMode::Yellow;
+    else if (value == "INVERT") theme_mode = ThemeMode::Invert;
+    else theme_mode = ThemeMode::White;
+}
+
+bool ensureConfigDir()
+{
+    if (!initSd()) {
+        config_status = "RAM";
+        return false;
+    }
+    errno = 0;
+    if (mkdir(CONFIG_DIR, 0775) != 0 && errno != EEXIST) {
+        config_status = "RAM";
+        return false;
+    }
+    return true;
+}
+
+void saveConfig()
+{
+    if (!ensureConfigDir()) return;
+    FILE* f = fopen(CONFIG_FILE, "wb");
+    if (!f) {
+        config_status = "RAM";
+        return;
+    }
+    fprintf(f, "THEME=%s\n", themeName());
+    fclose(f);
+    config_status = "SAVED";
+}
+
+void loadConfig()
+{
+    config_status = "RAM";
+    if (!ensureConfigDir()) return;
+    FILE* f = fopen(CONFIG_FILE, "rb");
+    if (!f) {
+        saveConfig();
+        return;
+    }
+    char line[80];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s = line;
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (s.rfind("THEME=", 0) == 0) setThemeByName(s.substr(6));
+    }
+    fclose(f);
+    config_status = "LOADED";
+}
 
 void flushKeyboardEvents()
 {
@@ -303,7 +392,7 @@ void setBrightnessNormal()
 
 void drawSplash()
 {
-    M5.Display.fillScreen(TFT_BLACK);
+    M5.Display.fillScreen(0x0000);
     M5.Display.setBrightness(0);
     M5.Display.pushImage(0, 0, 240, 135, image_data_logo);
     for (int b = 0; b <= 100; b += 10) {
@@ -1371,8 +1460,8 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
 {
     if (display_off || pcm.empty()) return;
     const int x = 8, y = 76, w = 224, h = 38;
-    canvas.fillRect(x, y, w, h, TFT_BLACK);
-    canvas.drawRect(x, y, w, h, TFT_DARKGREY);
+    canvas.fillRect(x, y, w, h, uiBg());
+    canvas.drawRect(x, y, w, h, uiDim());
     const int mid = y + h / 2;
     const size_t frames = pcm.size() / std::max(1, channels);
     if (frames == 0) return;
@@ -1383,7 +1472,7 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
         int sample = pcm[std::min(idx, pcm.size() - 1)] >> 9;
         int yy = std::max(y + 1, std::min(y + h - 2, mid - sample));
         int xx = x + px;
-        if (px > 0) canvas.drawLine(prev_x, prev_y, xx, yy, TFT_WHITE);
+        if (px > 0) canvas.drawLine(prev_x, prev_y, xx, yy, uiFg());
         prev_x = xx;
         prev_y = yy;
     }
@@ -1610,11 +1699,11 @@ int batteryPercent()
 void drawBatteryWidget(int x, int y)
 {
     int level = batteryPercent();
-    canvas.drawLine(x + 4, y, x, y + 7, TFT_WHITE);
-    canvas.drawLine(x, y + 7, x + 5, y + 7, TFT_WHITE);
-    canvas.drawLine(x + 5, y + 7, x + 2, y + 13, TFT_WHITE);
+    canvas.drawLine(x + 4, y, x, y + 7, uiFg());
+    canvas.drawLine(x, y + 7, x + 5, y + 7, uiFg());
+    canvas.drawLine(x + 5, y + 7, x + 2, y + 13, uiFg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(x + 11, y);
     if (level >= 0) canvas.printf("%d%%", level);
     else canvas.print("--%");
@@ -1656,11 +1745,11 @@ bool sdUsage(uint64_t* total, uint64_t* free_bytes)
 
 void drawLauncher()
 {
-    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS"};
+    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("ABVx");
     drawBatteryWidget(166, 8);
@@ -1669,11 +1758,11 @@ void drawLauncher()
     start = std::min(start, std::max(0, launcher_count - 3));
     for (int i = start; i < std::min(launcher_count, start + 3); ++i) {
         canvas.setCursor(8, 38 + (i - start) * 24);
-        canvas.setTextColor(i == launcher_index ? TFT_BLACK : TFT_WHITE, i == launcher_index ? TFT_WHITE : TFT_BLACK);
+        canvas.setTextColor(i == launcher_index ? uiBg() : uiFg(), i == launcher_index ? uiFg() : uiBg());
         canvas.printf("%c %s", i == launcher_index ? '>' : ' ', labels[i]);
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN   GO MUSIC");
     canvas.pushSprite(0, 0);
@@ -1681,9 +1770,9 @@ void drawLauncher()
 
 void drawRandomizer()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("RANDOM");
     canvas.setTextSize(4);
@@ -1691,7 +1780,7 @@ void drawRandomizer()
     canvas.setCursor(result_x, 50);
     canvas.print(random_result.c_str());
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK ROLL   GO BACK");
     canvas.pushSprite(0, 0);
@@ -1699,16 +1788,16 @@ void drawRandomizer()
 
 void drawHabitsList()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("HABITS TODAY");
     if (habits.empty()) {
         canvas.setCursor(8, 48);
         canvas.print("NO HABITS");
         canvas.setTextSize(1);
-        canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 78);
         canvas.print("/sdcard/habits");
     } else {
@@ -1719,12 +1808,12 @@ void drawHabitsList()
         for (int i = start; i < end; ++i) {
             const auto& h = habits[i];
             canvas.setCursor(8, 34 + (i - start) * 21);
-            canvas.setTextColor(i == habits_cursor ? TFT_BLACK : TFT_WHITE, i == habits_cursor ? TFT_WHITE : TFT_BLACK);
+            canvas.setTextColor(i == habits_cursor ? uiBg() : uiFg(), i == habits_cursor ? uiFg() : uiBg());
             canvas.printf("%c[%c] %.10s", i == habits_cursor ? '>' : ' ', h.done ? 'x' : ' ', h.title.c_str());
         }
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 112);
     canvas.print("L MANAGE  R STATS  1 NEW");
     canvas.setCursor(8, 122);
@@ -1734,9 +1823,9 @@ void drawHabitsList()
 
 void drawHabitsStats()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("STATS %dD", habit_stats_window);
     int days = std::max(1, std::min(habit_stats_window, habit_day));
@@ -1745,7 +1834,7 @@ void drawHabitsStats()
     int total_possible = std::max(1, days * static_cast<int>(habits.size()));
     int rows = std::min(3, static_cast<int>(habits.size()));
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 28);
     canvas.printf("last %d internal days", days);
     canvas.setTextSize(2);
@@ -1754,14 +1843,14 @@ void drawHabitsStats()
         total_done += done;
         int pct = days > 0 ? (done * 100) / days : 0;
         canvas.setCursor(8, 44 + i * 22);
-        canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+        canvas.setTextColor(uiFg(), uiBg());
         canvas.printf("%.8s %d/%d %d%%", habits[i].title.c_str(), done, days, pct);
     }
     for (int i = rows; i < static_cast<int>(habits.size()); ++i) {
         total_done += habitDoneCount(habits[i].id, start_day, habit_day);
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 106);
     canvas.printf("TOTAL %d/%d %d%%", total_done, total_possible, (total_done * 100) / total_possible);
     canvas.setCursor(8, 122);
@@ -1772,18 +1861,18 @@ void drawHabitsStats()
 void drawHabitsManage()
 {
     static const char* items[] = {"ADD HABIT", "DISABLE SEL", "BACK"};
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("MANAGE");
     for (int i = 0; i < 3; ++i) {
         canvas.setCursor(8, 38 + i * 24);
-        canvas.setTextColor(i == habits_manage_cursor ? TFT_BLACK : TFT_WHITE, i == habits_manage_cursor ? TFT_WHITE : TFT_BLACK);
+        canvas.setTextColor(i == habits_manage_cursor ? uiBg() : uiFg(), i == habits_manage_cursor ? uiFg() : uiBg());
         canvas.printf("%c %s", i == habits_manage_cursor ? '>' : ' ', items[i]);
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 112);
     if (!habits.empty()) canvas.printf("SEL %.14s", habits[habits_cursor].title.c_str());
     else canvas.print("NO HABITS");
@@ -1794,9 +1883,9 @@ void drawHabitsManage()
 
 void drawHabitsEdit()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("ADD HABIT");
     canvas.setTextSize(2);
@@ -1805,7 +1894,7 @@ void drawHabitsEdit()
     canvas.print(tail.c_str());
     canvas.print("_");
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 112);
     canvas.printf("%d/32", static_cast<int>(habit_input.size()));
     canvas.setCursor(8, 122);
@@ -1815,9 +1904,9 @@ void drawHabitsEdit()
 
 void drawMusicList()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("MUSIC  %d/%d", tracks.empty() ? 0 : selected_track + 1, static_cast<int>(tracks.size()));
     if (tracks.empty()) {
@@ -1832,12 +1921,12 @@ void drawMusicList()
         int end = std::min(static_cast<int>(tracks.size()), start + 3);
         for (int i = start; i < end; ++i) {
             canvas.setCursor(8, 38 + (i - start) * 24);
-            canvas.setTextColor(i == selected_track ? TFT_BLACK : TFT_WHITE, i == selected_track ? TFT_WHITE : TFT_BLACK);
+            canvas.setTextColor(i == selected_track ? uiBg() : uiFg(), i == selected_track ? uiFg() : uiBg());
             canvas.printf("%c %.13s", i == selected_track ? '>' : ' ', tracks[i].c_str());
         }
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.printf("OK PLAY  1 SHUF:%s  GO BACK", shuffle_on ? "ON" : "OFF");
     canvas.pushSprite(0, 0);
@@ -1845,9 +1934,9 @@ void drawMusicList()
 
 void drawMusicPlaying()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("PLAYING");
     canvas.setCursor(8, 34);
@@ -1856,7 +1945,7 @@ void drawMusicPlaying()
     canvas.printf("V:%s S:%s C:%d", volumeName(), shuffle_on ? "ON" : "OFF", decoded_chunks);
     drawWaveform(pcm_chunk, pcm_channels);
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK/GO STOP  UP/DN VOL  L/R TRACK");
     canvas.pushSprite(0, 0);
@@ -1864,9 +1953,9 @@ void drawMusicPlaying()
 
 void drawNotesList()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("NOTES %d/%d", notes_cursor + 1, static_cast<int>(notes.size()) + 1);
     const int total = static_cast<int>(notes.size()) + 1;
@@ -1876,12 +1965,12 @@ void drawNotesList()
     int end = std::min(total, start + rows);
     for (int i = start; i < end; ++i) {
         canvas.setCursor(8, 34 + (i - start) * 21);
-        canvas.setTextColor(i == notes_cursor ? TFT_BLACK : TFT_WHITE, i == notes_cursor ? TFT_WHITE : TFT_BLACK);
+        canvas.setTextColor(i == notes_cursor ? uiBg() : uiFg(), i == notes_cursor ? uiFg() : uiBg());
         if (i == 0) canvas.printf("%c NEW NOTE", i == notes_cursor ? '>' : ' ');
         else canvas.printf("%c %.13s", i == notes_cursor ? '>' : ' ', notes[i - 1].c_str());
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK NEW/OPEN   GO BACK");
     canvas.pushSprite(0, 0);
@@ -2005,14 +2094,14 @@ void drawMixedTextLine(int x, int y, const std::string& text, int scale = 2)
 {
     int cx = x;
     canvas.setTextSize(scale);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     for (size_t i = 0; i < text.size();) {
         size_t before = i;
         uint32_t cp = nextUtf8Codepoint(text, i);
         if (cp == ' ') { cx += 6 * scale; continue; }
         const char** glyph = cyrillicBitmap(cp);
         if (glyph) {
-            drawBitmapGlyph(cx, y + 2, scale, glyph, TFT_WHITE);
+            drawBitmapGlyph(cx, y + 2, scale, glyph, uiFg());
             cx += 6 * scale;
         } else if (cp < 128) {
             char b[2] = {static_cast<char>(cp), 0};
@@ -2020,7 +2109,7 @@ void drawMixedTextLine(int x, int y, const std::string& text, int scale = 2)
             canvas.print(b);
             cx += 6 * scale;
         } else {
-            canvas.drawRect(cx, y + 2, 4 * scale, 7 * scale, TFT_WHITE);
+            canvas.drawRect(cx, y + 2, 4 * scale, 7 * scale, uiFg());
             cx += 6 * scale;
         }
         if (i == before) ++i;
@@ -2039,13 +2128,13 @@ void drawTextLineSmart(int x, int y, const std::string& text)
 
 void drawNotesView()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 5);
     canvas.printf("%.14s %d/%d", active_note_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
         int idx = reader_scroll + row;
         if (idx >= static_cast<int>(reader_lines.size())) break;
@@ -2053,7 +2142,7 @@ void drawNotesView()
         drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("UP/DN LINE  L/R PAGE  GO LIST");
     canvas.pushSprite(0, 0);
@@ -2061,17 +2150,17 @@ void drawNotesView()
 
 void drawNotesEdit()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("NEW NOTE");
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 34);
     canvas.printf("%s  1 toggle", note_ru_mode ? "RU translit" : "LAT text");
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     std::string display_text = note_input;
     std::string tail = utf8TailByChars(display_text, 57);
     for (int row = 0; row < 3; ++row) {
@@ -2080,7 +2169,7 @@ void drawNotesEdit()
         if (off < tail.size()) canvas.print(tail.substr(off, 19).c_str());
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 112);
     canvas.printf("%s %d/512", note_ru_mode ? "RU SAVE" : "LAT", static_cast<int>(note_input.size()));
     canvas.setCursor(8, 122);
@@ -2091,9 +2180,9 @@ void drawNotesEdit()
 
 void drawRecorderList()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("REC %d/%d", recorder_cursor + 1, static_cast<int>(recordings.size()) + 1);
 
@@ -2103,7 +2192,7 @@ void drawRecorderList()
     int end = std::min(total, start + 3);
     for (int i = start; i < end; ++i) {
         canvas.setCursor(8, 38 + (i - start) * 24);
-        canvas.setTextColor(i == recorder_cursor ? TFT_BLACK : TFT_WHITE, i == recorder_cursor ? TFT_WHITE : TFT_BLACK);
+        canvas.setTextColor(i == recorder_cursor ? uiBg() : uiFg(), i == recorder_cursor ? uiFg() : uiBg());
         if (i == 0) {
             canvas.printf("%c NEW REC", i == recorder_cursor ? '>' : ' ');
         } else {
@@ -2111,7 +2200,7 @@ void drawRecorderList()
         }
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK REC/PLAY   GO BACK");
     canvas.pushSprite(0, 0);
@@ -2119,9 +2208,9 @@ void drawRecorderList()
 
 void drawRecorderRecording()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("RECORDING");
     canvas.setCursor(8, 34);
@@ -2130,7 +2219,7 @@ void drawRecorderRecording()
     canvas.printf("%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK SAVE   GO SAVE");
     canvas.pushSprite(0, 0);
@@ -2138,9 +2227,9 @@ void drawRecorderRecording()
 
 void drawRecorderPlaying()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("REC PLAY");
     canvas.setCursor(8, 34);
@@ -2149,7 +2238,7 @@ void drawRecorderPlaying()
     canvas.printf("C:%lu", static_cast<unsigned long>(rec_play_chunks));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK/GO STOP");
     canvas.pushSprite(0, 0);
@@ -2157,9 +2246,9 @@ void drawRecorderPlaying()
 
 void drawReaderList()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("BOOKS %d/%d", books.empty() ? 0 : selected_book + 1, static_cast<int>(books.size()));
     if (books.empty()) {
@@ -2177,12 +2266,12 @@ void drawReaderList()
         int end = std::min(static_cast<int>(books.size()), start + rows);
         for (int i = start; i < end; ++i) {
             canvas.setCursor(8, 34 + (i - start) * 21);
-            canvas.setTextColor(i == selected_book ? TFT_BLACK : TFT_WHITE, i == selected_book ? TFT_WHITE : TFT_BLACK);
+            canvas.setTextColor(i == selected_book ? uiBg() : uiFg(), i == selected_book ? uiFg() : uiBg());
             canvas.printf("%c%c%.12s", i == selected_book ? '>' : ' ', reader_bookmarks.count(books[i]) ? '*' : ' ', books[i].c_str());
         }
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK READ   GO BACK");
     canvas.pushSprite(0, 0);
@@ -2190,13 +2279,13 @@ void drawReaderList()
 
 void drawReaderView()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 5);
     canvas.printf("%.14s %d/%d", active_book_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
         int idx = reader_scroll + row;
         if (idx >= static_cast<int>(reader_lines.size())) break;
@@ -2204,7 +2293,7 @@ void drawReaderView()
         drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("UP/DN LINE  L/R PAGE  1 SPEED");
     canvas.pushSprite(0, 0);
@@ -2239,16 +2328,16 @@ void drawCenteredText(const std::string& text, int y, int text_size, uint16_t co
     int width = cols * 6 * text_size;
     int x = std::max(0, (SCREEN_W - width) / 2);
     canvas.setTextSize(text_size);
-    canvas.setTextColor(color, TFT_BLACK);
+    canvas.setTextColor(color, uiBg());
     canvas.setCursor(x, y);
     canvas.print(text.c_str());
 }
 
 void drawReaderSpeed()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 6);
     canvas.print("SPEED");
     canvas.setCursor(92, 6);
@@ -2267,11 +2356,11 @@ void drawReaderSpeed()
         int width = cols * 6 * size;
         drawMixedTextLine(std::max(0, (SCREEN_W - width) / 2), size == 3 ? 62 : 66, text, size);
     } else {
-        drawCenteredText(text, size == 3 ? 62 : 66, size, speed_paused ? TFT_DARKGREY : TFT_WHITE);
+        drawCenteredText(text, size == 3 ? 62 : 66, size, speed_paused ? uiDim() : uiFg());
     }
 
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 106);
     int total = speed_mode == SpeedMode::Line ? static_cast<int>(reader_lines.size()) : static_cast<int>(reader_words.size());
     canvas.printf("POS %d/%d", std::min(speed_index + 1, std::max(1, total)), total);
@@ -2309,7 +2398,7 @@ uint32_t timerDisplayMs()
 void drawBigTime(const char* text, int y)
 {
     canvas.setTextSize(3);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     int width = std::strlen(text) * 18;
     canvas.setCursor(std::max(0, (SCREEN_W - width) / 2), y);
     canvas.print(text);
@@ -2349,9 +2438,9 @@ void updateAlert()
 
 void drawTimeApp()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 6);
     canvas.print("TIME");
     canvas.setCursor(88, 6);
@@ -2363,7 +2452,7 @@ void drawTimeApp()
         formatHMS(elapsedClockSeconds(), buf, sizeof(buf));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
-        canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.printf("SET:%s  1 FIELD", timeFieldName());
     } else if (time_mode == TimeMode::Stopwatch) {
@@ -2371,11 +2460,11 @@ void drawTimeApp()
         uint32_t sec = ms / 1000;
         snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu.%lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60), static_cast<unsigned long>((ms / 100) % 10));
         canvas.setTextSize(2);
-        canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+        canvas.setTextColor(uiFg(), uiBg());
         canvas.setCursor(8, 52);
         canvas.print(buf);
         canvas.setTextSize(1);
-        canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.print(stopwatch_running ? "RUN" : "PAUSE");
     } else if (time_mode == TimeMode::Timer) {
@@ -2383,19 +2472,19 @@ void drawTimeApp()
         snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
-        canvas.setTextColor(timer_done ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
+        canvas.setTextColor(timer_done ? uiFg() : uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.printf("%s SET:%s", timer_done ? "DONE" : (timer_running ? "RUN" : "SET"), timeFieldName());
     } else {
         formatHMS(alarm_seconds, buf, sizeof(buf));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
-        canvas.setTextColor((alarm_enabled || alarm_ringing) ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
+        canvas.setTextColor((alarm_enabled || alarm_ringing) ? uiFg() : uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.printf("%s SET:%s", alarm_ringing ? "RING" : (alarm_enabled ? "ON" : "OFF"), timeFieldName());
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK ON/START  1 FIELD/RST  L/R MODE");
     canvas.pushSprite(0, 0);
@@ -2434,13 +2523,13 @@ void updateTimeApp()
 
 void drawFilesList()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("FILES %d/%d", file_entries.empty() ? 0 : files_cursor + 1, static_cast<int>(file_entries.size()));
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 30);
     canvas.printf("%.28s", files_path == MOUNT_POINT ? "/" : files_path.substr(std::strlen(MOUNT_POINT)).c_str());
     uint64_t total = 0, free_b = 0;
@@ -2452,7 +2541,7 @@ void drawFilesList()
     }
     if (file_entries.empty()) {
         canvas.setTextSize(2);
-        canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+        canvas.setTextColor(uiFg(), uiBg());
         canvas.setCursor(8, 62);
         canvas.print(sd_ready ? "EMPTY" : "NO SD");
     } else {
@@ -2464,12 +2553,12 @@ void drawFilesList()
         for (int i = start; i < end; ++i) {
             const auto& e = file_entries[i];
             canvas.setCursor(8, 58 + (i - start) * 20);
-            canvas.setTextColor(i == files_cursor ? TFT_BLACK : TFT_WHITE, i == files_cursor ? TFT_WHITE : TFT_BLACK);
+            canvas.setTextColor(i == files_cursor ? uiBg() : uiFg(), i == files_cursor ? uiFg() : uiBg());
             canvas.printf("%c%c%.12s", i == files_cursor ? '>' : ' ', e.is_dir ? '/' : ' ', e.name.c_str());
         }
     }
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN  GO BACK  KNOWN FILES");
     canvas.pushSprite(0, 0);
@@ -2516,18 +2605,51 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
     return false;
 }
 
+void drawSettings()
+{
+    canvas.fillScreen(uiBg());
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("SETTINGS");
+    static const char* labels[] = {"THEME", "SOUND", "TIMEOUT", "POWER", "SD", "COMM"};
+    for (int i = 0; i < 4; ++i) {
+        canvas.setCursor(8, 34 + i * 21);
+        canvas.setTextColor(i == settings_cursor ? uiBg() : uiFg(), i == settings_cursor ? uiFg() : uiBg());
+        if (i == 0) canvas.printf("%c THEME %s", i == settings_cursor ? '>' : ' ', themeName());
+        else if (i == 1) canvas.printf("%c SOUND later", i == settings_cursor ? '>' : ' ');
+        else if (i == 2) canvas.printf("%c TIMEOUT later", i == settings_cursor ? '>' : ' ');
+        else canvas.printf("%c POWER later", i == settings_cursor ? '>' : ' ');
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    uint64_t total = 0, free_b = 0;
+    canvas.setCursor(8, 102);
+    if (sdUsage(&total, &free_b) && total >= free_b) {
+        canvas.printf("SD %s FREE USED %s", formatBytes(free_b).c_str(), formatBytes(total - free_b).c_str());
+    } else {
+        canvas.print("SD --");
+    }
+    canvas.setCursor(8, 112);
+    canvas.printf("CFG %s  COMM later", config_status.c_str());
+    canvas.setCursor(8, 122);
+    canvas.print("L/R CHANGE       GO BACK");
+    canvas.pushSprite(0, 0);
+    (void)labels;
+}
+
 void drawMessage()
 {
-    canvas.fillScreen(TFT_BLACK);
+    canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
-    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 12);
     canvas.println(message_title.c_str());
     canvas.setTextSize(2);
     canvas.setCursor(8, 42);
     canvas.println(message_body.c_str());
     canvas.setTextSize(1);
-    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("GO BACK");
     canvas.pushSprite(0, 0);
@@ -2555,6 +2677,7 @@ void drawIfDirty()
     else if (screen == Screen::HabitsStats) drawHabitsStats();
     else if (screen == Screen::HabitsManage) drawHabitsManage();
     else if (screen == Screen::HabitsEdit) drawHabitsEdit();
+    else if (screen == Screen::Settings) drawSettings();
     else drawMessage();
     dirty = false;
 }
@@ -2616,7 +2739,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Launcher) {
         if (ev.key == Key::Up) launcher_index = std::max(0, launcher_index - 1);
-        else if (ev.key == Key::Down) launcher_index = std::min(7, launcher_index + 1);
+        else if (ev.key == Key::Down) launcher_index = std::min(8, launcher_index + 1);
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; }
         else if (ev.key == Key::Ok) {
             if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
@@ -2627,6 +2750,7 @@ void handleKey(KeyEvent ev)
             else if (launcher_index == 5) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; blockInput(250); }
             else if (launcher_index == 6) { random_result = "READY"; screen = Screen::Randomizer; blockInput(250); }
             else if (launcher_index == 7) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
+            else if (launcher_index == 8) { screen = Screen::Settings; blockInput(250); }
             else { message_title = "Coming soon"; message_body = "Music/Reader/Record"; message_returns_music = false; screen = Screen::Message; }
         }
         dirty = true;
@@ -3081,6 +3205,22 @@ void handleKey(KeyEvent ev)
         return;
     }
 
+    if (screen == Screen::Settings) {
+        if (ev.key == Key::Up) settings_cursor = std::max(0, settings_cursor - 1);
+        else if (ev.key == Key::Down) settings_cursor = std::min(5, settings_cursor + 1);
+        else if ((ev.key == Key::Left || ev.key == Key::Right || ev.key == Key::Ok) && settings_cursor == 0) {
+            int dir = ev.key == Key::Left ? 3 : 1;
+            theme_mode = static_cast<ThemeMode>((static_cast<int>(theme_mode) + dir) % 4);
+            saveConfig();
+            blockInput(220);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
     if (screen == Screen::Message) {
         if (M5.millis() < message_hold_until_ms) return;
         if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
@@ -3109,6 +3249,7 @@ extern "C" void app_main(void)
     canvas.setColorDepth(8);
 
     initKeyboard();
+    loadConfig();
     drawSplash();
     last_input_ms = M5.millis();
     dirty = true;

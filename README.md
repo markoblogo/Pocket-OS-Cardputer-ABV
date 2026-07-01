@@ -46,6 +46,11 @@ Confirmed on real Cardputer ADV:
   - `1` starts the next internal day and clears today's checks;
   - shows simple 7D / 30D completion stats;
   - can add habits and disable the selected habit without deleting old logs.
+- Settings app:
+  - stores config in `/sdcard/cardputer/CONFIG.TXT`;
+  - supports UI themes: `WHITE`, `GREEN`, `YELLOW`, `INVERT`;
+  - shows SD free/used status;
+  - keeps sound, timeout, power save, and communication settings as placeholders for the next passes.
 - Time app:
   - includes Clock, Stopwatch, Timer, and Alarm modes;
   - Left / Right switches mode;
@@ -178,6 +183,14 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 11. Test `ADD HABIT`: type a short latin/translit name, `OK` saves.
 12. Test `DISABLE SELECTED`: selected habit disappears, old logs remain.
 13. Press `GO` to return to Habits, then `GO` to launcher.
+
+### Settings
+
+1. Open Settings.
+2. On `THEME`, press Left / Right / OK.
+3. Confirm UI changes between `WHITE`, `GREEN`, `YELLOW`, and `INVERT`.
+4. Confirm `CFG SAVED` or `CFG LOADED` appears when SD is available.
+5. Reboot and confirm the selected theme is loaded from `/sdcard/cardputer/CONFIG.TXT`.
 
 ### Record
 
