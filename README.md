@@ -54,6 +54,10 @@ Confirmed on real Cardputer ADV:
   - supports `POWER` preset: green theme, low sound, short timeout;
   - shows SD free/used status;
   - keeps communication settings as placeholders for the next passes.
+- Connections app:
+  - safe shell only for now;
+  - planned Wi-Fi AP + HTTP file manager for SD transfer;
+  - no radio/network services are started yet.
 - Time app:
   - includes Clock, Stopwatch, Timer, and Alarm modes;
   - Left / Right switches mode;
@@ -198,6 +202,13 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 7. Confirm `CFG SAVED` or `CFG LOADED` appears when SD is available.
 8. Reboot and confirm settings load from `/sdcard/cardputer/CONFIG.TXT`.
 
+### Connections
+
+1. Open Connections.
+2. Confirm it shows `WiFi Transfer`, `Bluetooth later`, and `USB later`.
+3. Press `OK`; it should show `WiFi Transfer / AP HTTP later`.
+4. Press `GO` to return.
+
 ### Record
 
 1. Open Record.
@@ -217,6 +228,13 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Music playback is chunk/blocking-based; controls may have small latency.
 - Files MVP is read/open only; delete and rename are postponed.
 - Future Transfer/Connections app should provide Wi-Fi AP + HTTP file manager for moving arbitrary files to/from SD without removing the card.
+- Connections transfer target:
+  - Cardputer starts AP mode, e.g. `ABVX-Cardputer`;
+  - Mac opens a simple browser file manager;
+  - SD paths are whitelisted: `/music`, `/books`, `/notes`, `/rec`, `/cardputer`;
+  - first version should list/download/upload only;
+  - delete/rename require confirmation and are postponed;
+  - FATFS 8.3 filenames remain the safe default until long filename support is intentionally fixed.
 - Habits MVP has manual day rollover with `1 NEW DAY`; real calendar dates and weekly/monthly/yearly summaries are postponed until time sync/storage polish.
 - Time block is implemented for this stage: manual runtime clock, stopwatch, timer, and alarm. Full power-off resets time; future Mac sync should set time once during sync.
 - Screen-off playback/power optimization is not finalized yet.

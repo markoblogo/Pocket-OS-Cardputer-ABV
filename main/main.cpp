@@ -60,7 +60,7 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Message };
+enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -1807,7 +1807,7 @@ bool sdUsage(uint64_t* total, uint64_t* free_bytes)
 
 void drawLauncher()
 {
-    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS"};
+    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
@@ -2704,6 +2704,28 @@ void drawSettings()
     canvas.pushSprite(0, 0);
 }
 
+void drawConnections()
+{
+    canvas.fillScreen(uiBg());
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("CONNECTIONS");
+    canvas.setCursor(8, 38);
+    canvas.print("> WiFi Transfer");
+    canvas.setCursor(8, 62);
+    canvas.print("  Bluetooth later");
+    canvas.setCursor(8, 86);
+    canvas.print("  USB later");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 112);
+    canvas.print("AP HTTP file manager later");
+    canvas.setCursor(8, 122);
+    canvas.print("OK INFO          GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
 void drawMessage()
 {
     canvas.fillScreen(uiBg());
@@ -2744,6 +2766,7 @@ void drawIfDirty()
     else if (screen == Screen::HabitsManage) drawHabitsManage();
     else if (screen == Screen::HabitsEdit) drawHabitsEdit();
     else if (screen == Screen::Settings) drawSettings();
+    else if (screen == Screen::Connections) drawConnections();
     else drawMessage();
     dirty = false;
 }
@@ -2817,7 +2840,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Launcher) {
         if (ev.key == Key::Up) launcher_index = std::max(0, launcher_index - 1);
-        else if (ev.key == Key::Down) launcher_index = std::min(8, launcher_index + 1);
+        else if (ev.key == Key::Down) launcher_index = std::min(9, launcher_index + 1);
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; }
         else if (ev.key == Key::Ok) {
             if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
@@ -2829,6 +2852,7 @@ void handleKey(KeyEvent ev)
             else if (launcher_index == 6) { random_result = "READY"; screen = Screen::Randomizer; blockInput(250); }
             else if (launcher_index == 7) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
             else if (launcher_index == 8) { screen = Screen::Settings; blockInput(250); }
+            else if (launcher_index == 9) { screen = Screen::Connections; blockInput(250); }
             else { message_title = "Coming soon"; message_body = "Music/Reader/Record"; message_returns_music = false; screen = Screen::Message; }
         }
         dirty = true;
@@ -3303,6 +3327,22 @@ void handleKey(KeyEvent ev)
             }
             saveConfig();
             blockInput(220);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::Connections) {
+        if (ev.key == Key::Ok) {
+            message_title = "WiFi Transfer";
+            message_body = "AP HTTP later";
+            message_returns_music = false;
+            message_returns_notes = false;
+            screen = Screen::Message;
+            blockInput(250);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
