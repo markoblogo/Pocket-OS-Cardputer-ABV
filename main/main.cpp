@@ -1428,8 +1428,9 @@ void drawRandomizer()
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setCursor(8, 8);
     canvas.print("RANDOM");
-    canvas.setTextSize(3);
-    canvas.setCursor(24, 52);
+    canvas.setTextSize(4);
+    int result_x = std::max(0, (SCREEN_W - static_cast<int>(canvas.textWidth(random_result.c_str()))) / 2);
+    canvas.setCursor(result_x, 50);
     canvas.print(random_result.c_str());
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
