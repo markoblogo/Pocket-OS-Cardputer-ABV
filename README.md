@@ -44,7 +44,8 @@ Confirmed on real Cardputer ADV:
   - stores daily checks in `/sdcard/habits/LOG.TXT`;
   - shows a `TODAY` checklist;
   - `1` starts the next internal day and clears today's checks;
-  - shows simple 7D / 30D completion stats.
+  - shows simple 7D / 30D completion stats;
+  - can add habits and disable the selected habit without deleting old logs.
 - Time app:
   - includes Clock, Stopwatch, Timer, and Alarm modes;
   - Left / Right switches mode;
@@ -172,7 +173,11 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 6. Press `1` to start a new internal day; checks should clear.
 7. Press Right to open Stats.
 8. Press Left / Right / OK to switch 7D / 30D.
-9. Press `GO` to return to Habits, then `GO` to launcher.
+9. Press `GO` to return to Habits.
+10. Press Left to open Manage.
+11. Test `ADD HABIT`: type a short latin/translit name, `OK` saves.
+12. Test `DISABLE SELECTED`: selected habit disappears, old logs remain.
+13. Press `GO` to return to Habits, then `GO` to launcher.
 
 ### Record
 

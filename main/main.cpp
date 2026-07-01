@@ -58,7 +58,7 @@ bool sd_ready = false;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, Message };
+enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -139,6 +139,8 @@ int files_cursor = 0;
 int habits_cursor = 0;
 int habit_day = 1;
 int habit_stats_window = 7;
+int habits_manage_cursor = 0;
+std::string habit_input;
 int selected_track = 0;
 std::string override_music_path;
 int selected_book = 0;
@@ -746,6 +748,85 @@ void scanHabits()
     fclose(f);
     loadHabitLogForDay();
     habits_cursor = std::max(0, std::min(habits_cursor, std::max(0, static_cast<int>(habits.size()) - 1)));
+}
+
+std::string nextHabitId()
+{
+    bool used[1000] = {};
+    FILE* f = fopen(HABITS_FILE, "rb");
+    if (f) {
+        char line[160];
+        while (fgets(line, sizeof(line), f)) {
+            std::string s = line;
+            size_t p = s.find('|');
+            if (p == std::string::npos) continue;
+            std::string id = s.substr(0, p);
+            if (id.size() == 4 && id[0] == 'H') {
+                int n = std::atoi(id.substr(1).c_str());
+                if (n >= 0 && n < 1000) used[n] = true;
+            }
+        }
+        fclose(f);
+    }
+    for (int i = 1; i < 1000; ++i) {
+        if (!used[i]) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "H%03d", i);
+            return buf;
+        }
+    }
+    return "H999";
+}
+
+bool appendHabit(const std::string& title, std::string* err = nullptr)
+{
+    if (!ensureDefaultHabits(err)) return false;
+    FILE* f = fopen(HABITS_FILE, "ab");
+    if (!f) {
+        if (err) {
+            *err = "open ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    std::string clean = title.substr(0, 32);
+    for (char& c : clean) {
+        if (c == '|' || static_cast<unsigned char>(c) < 32) c = ' ';
+    }
+    fprintf(f, "%s|%s|1\n", nextHabitId().c_str(), clean.c_str());
+    fclose(f);
+    return true;
+}
+
+bool disableHabit(const std::string& id, std::string* err = nullptr)
+{
+    if (!ensureDefaultHabits(err)) return false;
+    std::vector<std::string> lines;
+    FILE* in = fopen(HABITS_FILE, "rb");
+    if (!in) return false;
+    char line[160];
+    while (fgets(line, sizeof(line), in)) {
+        std::string s = line;
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        size_t p1 = s.find('|');
+        size_t p2 = p1 == std::string::npos ? std::string::npos : s.find('|', p1 + 1);
+        if (p1 != std::string::npos && p2 != std::string::npos && s.substr(0, p1) == id) {
+            s = s.substr(0, p2 + 1) + "0";
+        }
+        lines.push_back(s + "\n");
+    }
+    fclose(in);
+    FILE* out = fopen(HABITS_FILE, "wb");
+    if (!out) {
+        if (err) {
+            *err = "open ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    for (const auto& s : lines) fputs(s.c_str(), out);
+    fclose(out);
+    return true;
 }
 
 int habitDoneCount(const std::string& id, int start_day, int end_day)
@@ -1645,7 +1726,7 @@ void drawHabitsList()
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 112);
-    canvas.print("1 NEW DAY  R STATS");
+    canvas.print("L MANAGE  R STATS  1 NEW");
     canvas.setCursor(8, 122);
     canvas.print("OK CHECK        GO BACK");
     canvas.pushSprite(0, 0);
@@ -1685,6 +1766,50 @@ void drawHabitsStats()
     canvas.printf("TOTAL %d/%d %d%%", total_done, total_possible, (total_done * 100) / total_possible);
     canvas.setCursor(8, 122);
     canvas.print("L/R 7D/30D       GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawHabitsManage()
+{
+    static const char* items[] = {"ADD HABIT", "DISABLE SEL", "BACK"};
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.print("MANAGE");
+    for (int i = 0; i < 3; ++i) {
+        canvas.setCursor(8, 38 + i * 24);
+        canvas.setTextColor(i == habits_manage_cursor ? TFT_BLACK : TFT_WHITE, i == habits_manage_cursor ? TFT_WHITE : TFT_BLACK);
+        canvas.printf("%c %s", i == habits_manage_cursor ? '>' : ' ', items[i]);
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 112);
+    if (!habits.empty()) canvas.printf("SEL %.14s", habits[habits_cursor].title.c_str());
+    else canvas.print("NO HABITS");
+    canvas.setCursor(8, 122);
+    canvas.print("OK SELECT       GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawHabitsEdit()
+{
+    canvas.fillScreen(TFT_BLACK);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setCursor(8, 8);
+    canvas.print("ADD HABIT");
+    canvas.setTextSize(2);
+    canvas.setCursor(8, 48);
+    std::string tail = habit_input.size() > 19 ? habit_input.substr(habit_input.size() - 19) : habit_input;
+    canvas.print(tail.c_str());
+    canvas.print("_");
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    canvas.setCursor(8, 112);
+    canvas.printf("%d/32", static_cast<int>(habit_input.size()));
+    canvas.setCursor(8, 122);
+    canvas.print("OK SAVE  BKSP DEL  GO CANCEL");
     canvas.pushSprite(0, 0);
 }
 
@@ -2428,6 +2553,8 @@ void drawIfDirty()
     else if (screen == Screen::Randomizer) drawRandomizer();
     else if (screen == Screen::HabitsList) drawHabitsList();
     else if (screen == Screen::HabitsStats) drawHabitsStats();
+    else if (screen == Screen::HabitsManage) drawHabitsManage();
+    else if (screen == Screen::HabitsEdit) drawHabitsEdit();
     else drawMessage();
     dirty = false;
 }
@@ -2480,7 +2607,7 @@ void wakeDisplay()
 
 void handleKey(KeyEvent ev)
 {
-    if (ev.key == Key::None && screen != Screen::NotesEdit) return;
+    if (ev.key == Key::None && screen != Screen::NotesEdit && screen != Screen::HabitsEdit) return;
     last_input_ms = M5.millis();
     if (display_off || display_dim) {
         wakeDisplay();
@@ -2878,6 +3005,10 @@ void handleKey(KeyEvent ev)
             habit_stats_window = 7;
             screen = Screen::HabitsStats;
             blockInput(250);
+        } else if (ev.key == Key::Left) {
+            habits_manage_cursor = 0;
+            screen = Screen::HabitsManage;
+            blockInput(250);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             saveHabitLogForDay();
             screen = Screen::Launcher;
@@ -2894,6 +3025,57 @@ void handleKey(KeyEvent ev)
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::HabitsList;
             blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::HabitsManage) {
+        if (ev.key == Key::Up) habits_manage_cursor = std::max(0, habits_manage_cursor - 1);
+        else if (ev.key == Key::Down) habits_manage_cursor = std::min(2, habits_manage_cursor + 1);
+        else if (ev.key == Key::Ok) {
+            if (habits_manage_cursor == 0) {
+                habit_input.clear();
+                screen = Screen::HabitsEdit;
+            } else if (habits_manage_cursor == 1) {
+                if (!habits.empty()) {
+                    std::string id = habits[habits_cursor].id;
+                    disableHabit(id);
+                    scanHabits();
+                }
+                screen = Screen::HabitsList;
+            } else {
+                screen = Screen::HabitsList;
+            }
+            blockInput(250);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::HabitsList;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::HabitsEdit) {
+        if (ev.key == Key::Ok) {
+            if (!habit_input.empty()) {
+                appendHabit(habit_input);
+                scanHabits();
+            }
+            habit_input.clear();
+            screen = Screen::HabitsList;
+            blockInput(300);
+        } else if (ev.key == Key::Backspace) {
+            if (!habit_input.empty()) habit_input.pop_back();
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            habit_input.clear();
+            screen = Screen::HabitsManage;
+            blockInput(250);
+        } else if (ev.key == Key::None && ev.name && ev.name[0] && !ev.name[1]) {
+            char c = ev.name[0];
+            if (static_cast<unsigned char>(c) >= 32 && static_cast<unsigned char>(c) <= 126 && c != '|' && habit_input.size() < 32) {
+                habit_input.push_back(c);
+            }
         }
         dirty = true;
         return;
