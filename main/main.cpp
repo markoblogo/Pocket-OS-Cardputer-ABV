@@ -1387,7 +1387,7 @@ void drawNotesEdit()
     canvas.printf("%s  1 toggle", note_ru_mode ? "RU translit" : "LAT text");
     canvas.setTextSize(2);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
-    std::string display_text = noteTextForSave();
+    std::string display_text = note_input;
     std::string tail = utf8TailByChars(display_text, 57);
     for (int row = 0; row < 3; ++row) {
         canvas.setCursor(8, 52 + row * 22);
@@ -1397,7 +1397,7 @@ void drawNotesEdit()
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
     canvas.setCursor(8, 112);
-    canvas.printf("%s %d/512", note_ru_mode ? "RU" : "LAT", static_cast<int>(note_input.size()));
+    canvas.printf("%s %d/512", note_ru_mode ? "RU SAVE" : "LAT", static_cast<int>(note_input.size()));
     canvas.setCursor(8, 122);
     canvas.print("OK SAVE  1 LAT/RU  GO CANCEL");
     canvas.pushSprite(0, 0);

@@ -28,7 +28,7 @@ Confirmed on real Cardputer ADV:
 - Notes app:
   - stores notes in `/sdcard/notes`;
   - first list item `NEW NOTE` creates a new plain text note;
-  - editor supports `LAT` mode and `RU` translit mode toggled by `1`;
+  - editor supports `LAT` mode and `RU` translit-save mode toggled by `1`;
   - saves files as `NOTE0001.TXT`, `NOTE0002.TXT`, etc.;
   - opens saved notes using the same readable text viewer.
 - Record app:
@@ -132,7 +132,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 ## Known limitations
 
 - Reader/Notes text support is MVP only: English/Russian best-effort, in-RAM Reader bookmarks only, no persistent saved position, no French/Ukrainian font support yet.
-- Notes input supports latin text plus RU transliteration mode; punctuation is still limited by Cardputer arrow-key mappings.
+- Notes input supports latin text plus RU transliteration save mode; the edit screen shows latin translit because the current large font does not render Cyrillic. Punctuation is still limited by Cardputer arrow-key mappings.
 - Recordings use `/sdcard/rec` instead of `/sdcard/recordings` because FATFS long filenames are not enabled yet.
 - Music playback is chunk/blocking-based; controls may have small latency.
 - Screen-off playback/power optimization is not finalized yet.
