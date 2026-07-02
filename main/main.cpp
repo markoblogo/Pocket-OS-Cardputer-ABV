@@ -3119,11 +3119,17 @@ bool startConnectionHttp(char* err, size_t err_len)
     download.handler = connectionDownloadHandler;
     httpd_register_uri_handler(connection_httpd, &download);
 
-    httpd_uri_t write_test = {};
-    write_test.uri = "/api/write-test";
-    write_test.method = HTTP_POST;
-    write_test.handler = connectionWriteTestHandler;
-    httpd_register_uri_handler(connection_httpd, &write_test);
+    httpd_uri_t write_test_get = {};
+    write_test_get.uri = "/api/write-test";
+    write_test_get.method = HTTP_GET;
+    write_test_get.handler = connectionWriteTestHandler;
+    httpd_register_uri_handler(connection_httpd, &write_test_get);
+
+    httpd_uri_t write_test_post = {};
+    write_test_post.uri = "/api/write-test";
+    write_test_post.method = HTTP_POST;
+    write_test_post.handler = connectionWriteTestHandler;
+    httpd_register_uri_handler(connection_httpd, &write_test_post);
 
     connection_http_on = true;
     return true;

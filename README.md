@@ -182,7 +182,7 @@ Endpoints:
 - `/api/status` returns AP/HTTP/request status.
 - `/api/list?path=/music` lists a whitelisted SD folder.
 - `/api/download?path=/notes/NOTE0001.TXT` downloads a whitelisted SD file.
-- `POST /api/write-test` writes `/sdcard/cardputer/WTEST.TXT` for SD write diagnostics.
+- `/api/write-test` writes `/sdcard/cardputer/WTEST.TXT` for SD write diagnostics; GET and POST are both accepted for easier browser testing.
 
 Upload and delete are intentionally not implemented yet.
 
@@ -245,7 +245,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 8. Open Files, browse SD and open a known `.TXT` or `.MP3`.
 9. Open Habits, check an item, reopen, confirm state remains.
 10. Open Settings, change theme, reboot if needed, confirm config loads.
-11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, one `/api/download?...`, and `POST /api/write-test`, stop with GO.
+11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, one `/api/download?...`, and `/api/write-test`, stop with GO.
 
 ## Known limitations
 
