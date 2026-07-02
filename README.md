@@ -154,7 +154,7 @@ Calendar dates are postponed until reliable time sync exists.
 
 ### Settings
 
-Stored in `/sdcard/cardputer/CONFIG.TXT`.
+Stored physically in `/sdcard/CARDPTR/CONFIG.TXT` because FATFS long filenames are not enabled. The HTTP API still exposes it as `/cardputer`.
 
 Options:
 
@@ -182,7 +182,7 @@ Endpoints:
 - `/api/status` returns AP/HTTP/request status.
 - `/api/list?path=/music` lists a whitelisted SD folder.
 - `/api/download?path=/notes/NOTE0001.TXT` downloads a whitelisted SD file.
-- `/api/write-test` writes `/sdcard/cardputer/WTEST.TXT` for SD write diagnostics; GET and POST are both accepted for easier browser testing.
+- `/api/write-test` writes `/sdcard/CARDPTR/WTEST.TXT` for SD write diagnostics; GET and POST are both accepted for easier browser testing.
 
 Upload and delete are intentionally not implemented yet.
 
@@ -198,7 +198,7 @@ Use FATFS 8.3-safe names for now.
 /sdcard/notes/NOTE0001.TXT
 /sdcard/rec/REC0001.WAV
 /sdcard/habits/HABITS.TXT
-/sdcard/cardputer/CONFIG.TXT
+/sdcard/CARDPTR/CONFIG.TXT
 ```
 
 Long filenames are not treated as reliable yet.

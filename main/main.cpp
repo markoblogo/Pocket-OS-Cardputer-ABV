@@ -44,8 +44,8 @@ constexpr const char* HABITS_DIR = "/sdcard/habits";
 constexpr const char* HABITS_FILE = "/sdcard/habits/HABITS.TXT";
 constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
 constexpr const char* HABIT_STATE_FILE = "/sdcard/habits/STATE.TXT";
-constexpr const char* CONFIG_DIR = "/sdcard/cardputer";
-constexpr const char* CONFIG_FILE = "/sdcard/cardputer/CONFIG.TXT";
+constexpr const char* CONFIG_DIR = "/sdcard/CARDPTR";
+constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 8 * 1024;
@@ -2802,7 +2802,15 @@ bool apiPathToSdPath(const std::string& api_path, std::string* full_path, char* 
         snprintf(err, err_len, "path blocked");
         return false;
     }
-    *full_path = api_path == "/" ? std::string(MOUNT_POINT) : std::string(MOUNT_POINT) + api_path;
+    if (api_path == "/") {
+        *full_path = MOUNT_POINT;
+    } else if (api_path == "/cardputer") {
+        *full_path = CONFIG_DIR;
+    } else if (api_path.rfind("/cardputer/", 0) == 0) {
+        *full_path = std::string(CONFIG_DIR) + api_path.substr(std::strlen("/cardputer"));
+    } else {
+        *full_path = std::string(MOUNT_POINT) + api_path;
+    }
     return true;
 }
 
@@ -3011,7 +3019,7 @@ esp_err_t connectionWriteTestHandler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    const char* path = "/sdcard/cardputer/WTEST.TXT";
+    const char* path = "/sdcard/CARDPTR/WTEST.TXT";
     FILE* f = fopen(path, "wb");
     if (!f) {
         snprintf(err, sizeof(err), "open %s", std::strerror(errno));
