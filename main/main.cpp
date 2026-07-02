@@ -2851,7 +2851,7 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "<li><a href=\"/api/list?path=/notes\">/api/list?path=/notes</a></li>"
         "<li><a href=\"/api/list?path=/rec\">/api/list?path=/rec</a></li>"
         "</ul>"
-        "<form action=\"/api/write-test\" method=\"post\"><button>write-test</button></form>"
+        "<p><a href=\"/api/write-test\">/api/write-test</a></p>"
         "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
         "<p>Upload/delete later. Write-test creates /cardputer/WTEST.TXT.</p>"
         "</body></html>";
