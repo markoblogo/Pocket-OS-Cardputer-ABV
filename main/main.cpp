@@ -72,6 +72,9 @@ volatile bool connection_dirty = false;
 int connection_req_count = 0;
 char connection_last_endpoint[32] = "-";
 char connection_last_error[64] = "none";
+volatile bool connection_upload_active = false;
+volatile int connection_upload_done = 0;
+volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
@@ -3150,6 +3153,10 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
 
     char buf[1024];
     int remaining = req->content_len;
+    connection_upload_active = true;
+    connection_upload_done = 0;
+    connection_upload_total = req->content_len;
+    setConnectionStatus(endpoint, "uploading");
     bool ok = true;
     while (remaining > 0) {
         int want = std::min<int>(remaining, sizeof(buf));
@@ -3166,6 +3173,8 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
             break;
         }
         remaining -= got;
+        connection_upload_done = req->content_len - remaining;
+        connection_dirty = true;
         vTaskDelay(1);
     }
     if (fflush(f) != 0) {
@@ -3177,11 +3186,13 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
         snprintf(err, sizeof(err), "close %s", std::strerror(errno));
     }
     if (!ok) {
+        connection_upload_active = false;
         unlink(full_path.c_str());
         sendHttpError(req, endpoint, err[0] ? err : "upload failed", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
 
+    connection_upload_active = false;
     setConnectionStatus(endpoint, "none");
     httpd_resp_set_type(req, "text/plain");
     char reply[128];
@@ -3369,7 +3380,11 @@ void drawConnections()
         canvas.setCursor(8, 86);
         canvas.printf("LAST: %.22s", connection_last_endpoint);
         canvas.setCursor(8, 98);
-        canvas.printf("ERR: %.24s", connection_last_error);
+        if (connection_upload_active) {
+            canvas.printf("UP: %d/%d", connection_upload_done, connection_upload_total);
+        } else {
+            canvas.printf("ERR: %.24s", connection_last_error);
+        }
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 122);
         canvas.print("LIST/DL/WRTEST       GO STOP");
@@ -4058,6 +4073,11 @@ extern "C" void app_main(void)
         handleKey(ev);
         if (connection_dirty) {
             connection_dirty = false;
+            dirty = true;
+        }
+        if (connection_upload_active) {
+            last_input_ms = M5.millis();
+            if (display_off || display_dim) wakeDisplay();
             dirty = true;
         }
         drawIfDirty();
