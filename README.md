@@ -183,8 +183,9 @@ Endpoints:
 - `/api/list?path=/music` lists a whitelisted SD folder.
 - `/api/download?path=/notes/NOTE0001.TXT` downloads a whitelisted SD file.
 - `/api/write-test` writes `/sdcard/CARDPTR/WTEST.TXT` for SD write diagnostics; GET and POST are both accepted for easier browser testing.
+- `POST /api/upload?path=/books/B1.TXT` uploads a raw request body to a whitelisted SD folder.
 
-Upload and delete are intentionally not implemented yet.
+Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Delete is not implemented yet.
 
 ## SD card layout
 
@@ -245,7 +246,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 8. Open Files, browse SD and open a known `.TXT` or `.MP3`.
 9. Open Habits, check an item, reopen, confirm state remains.
 10. Open Settings, change theme, reboot if needed, confirm config loads.
-11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, one `/api/download?...`, and `/api/write-test`, stop with GO.
+11. Open Connections, press OK, connect Mac to `ABVX-Cardputer`, test `/api/ping`, `/api/list?path=/music`, one `/api/download?...`, `/api/write-test`, and a small upload, stop with GO.
 
 ## Known limitations
 
@@ -255,7 +256,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Reader bookmarks are RAM-only for now.
 - Music playback is stable enough for MVP but still uses chunked blocking playback.
 - Files is read/open only; delete/rename need confirmation UX later.
-- Connections supports list/download plus a small write-test endpoint. Full upload/delete are next steps.
+- Connections supports list/download plus upload MVP. Delete and overwrite are postponed.
 - Clock does not persist through full power-off.
 - Habits use manual day rollover, not calendar dates.
 - Browser, AI, Mac companion sync, and full Agent are postponed.
@@ -264,8 +265,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 
 Near-term:
 
-1. Connections v3: safe upload with 8.3 validation and queued SD writes after write-test is confirmed stable.
-2. Local web file manager: browser UI for list/download/upload/status while Cardputer runs AP mode.
+1. Local web file manager: browser UI for list/download/upload/status while Cardputer runs AP mode.
 3. Files v2: size/details and unsupported-file screen polish.
 4. Reader v2: persistent bookmarks.
 5. Notes v2: edit existing notes.

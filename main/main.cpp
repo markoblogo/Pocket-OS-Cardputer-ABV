@@ -51,6 +51,7 @@ constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 8 * 1024;
 constexpr int CHUNK_MS = 120;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
+constexpr size_t MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 constexpr int READER_LINES_PER_PAGE = 4;
 constexpr int SPEED_WPM_MIN = 350;
 constexpr int SPEED_WPM_MAX = 1000;
@@ -2814,6 +2815,50 @@ bool apiPathToSdPath(const std::string& api_path, std::string* full_path, char* 
     return true;
 }
 
+bool isSafe83Name(const std::string& name)
+{
+    if (name.empty() || name == "." || name == ".." || name.size() > 12) return false;
+    size_t dot = name.find('.');
+    if (dot != std::string::npos && name.find('.', dot + 1) != std::string::npos) return false;
+    size_t base_len = dot == std::string::npos ? name.size() : dot;
+    size_t ext_len = dot == std::string::npos ? 0 : name.size() - dot - 1;
+    if (base_len == 0 || base_len > 8 || ext_len > 3) return false;
+    for (char c : name) {
+        if (c == '.') continue;
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') continue;
+        return false;
+    }
+    return true;
+}
+
+bool uploadPathAllowed(const std::string& api_path, std::string* parent_api, std::string* filename, char* err, size_t err_len)
+{
+    size_t slash = api_path.find_last_of('/');
+    if (slash == std::string::npos || slash == 0) {
+        snprintf(err, err_len, "bad upload path");
+        return false;
+    }
+    *parent_api = api_path.substr(0, slash);
+    *filename = api_path.substr(slash + 1);
+    static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/cardputer"};
+    bool direct_root = false;
+    for (const char* root : roots) {
+        if (*parent_api == root) {
+            direct_root = true;
+            break;
+        }
+    }
+    if (!direct_root) {
+        snprintf(err, err_len, "root only");
+        return false;
+    }
+    if (!isSafe83Name(*filename)) {
+        snprintf(err, err_len, "use 8.3 name");
+        return false;
+    }
+    return true;
+}
+
 void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, httpd_err_code_t code = HTTPD_400_BAD_REQUEST)
 {
     setConnectionStatus(endpoint, reason);
@@ -2861,7 +2906,8 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "</ul>"
         "<p><a href=\"/api/write-test\">/api/write-test</a></p>"
         "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
-        "<p>Upload/delete later. Write-test creates /cardputer/WTEST.TXT.</p>"
+        "<p>Upload: POST raw body to /api/upload?path=/books/B1.TXT</p>"
+        "<p>8.3 names only. No overwrite. Delete later.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
 }
@@ -3043,6 +3089,106 @@ esp_err_t connectionWriteTestHandler(httpd_req_t* req)
     return httpd_resp_sendstr(req, "OK WRITE\npath=/cardputer/WTEST.TXT\n");
 }
 
+esp_err_t connectionUploadHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/upload";
+    std::string api_path;
+    if (!getRequestPath(req, &api_path, nullptr)) {
+        sendHttpError(req, endpoint, "missing path");
+        return ESP_OK;
+    }
+    if (req->content_len <= 0 || static_cast<size_t>(req->content_len) > MAX_UPLOAD_BYTES) {
+        sendHttpError(req, endpoint, "bad size");
+        return ESP_OK;
+    }
+
+    char err[64] = {};
+    std::string parent_api, filename, full_path, parent_full;
+    if (!uploadPathAllowed(api_path, &parent_api, &filename, err, sizeof(err)) ||
+        !apiPathToSdPath(api_path, &full_path, err, sizeof(err)) ||
+        !apiPathToSdPath(parent_api, &parent_full, err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "bad path");
+        return ESP_OK;
+    }
+    if (!initSd()) {
+        sendHttpError(req, endpoint, "sd mount failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    if (parent_api == "/cardputer") {
+        if (!ensureConnectionWriteDir(err, sizeof(err))) {
+            sendHttpError(req, endpoint, err[0] ? err : "dir failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+            return ESP_OK;
+        }
+    } else {
+        struct stat pst = {};
+        if (stat(parent_full.c_str(), &pst) != 0) {
+            errno = 0;
+            if (mkdir(parent_full.c_str(), 0775) != 0 && errno != EEXIST) {
+                snprintf(err, sizeof(err), "mkdir %s", std::strerror(errno));
+                sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
+                return ESP_OK;
+            }
+        } else if (!S_ISDIR(pst.st_mode)) {
+            sendHttpError(req, endpoint, "parent not dir", HTTPD_500_INTERNAL_SERVER_ERROR);
+            return ESP_OK;
+        }
+    }
+
+    struct stat st = {};
+    if (stat(full_path.c_str(), &st) == 0) {
+        sendHttpError(req, endpoint, "exists");
+        return ESP_OK;
+    }
+
+    FILE* f = fopen(full_path.c_str(), "wb");
+    if (!f) {
+        snprintf(err, sizeof(err), "open %s", std::strerror(errno));
+        sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    char buf[1024];
+    int remaining = req->content_len;
+    bool ok = true;
+    while (remaining > 0) {
+        int want = std::min<int>(remaining, sizeof(buf));
+        int got = httpd_req_recv(req, buf, want);
+        if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (got <= 0) {
+            ok = false;
+            snprintf(err, sizeof(err), "recv failed");
+            break;
+        }
+        if (fwrite(buf, 1, got, f) != static_cast<size_t>(got)) {
+            ok = false;
+            snprintf(err, sizeof(err), "write %s", std::strerror(errno));
+            break;
+        }
+        remaining -= got;
+        vTaskDelay(1);
+    }
+    if (fflush(f) != 0) {
+        ok = false;
+        snprintf(err, sizeof(err), "flush %s", std::strerror(errno));
+    }
+    if (fclose(f) != 0) {
+        ok = false;
+        snprintf(err, sizeof(err), "close %s", std::strerror(errno));
+    }
+    if (!ok) {
+        unlink(full_path.c_str());
+        sendHttpError(req, endpoint, err[0] ? err : "upload failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    setConnectionStatus(endpoint, "none");
+    httpd_resp_set_type(req, "text/plain");
+    char reply[128];
+    snprintf(reply, sizeof(reply), "OK UPLOAD\npath=%s\nsize=%d\n", api_path.c_str(), req->content_len);
+    return httpd_resp_sendstr(req, reply);
+}
+
 bool ensureConnectionStack(char* err, size_t err_len)
 {
     if (connection_stack_ready) return true;
@@ -3138,6 +3284,12 @@ bool startConnectionHttp(char* err, size_t err_len)
     write_test_post.method = HTTP_POST;
     write_test_post.handler = connectionWriteTestHandler;
     httpd_register_uri_handler(connection_httpd, &write_test_post);
+
+    httpd_uri_t upload = {};
+    upload.uri = "/api/upload";
+    upload.method = HTTP_POST;
+    upload.handler = connectionUploadHandler;
+    httpd_register_uri_handler(connection_httpd, &upload);
 
     connection_http_on = true;
     return true;
