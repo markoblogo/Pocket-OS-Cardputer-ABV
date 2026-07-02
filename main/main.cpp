@@ -2813,6 +2813,26 @@ void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, h
     httpd_resp_send_err(req, code, reason);
 }
 
+bool ensureConnectionWriteDir(char* err, size_t err_len)
+{
+    if (!initSd()) {
+        snprintf(err, err_len, "sd mount failed");
+        return false;
+    }
+    struct stat st = {};
+    if (stat(CONFIG_DIR, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) return true;
+        snprintf(err, err_len, "not dir");
+        return false;
+    }
+    errno = 0;
+    if (mkdir(CONFIG_DIR, 0775) != 0 && errno != EEXIST) {
+        snprintf(err, err_len, "mkdir %d %s", errno, std::strerror(errno));
+        return false;
+    }
+    return true;
+}
+
 esp_err_t connectionRootHandler(httpd_req_t* req)
 {
     ++connection_req_count;
@@ -2985,15 +3005,15 @@ esp_err_t connectionWriteTestHandler(httpd_req_t* req)
 {
     ++connection_req_count;
     const char* endpoint = "/api/write-test";
-    if (!ensureConfigDir()) {
-        sendHttpError(req, endpoint, "no sd/dir", HTTPD_500_INTERNAL_SERVER_ERROR);
+    char err[64] = {};
+    if (!ensureConnectionWriteDir(err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "sd dir failed", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
 
     const char* path = "/sdcard/cardputer/WTEST.TXT";
     FILE* f = fopen(path, "wb");
     if (!f) {
-        char err[64];
         snprintf(err, sizeof(err), "open %s", std::strerror(errno));
         sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
@@ -3112,6 +3132,9 @@ bool startConnectionHttp(char* err, size_t err_len)
 bool startConnections(char* err, size_t err_len)
 {
     if (connection_wifi_on && connection_http_on) return true;
+    // Mount SD before Wi-Fi starts. SD operations from HTTP handlers are then
+    // less likely to be the first mount attempt from the HTTP server task.
+    initSd();
     if (!ensureConnectionStack(err, err_len)) return false;
 
     wifi_config_t ap_config = {};
