@@ -266,11 +266,11 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 Near-term:
 
 1. Local web file manager: browser UI for list/download/upload/status while Cardputer runs AP mode.
-3. Files v2: size/details and unsupported-file screen polish.
-4. Reader v2: persistent bookmarks.
-5. Notes v2: edit existing notes.
-6. Time sync through Connections or future Mac sync flow.
-7. Agent quick-actions menu after app actions are stable.
+2. Files v2: size/details and unsupported-file screen polish.
+3. Reader v2: persistent bookmarks.
+4. Notes v2: edit existing notes.
+5. Time sync through Connections or future Mac sync flow.
+6. Agent quick-actions menu after app actions are stable.
 
 Infrastructure later:
 
