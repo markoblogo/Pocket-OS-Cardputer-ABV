@@ -260,11 +260,32 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Habits use manual day rollover, not calendar dates.
 - Browser, AI, Mac companion sync, and full Agent are postponed.
 
-## Near-term roadmap
+## Roadmap
+
+Near-term:
 
 1. Connections v3: safe upload with 8.3 validation and queued SD writes after write-test is confirmed stable.
-2. Files v2: size/details and unsupported-file screen polish.
-3. Reader v2: persistent bookmarks.
-4. Notes v2: edit existing notes.
-5. Time sync through future Mac/transfer flow.
-6. Agent quick-actions menu after app actions are stable.
+2. Local web file manager: browser UI for list/download/upload/status while Cardputer runs AP mode.
+3. Files v2: size/details and unsupported-file screen polish.
+4. Reader v2: persistent bookmarks.
+5. Notes v2: edit existing notes.
+6. Time sync through Connections or future Mac sync flow.
+7. Agent quick-actions menu after app actions are stable.
+
+Infrastructure later:
+
+- Firmware version/about screen with build info, SD status, and battery.
+- `CHANGELOG.md` and tagged GitHub releases.
+- GitHub Actions build that publishes `.bin` firmware artifacts.
+- Power policy hardening: Wi-Fi only while Connections is open, screen dim/off rules, no deep sleep until state handling is reliable.
+- OTA updates only after release/versioning/rollback discipline is in place.
+
+Longer-term product ideas:
+
+- Text-only browser: fetch pages, remove images/video/scripts, keep readable text and links. This stays offline-shell-adjacent and is not a priority until core apps and transfer are stable.
+- Mac companion app for sync, file preparation, time setting, config, and firmware updates.
+- Offline Agent as quick-actions command center first; online AI later and optional.
+
+Out of scope for this firmware:
+
+- Agro dashboards, grain-market terminals, price alerts, WebSocket market feeds, subscriptions, and Meshtastic. These may belong to separate projects, not this offline personal shell.
