@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -52,6 +53,8 @@ constexpr int INPUT_BUF_SIZE = 8 * 1024;
 constexpr int CHUNK_MS = 120;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
 constexpr size_t MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
+constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 16 * 1024;
 constexpr int READER_LINES_PER_PAGE = 4;
 constexpr int SPEED_WPM_MIN = 350;
 constexpr int SPEED_WPM_MAX = 1000;
@@ -240,6 +243,7 @@ uint32_t last_alert_beep_ms = 0;
 std::string random_result = "READY";
 
 bool initSd();
+bool ensureConnectionWriteDir(char* err, size_t err_len);
 
 uint16_t uiBg()
 {
@@ -2775,6 +2779,24 @@ bool getRequestPath(httpd_req_t* req, std::string* api_path, const char* fallbac
     return true;
 }
 
+bool getQueryValue(httpd_req_t* req, const char* key, char* out, size_t out_len)
+{
+    char query[224] = {};
+    return httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+           httpd_query_key_value(query, key, out, out_len) == ESP_OK;
+}
+
+bool getQueryUint(httpd_req_t* req, const char* key, size_t* out)
+{
+    char value[24] = {};
+    if (!getQueryValue(req, key, value, sizeof(value))) return false;
+    char* end = nullptr;
+    unsigned long parsed = std::strtoul(value, &end, 10);
+    if (!end || *end != '\0') return false;
+    *out = static_cast<size_t>(parsed);
+    return true;
+}
+
 bool isAllowedApiPath(const std::string& path)
 {
     static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/cardputer"};
@@ -2862,6 +2884,40 @@ bool uploadPathAllowed(const std::string& api_path, std::string* parent_api, std
     return true;
 }
 
+bool ensureUploadParent(const std::string& parent_api, const std::string& parent_full, char* err, size_t err_len)
+{
+    if (parent_api == "/cardputer") {
+        return ensureConnectionWriteDir(err, err_len);
+    }
+    struct stat pst = {};
+    if (stat(parent_full.c_str(), &pst) != 0) {
+        errno = 0;
+        if (mkdir(parent_full.c_str(), 0775) != 0 && errno != EEXIST) {
+            snprintf(err, err_len, "mkdir %s", std::strerror(errno));
+            return false;
+        }
+    } else if (!S_ISDIR(pst.st_mode)) {
+        snprintf(err, err_len, "parent not dir");
+        return false;
+    }
+    return true;
+}
+
+bool prepareUploadPath(const std::string& api_path, std::string* full_path, std::string* parent_api, char* err, size_t err_len)
+{
+    std::string filename, parent_full;
+    if (!uploadPathAllowed(api_path, parent_api, &filename, err, err_len) ||
+        !apiPathToSdPath(api_path, full_path, err, err_len) ||
+        !apiPathToSdPath(*parent_api, &parent_full, err, err_len)) {
+        return false;
+    }
+    if (!initSd()) {
+        snprintf(err, err_len, "sd mount failed");
+        return false;
+    }
+    return ensureUploadParent(*parent_api, parent_full, err, err_len);
+}
+
 void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, httpd_err_code_t code = HTTPD_400_BAD_REQUEST)
 {
     setConnectionStatus(endpoint, reason);
@@ -2909,7 +2965,8 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "</ul>"
         "<p><a href=\"/api/write-test\">/api/write-test</a></p>"
         "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
-        "<p>Upload: POST raw body to /api/upload?path=/books/B1.TXT</p>"
+        "<p>Small upload: POST raw body to /api/upload?path=/books/B1.TXT</p>"
+        "<p>Large upload: use tools/cardputer_upload.py chunk uploader.</p>"
         "<p>8.3 names only. No overwrite. Delete later.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
@@ -3105,37 +3162,16 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "bad size");
         return ESP_OK;
     }
+    if (static_cast<size_t>(req->content_len) > MAX_DIRECT_UPLOAD_BYTES) {
+        sendHttpError(req, endpoint, "use chunk upload");
+        return ESP_OK;
+    }
 
     char err[64] = {};
-    std::string parent_api, filename, full_path, parent_full;
-    if (!uploadPathAllowed(api_path, &parent_api, &filename, err, sizeof(err)) ||
-        !apiPathToSdPath(api_path, &full_path, err, sizeof(err)) ||
-        !apiPathToSdPath(parent_api, &parent_full, err, sizeof(err))) {
-        sendHttpError(req, endpoint, err[0] ? err : "bad path");
+    std::string parent_api, full_path;
+    if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
-    }
-    if (!initSd()) {
-        sendHttpError(req, endpoint, "sd mount failed", HTTPD_500_INTERNAL_SERVER_ERROR);
-        return ESP_OK;
-    }
-    if (parent_api == "/cardputer") {
-        if (!ensureConnectionWriteDir(err, sizeof(err))) {
-            sendHttpError(req, endpoint, err[0] ? err : "dir failed", HTTPD_500_INTERNAL_SERVER_ERROR);
-            return ESP_OK;
-        }
-    } else {
-        struct stat pst = {};
-        if (stat(parent_full.c_str(), &pst) != 0) {
-            errno = 0;
-            if (mkdir(parent_full.c_str(), 0775) != 0 && errno != EEXIST) {
-                snprintf(err, sizeof(err), "mkdir %s", std::strerror(errno));
-                sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
-                return ESP_OK;
-            }
-        } else if (!S_ISDIR(pst.st_mode)) {
-            sendHttpError(req, endpoint, "parent not dir", HTTPD_500_INTERNAL_SERVER_ERROR);
-            return ESP_OK;
-        }
     }
 
     struct stat st = {};
@@ -3198,6 +3234,136 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
     char reply[128];
     snprintf(reply, sizeof(reply), "OK UPLOAD\npath=%s\nsize=%d\n", api_path.c_str(), req->content_len);
     return httpd_resp_sendstr(req, reply);
+}
+
+esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/upload-begin";
+    std::string api_path;
+    size_t total = 0;
+    if (!getRequestPath(req, &api_path, nullptr) || !getQueryUint(req, "size", &total)) {
+        sendHttpError(req, endpoint, "missing args");
+        return ESP_OK;
+    }
+    if (total == 0 || total > MAX_UPLOAD_BYTES) {
+        sendHttpError(req, endpoint, "bad size");
+        return ESP_OK;
+    }
+    char err[64] = {};
+    std::string parent_api, full_path;
+    if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    struct stat st = {};
+    if (stat(full_path.c_str(), &st) == 0) {
+        sendHttpError(req, endpoint, "exists");
+        return ESP_OK;
+    }
+    FILE* f = fopen(full_path.c_str(), "wb");
+    if (!f) {
+        snprintf(err, sizeof(err), "open %s", std::strerror(errno));
+        sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    fclose(f);
+    connection_upload_done = 0;
+    connection_upload_total = static_cast<int>(total);
+    setConnectionStatus(endpoint, "begin");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "OK BEGIN\n");
+}
+
+esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/upload-chunk";
+    std::string api_path;
+    size_t offset = 0, total = 0;
+    if (!getRequestPath(req, &api_path, nullptr) || !getQueryUint(req, "offset", &offset) || !getQueryUint(req, "total", &total)) {
+        sendHttpError(req, endpoint, "missing args");
+        return ESP_OK;
+    }
+    if (req->content_len <= 0 || static_cast<size_t>(req->content_len) > MAX_UPLOAD_CHUNK_BYTES ||
+        total == 0 || total > MAX_UPLOAD_BYTES || offset + static_cast<size_t>(req->content_len) > total) {
+        sendHttpError(req, endpoint, "bad chunk");
+        return ESP_OK;
+    }
+    char err[64] = {};
+    std::string parent_api, full_path;
+    if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    FILE* f = fopen(full_path.c_str(), "r+b");
+    if (!f) {
+        snprintf(err, sizeof(err), "open %s", std::strerror(errno));
+        sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    if (fseek(f, static_cast<long>(offset), SEEK_SET) != 0) {
+        fclose(f);
+        sendHttpError(req, endpoint, "seek failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+
+    char buf[1024];
+    int remaining = req->content_len;
+    bool ok = true;
+    while (remaining > 0) {
+        int want = std::min<int>(remaining, sizeof(buf));
+        int got = httpd_req_recv(req, buf, want);
+        if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (got <= 0) {
+            ok = false;
+            snprintf(err, sizeof(err), "recv failed");
+            break;
+        }
+        if (fwrite(buf, 1, got, f) != static_cast<size_t>(got)) {
+            ok = false;
+            snprintf(err, sizeof(err), "write %s", std::strerror(errno));
+            break;
+        }
+        remaining -= got;
+    }
+    if (fflush(f) != 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        sendHttpError(req, endpoint, err[0] ? err : "chunk failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    connection_upload_done = static_cast<int>(offset + req->content_len);
+    connection_upload_total = static_cast<int>(total);
+    setConnectionStatus(endpoint, "chunk");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "OK CHUNK\n");
+}
+
+esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/upload-finish";
+    std::string api_path;
+    size_t total = 0;
+    if (!getRequestPath(req, &api_path, nullptr) || !getQueryUint(req, "size", &total)) {
+        sendHttpError(req, endpoint, "missing args");
+        return ESP_OK;
+    }
+    char err[64] = {};
+    std::string full_path;
+    if (!apiPathToSdPath(api_path, &full_path, err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "bad path");
+        return ESP_OK;
+    }
+    struct stat st = {};
+    if (stat(full_path.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != total) {
+        sendHttpError(req, endpoint, "size mismatch", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    setConnectionStatus(endpoint, "none");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "OK FINISH\n");
 }
 
 bool ensureConnectionStack(char* err, size_t err_len)
@@ -3301,6 +3467,24 @@ bool startConnectionHttp(char* err, size_t err_len)
     upload.method = HTTP_POST;
     upload.handler = connectionUploadHandler;
     httpd_register_uri_handler(connection_httpd, &upload);
+
+    httpd_uri_t upload_begin = {};
+    upload_begin.uri = "/api/upload-begin";
+    upload_begin.method = HTTP_POST;
+    upload_begin.handler = connectionUploadBeginHandler;
+    httpd_register_uri_handler(connection_httpd, &upload_begin);
+
+    httpd_uri_t upload_chunk = {};
+    upload_chunk.uri = "/api/upload-chunk";
+    upload_chunk.method = HTTP_POST;
+    upload_chunk.handler = connectionUploadChunkHandler;
+    httpd_register_uri_handler(connection_httpd, &upload_chunk);
+
+    httpd_uri_t upload_finish = {};
+    upload_finish.uri = "/api/upload-finish";
+    upload_finish.method = HTTP_POST;
+    upload_finish.handler = connectionUploadFinishHandler;
+    httpd_register_uri_handler(connection_httpd, &upload_finish);
 
     connection_http_on = true;
     return true;

@@ -185,7 +185,16 @@ Endpoints:
 - `/api/write-test` writes `/sdcard/CARDPTR/WTEST.TXT` for SD write diagnostics; GET and POST are both accepted for easier browser testing.
 - `POST /api/upload?path=/books/B1.TXT` uploads a raw request body to a whitelisted SD folder.
 
-Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Delete is not implemented yet.
+Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Small files can use `/api/upload`; larger files should use the chunk uploader in `tools/cardputer_upload.py`. Delete is not implemented yet.
+
+
+Chunk upload example:
+
+```sh
+python3 tools/cardputer_upload.py \
+  /Users/antonbiletskiy-volokh/Downloads/CardputerTestMusic/test_01_medicine_30s_128k.mp3 \
+  /music/T06.MP3
+```
 
 ## SD card layout
 
