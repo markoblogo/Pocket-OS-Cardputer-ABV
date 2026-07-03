@@ -1876,7 +1876,18 @@ void runAgentAction()
     else if (agent_cursor == 9) { screen = Screen::Connections; }
     else {
         message_title = "STATUS";
-        message_body = "offline shell";
+        int bat = batteryPercent();
+        uint64_t total = 0;
+        uint64_t free_b = 0;
+        if (sdUsage(&total, &free_b) && total >= free_b) {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "BAT %s  SD %s free", bat >= 0 ? std::to_string(bat).c_str() : "--", formatBytes(free_b).c_str());
+            message_body = buf;
+        } else {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "BAT %s  SD --", bat >= 0 ? std::to_string(bat).c_str() : "--");
+            message_body = buf;
+        }
         message_returns_music = false;
         message_returns_notes = false;
         screen = Screen::Message;
