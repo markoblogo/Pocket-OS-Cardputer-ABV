@@ -2135,7 +2135,8 @@ void drawNotesList()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.printf("NOTES %d/%d", notes_cursor + 1, static_cast<int>(notes.size()) + 1);
+    if (notes_cursor == 0) canvas.print(notes.empty() ? "NOTES 0/0" : "NOTES NEW");
+    else canvas.printf("NOTES %d/%d", notes_cursor, static_cast<int>(notes.size()));
     const int total = static_cast<int>(notes.size()) + 1;
     int rows = 4;
     int start = std::max(0, notes_cursor - 1);
@@ -2147,10 +2148,16 @@ void drawNotesList()
         if (i == 0) canvas.printf("%c NEW NOTE", i == notes_cursor ? '>' : ' ');
         else canvas.printf("%c %.13s", i == notes_cursor ? '>' : ' ', notes[i - 1].c_str());
     }
+    if (notes.empty()) {
+        canvas.setTextSize(1);
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 104);
+        canvas.print("No notes yet");
+    }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK NEW/OPEN   GO BACK");
+    canvas.print("OK OPEN  1 NEW  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -2310,14 +2317,18 @@ void drawNotesView()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 5);
-    canvas.printf("%.14s %d/%d", active_note_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
+    canvas.printf("%.12s %d/%d", active_note_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
-    for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
-        int idx = reader_scroll + row;
-        if (idx >= static_cast<int>(reader_lines.size())) break;
-        canvas.setCursor(8, 22 + row * 24);
-        drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
+    if (reader_lines.empty()) {
+        canvas.setCursor(8, 48);
+        canvas.print("EMPTY");
+    } else {
+        for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
+            int idx = reader_scroll + row;
+            if (idx >= static_cast<int>(reader_lines.size())) break;
+            drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
+        }
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
@@ -3910,6 +3921,12 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Down) notes_cursor = std::min(total - 1, notes_cursor + 1);
         else if (ev.key == Key::Left) notes_cursor = std::max(0, notes_cursor - 4);
         else if (ev.key == Key::Right) notes_cursor = std::min(total - 1, notes_cursor + 4);
+        else if (ev.key == Key::One) {
+            note_input.clear();
+            note_ru_mode = false;
+            screen = Screen::NotesEdit;
+            blockInput(300);
+        }
         else if (ev.key == Key::Ok) {
             if (notes_cursor == 0) {
                 note_input.clear();
