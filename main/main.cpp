@@ -81,7 +81,7 @@ volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -148,6 +148,7 @@ uint32_t input_block_until_ms = 0;
 
 Screen screen = Screen::Launcher;
 int launcher_index = 0;
+int agent_cursor = 0;
 std::string message_title;
 std::string message_body;
 bool message_returns_music = false;
@@ -1831,9 +1832,61 @@ bool sdUsage(uint64_t* total, uint64_t* free_bytes)
     return true;
 }
 
+static const char* AGENT_ACTIONS[] = {
+    "OPEN MUSIC",
+    "OPEN READER",
+    "OPEN NOTES",
+    "OPEN RECORD",
+    "OPEN FILES",
+    "OPEN TIME",
+    "OPEN HABITS",
+    "RANDOM YES/NO",
+    "SETTINGS",
+    "CONNECTIONS",
+    "STATUS"
+};
+constexpr int AGENT_ACTION_COUNT = sizeof(AGENT_ACTIONS) / sizeof(AGENT_ACTIONS[0]);
+
+void openLauncherApp(int index)
+{
+    if (index == 0) { agent_cursor = 0; screen = Screen::Agent; blockInput(250); }
+    else if (index == 1) { scanMusic(); screen = Screen::MusicList; blockInput(250); }
+    else if (index == 2) { scanBooks(); screen = Screen::ReaderList; blockInput(250); }
+    else if (index == 3) { scanNotes(); screen = Screen::NotesList; blockInput(250); }
+    else if (index == 4) { scanRecordings(); screen = Screen::RecorderList; blockInput(250); }
+    else if (index == 5) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; blockInput(250); }
+    else if (index == 6) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; blockInput(250); }
+    else if (index == 7) { random_result = "READY"; screen = Screen::Randomizer; blockInput(250); }
+    else if (index == 8) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
+    else if (index == 9) { screen = Screen::Settings; blockInput(250); }
+    else if (index == 10) { screen = Screen::Connections; blockInput(250); }
+}
+
+void runAgentAction()
+{
+    if (agent_cursor == 0) { scanMusic(); screen = Screen::MusicList; }
+    else if (agent_cursor == 1) { scanBooks(); screen = Screen::ReaderList; }
+    else if (agent_cursor == 2) { scanNotes(); screen = Screen::NotesList; }
+    else if (agent_cursor == 3) { scanRecordings(); screen = Screen::RecorderList; }
+    else if (agent_cursor == 4) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; }
+    else if (agent_cursor == 5) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; }
+    else if (agent_cursor == 6) { scanHabits(); screen = Screen::HabitsList; }
+    else if (agent_cursor == 7) { random_result = "READY"; screen = Screen::Randomizer; }
+    else if (agent_cursor == 8) { screen = Screen::Settings; }
+    else if (agent_cursor == 9) { screen = Screen::Connections; }
+    else {
+        message_title = "STATUS";
+        message_body = "offline shell";
+        message_returns_music = false;
+        message_returns_notes = false;
+        screen = Screen::Message;
+    }
+    blockInput(250);
+}
+
 void drawLauncher()
 {
-    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
+    static const char* labels[] = {"[@] AGENT", "[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
@@ -1853,6 +1906,32 @@ void drawLauncher()
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN   GO MUSIC");
+    canvas.pushSprite(0, 0);
+}
+
+void drawAgent()
+{
+    canvas.fillScreen(uiBg());
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("AGENT");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 28);
+    canvas.print("quick actions");
+    canvas.setTextSize(2);
+    int start = std::max(0, agent_cursor - 1);
+    start = std::min(start, std::max(0, AGENT_ACTION_COUNT - 4));
+    for (int i = start; i < std::min(AGENT_ACTION_COUNT, start + 4); ++i) {
+        canvas.setCursor(8, 42 + (i - start) * 20);
+        canvas.setTextColor(i == agent_cursor ? uiBg() : uiFg(), i == agent_cursor ? uiFg() : uiBg());
+        canvas.printf("%c %s", i == agent_cursor ? '>' : ' ', AGENT_ACTIONS[i]);
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 122);
+    canvas.print("OK RUN   GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -3577,6 +3656,7 @@ void drawIfDirty()
 {
     if (!dirty || display_off) return;
     if (screen == Screen::Launcher) drawLauncher();
+    else if (screen == Screen::Agent) drawAgent();
     else if (screen == Screen::MusicList) drawMusicList();
     else if (screen == Screen::MusicPlaying) drawMusicPlaying();
     else if (screen == Screen::ReaderList) drawReaderList();
@@ -3670,20 +3750,22 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Launcher) {
         if (ev.key == Key::Up) launcher_index = std::max(0, launcher_index - 1);
-        else if (ev.key == Key::Down) launcher_index = std::min(9, launcher_index + 1);
+        else if (ev.key == Key::Down) launcher_index = std::min(10, launcher_index + 1);
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; }
-        else if (ev.key == Key::Ok) {
-            if (launcher_index == 0) { scanMusic(); screen = Screen::MusicList; }
-            else if (launcher_index == 1) { scanBooks(); screen = Screen::ReaderList; }
-            else if (launcher_index == 2) { scanNotes(); screen = Screen::NotesList; }
-            else if (launcher_index == 3) { scanRecordings(); screen = Screen::RecorderList; }
-            else if (launcher_index == 4) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; blockInput(250); }
-            else if (launcher_index == 5) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; blockInput(250); }
-            else if (launcher_index == 6) { random_result = "READY"; screen = Screen::Randomizer; blockInput(250); }
-            else if (launcher_index == 7) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
-            else if (launcher_index == 8) { screen = Screen::Settings; blockInput(250); }
-            else if (launcher_index == 9) { screen = Screen::Connections; blockInput(250); }
-            else { message_title = "Coming soon"; message_body = "Music/Reader/Record"; message_returns_music = false; screen = Screen::Message; }
+        else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::Agent) {
+        if (ev.key == Key::Up) agent_cursor = std::max(0, agent_cursor - 1);
+        else if (ev.key == Key::Down) agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 1);
+        else if (ev.key == Key::Left) agent_cursor = std::max(0, agent_cursor - 4);
+        else if (ev.key == Key::Right) agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 4);
+        else if (ev.key == Key::Ok) runAgentAction();
+        else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
         }
         dirty = true;
         return;
