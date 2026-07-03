@@ -2770,8 +2770,12 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
         screen = Screen::RecorderPlaying;
         return true;
     }
-    if (err) *err = "unsupported";
-    return false;
+    message_title = "FILE INFO";
+    message_body = e.name + " " + formatBytes(e.size);
+    message_returns_music = false;
+    message_returns_notes = false;
+    screen = Screen::Message;
+    return true;
 }
 
 void drawSettings()
