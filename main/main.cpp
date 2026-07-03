@@ -2373,7 +2373,8 @@ void drawRecorderList()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.printf("REC %d/%d", recorder_cursor + 1, static_cast<int>(recordings.size()) + 1);
+    if (recorder_cursor == 0) canvas.print(recordings.empty() ? "REC 0/0" : "REC NEW");
+    else canvas.printf("REC %d/%d", recorder_cursor, static_cast<int>(recordings.size()));
 
     const int total = static_cast<int>(recordings.size()) + 1;
     int start = std::max(0, recorder_cursor - 1);
@@ -2388,10 +2389,16 @@ void drawRecorderList()
             canvas.printf("%c %.13s", i == recorder_cursor ? '>' : ' ', recordings[i - 1].c_str());
         }
     }
+    if (recordings.empty()) {
+        canvas.setTextSize(1);
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 104);
+        canvas.print("No recordings yet");
+    }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK REC/PLAY   GO BACK");
+    canvas.print("OK PLAY  1 NEW  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -2410,7 +2417,7 @@ void drawRecorderRecording()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK SAVE   GO SAVE");
+    canvas.print("OK STOP/SAVE   GO SAVE");
     canvas.pushSprite(0, 0);
 }
 
@@ -4015,6 +4022,19 @@ void handleKey(KeyEvent ev)
         const int total = static_cast<int>(recordings.size()) + 1;
         if (ev.key == Key::Up) recorder_cursor = std::max(0, recorder_cursor - 1);
         else if (ev.key == Key::Down) recorder_cursor = std::min(total - 1, recorder_cursor + 1);
+        else if (ev.key == Key::Left) recorder_cursor = std::max(0, recorder_cursor - 3);
+        else if (ev.key == Key::Right) recorder_cursor = std::min(total - 1, recorder_cursor + 3);
+        else if (ev.key == Key::One) {
+            std::string err;
+            if (!startRecording(&err)) {
+                message_title = "Record failed";
+                message_body = err.empty() ? "start" : err;
+                message_returns_music = false;
+                message_returns_notes = false;
+                screen = Screen::Message;
+            }
+            blockInput(300);
+        }
         else if (ev.key == Key::Ok) {
             std::string err;
             if (recorder_cursor == 0) {
@@ -4034,8 +4054,12 @@ void handleKey(KeyEvent ev)
                     screen = Screen::Message;
                 }
             }
+            blockInput(300);
         }
-        else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Launcher;
+        else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
         dirty = true;
         return;
     }
