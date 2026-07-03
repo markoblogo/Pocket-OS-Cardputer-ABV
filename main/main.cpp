@@ -3413,6 +3413,9 @@ bool startConnectionHttp(char* err, size_t err_len)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.lru_purge_enable = true;
+    // Default ESP-IDF HTTP server handler limit is too small for the
+    // Connections API once chunked upload endpoints are registered.
+    config.max_uri_handlers = 16;
     esp_err_t rc = httpd_start(&connection_httpd, &config);
     if (rc != ESP_OK) {
         snprintf(err, err_len, "http %s", esp_err_to_name(rc));
@@ -3420,71 +3423,33 @@ bool startConnectionHttp(char* err, size_t err_len)
         return false;
     }
 
-    httpd_uri_t root = {};
-    root.uri = "/";
-    root.method = HTTP_GET;
-    root.handler = connectionRootHandler;
-    httpd_register_uri_handler(connection_httpd, &root);
+    auto reg = [&](const char* uri, httpd_method_t method, esp_err_t (*handler)(httpd_req_t*)) -> bool {
+        httpd_uri_t route = {};
+        route.uri = uri;
+        route.method = method;
+        route.handler = handler;
+        esp_err_t reg_rc = httpd_register_uri_handler(connection_httpd, &route);
+        if (reg_rc != ESP_OK) {
+            snprintf(err, err_len, "route %s %s", uri, esp_err_to_name(reg_rc));
+            httpd_stop(connection_httpd);
+            connection_httpd = nullptr;
+            connection_http_on = false;
+            return false;
+        }
+        return true;
+    };
 
-    httpd_uri_t ping = {};
-    ping.uri = "/api/ping";
-    ping.method = HTTP_GET;
-    ping.handler = connectionPingHandler;
-    httpd_register_uri_handler(connection_httpd, &ping);
-
-    httpd_uri_t status = {};
-    status.uri = "/api/status";
-    status.method = HTTP_GET;
-    status.handler = connectionStatusHandler;
-    httpd_register_uri_handler(connection_httpd, &status);
-
-    httpd_uri_t list = {};
-    list.uri = "/api/list";
-    list.method = HTTP_GET;
-    list.handler = connectionListHandler;
-    httpd_register_uri_handler(connection_httpd, &list);
-
-    httpd_uri_t download = {};
-    download.uri = "/api/download";
-    download.method = HTTP_GET;
-    download.handler = connectionDownloadHandler;
-    httpd_register_uri_handler(connection_httpd, &download);
-
-    httpd_uri_t write_test_get = {};
-    write_test_get.uri = "/api/write-test";
-    write_test_get.method = HTTP_GET;
-    write_test_get.handler = connectionWriteTestHandler;
-    httpd_register_uri_handler(connection_httpd, &write_test_get);
-
-    httpd_uri_t write_test_post = {};
-    write_test_post.uri = "/api/write-test";
-    write_test_post.method = HTTP_POST;
-    write_test_post.handler = connectionWriteTestHandler;
-    httpd_register_uri_handler(connection_httpd, &write_test_post);
-
-    httpd_uri_t upload = {};
-    upload.uri = "/api/upload";
-    upload.method = HTTP_POST;
-    upload.handler = connectionUploadHandler;
-    httpd_register_uri_handler(connection_httpd, &upload);
-
-    httpd_uri_t upload_begin = {};
-    upload_begin.uri = "/api/upload-begin";
-    upload_begin.method = HTTP_POST;
-    upload_begin.handler = connectionUploadBeginHandler;
-    httpd_register_uri_handler(connection_httpd, &upload_begin);
-
-    httpd_uri_t upload_chunk = {};
-    upload_chunk.uri = "/api/upload-chunk";
-    upload_chunk.method = HTTP_POST;
-    upload_chunk.handler = connectionUploadChunkHandler;
-    httpd_register_uri_handler(connection_httpd, &upload_chunk);
-
-    httpd_uri_t upload_finish = {};
-    upload_finish.uri = "/api/upload-finish";
-    upload_finish.method = HTTP_POST;
-    upload_finish.handler = connectionUploadFinishHandler;
-    httpd_register_uri_handler(connection_httpd, &upload_finish);
+    if (!reg("/", HTTP_GET, connectionRootHandler)) return false;
+    if (!reg("/api/ping", HTTP_GET, connectionPingHandler)) return false;
+    if (!reg("/api/status", HTTP_GET, connectionStatusHandler)) return false;
+    if (!reg("/api/list", HTTP_GET, connectionListHandler)) return false;
+    if (!reg("/api/download", HTTP_GET, connectionDownloadHandler)) return false;
+    if (!reg("/api/write-test", HTTP_GET, connectionWriteTestHandler)) return false;
+    if (!reg("/api/write-test", HTTP_POST, connectionWriteTestHandler)) return false;
+    if (!reg("/api/upload", HTTP_POST, connectionUploadHandler)) return false;
+    if (!reg("/api/upload-begin", HTTP_POST, connectionUploadBeginHandler)) return false;
+    if (!reg("/api/upload-chunk", HTTP_POST, connectionUploadChunkHandler)) return false;
+    if (!reg("/api/upload-finish", HTTP_POST, connectionUploadFinishHandler)) return false;
 
     connection_http_on = true;
     return true;
