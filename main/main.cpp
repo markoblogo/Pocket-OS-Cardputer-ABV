@@ -244,6 +244,7 @@ uint32_t last_alarm_day = 999999;
 uint32_t alert_until_ms = 0;
 uint32_t last_alert_beep_ms = 0;
 std::string random_result = "READY";
+std::vector<std::string> random_history;
 
 bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
@@ -1992,14 +1993,24 @@ void drawAgent()
 void drawRandomizer()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("RANDOM");
     canvas.setTextSize(4);
+    canvas.setTextColor(uiAccent(), uiBg());
     int result_x = std::max(0, (SCREEN_W - static_cast<int>(canvas.textWidth(random_result.c_str()))) / 2);
     canvas.setCursor(result_x, 50);
     canvas.print(random_result.c_str());
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 98);
+    canvas.print("HIST ");
+    for (size_t i = 0; i < random_history.size(); ++i) {
+        if (i) canvas.print(" ");
+        canvas.print(random_history[i].c_str());
+    }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
@@ -2010,11 +2021,21 @@ void drawRandomizer()
 void drawHabitsList()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("HABITS TODAY");
+    int done_count = 0;
+    for (const auto& h : habits) if (h.done) ++done_count;
+    int pct = habits.empty() ? 0 : (done_count * 100) / static_cast<int>(habits.size());
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 28);
+    canvas.printf("DAY %d  %d/%d  %d%%", habit_day, done_count, static_cast<int>(habits.size()), pct);
     if (habits.empty()) {
+        canvas.setTextSize(2);
+        canvas.setTextColor(uiFg(), uiBg());
         canvas.setCursor(8, 48);
         canvas.print("NO HABITS");
         canvas.setTextSize(1);
@@ -2045,6 +2066,7 @@ void drawHabitsList()
 void drawHabitsStats()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
@@ -2055,7 +2077,7 @@ void drawHabitsStats()
     int total_possible = std::max(1, days * static_cast<int>(habits.size()));
     int rows = std::min(3, static_cast<int>(habits.size()));
     canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 28);
     canvas.printf("last %d internal days", days);
     canvas.setTextSize(2);
@@ -2083,6 +2105,7 @@ void drawHabitsManage()
 {
     static const char* items[] = {"ADD HABIT", "DISABLE SEL", "BACK"};
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
@@ -2105,6 +2128,7 @@ void drawHabitsManage()
 void drawHabitsEdit()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
@@ -4270,6 +4294,8 @@ void handleKey(KeyEvent ev)
         if (ev.key == Key::Ok) {
             static const char* results[] = {"YES", "NO", "MB"};
             random_result = results[esp_random() % 3];
+            random_history.insert(random_history.begin(), random_result);
+            if (random_history.size() > 5) random_history.pop_back();
             blockInput(220);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
