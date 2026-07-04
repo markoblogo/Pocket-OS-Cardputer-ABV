@@ -548,32 +548,9 @@ bool initKeyboard()
     return true;
 }
 
-void resetSdMount()
-{
-    if (sd_ready && sd_card) {
-        esp_vfs_fat_sdcard_unmount(MOUNT_POINT, sd_card);
-    }
-    sd_card = nullptr;
-    sd_ready = false;
-}
-
-bool sdRootAlive()
-{
-    DIR* dir = opendir(MOUNT_POINT);
-    if (!dir) return false;
-    closedir(dir);
-    return true;
-}
-
 bool initSd()
 {
-    if (sd_ready) {
-        if (sdRootAlive()) return true;
-        // After display idle/wake some boards can leave the VFS mount stale:
-        // the old sd_ready flag remains true, but all app scans see 0 files.
-        // Drop the stale mount and remount before reporting SD failure.
-        resetSdMount();
-    }
+    if (sd_ready) return true;
     esp_err_t ret;
     if (!spi_ready) {
         sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -612,8 +589,10 @@ DIR* openSdDirWithRetry(const char* path)
     if (!initSd()) return nullptr;
     DIR* dir = opendir(path);
     if (dir) return dir;
-    resetSdMount();
-    if (!initSd()) return nullptr;
+    // Do not unmount/remount on a single opendir failure: on Cardputer ADV that
+    // can turn a transient SD/VFS miss into a global "No SD" state. Retry once
+    // non-destructively and let the caller show an empty/error state if needed.
+    vTaskDelay(pdMS_TO_TICKS(20));
     return opendir(path);
 }
 
@@ -628,8 +607,8 @@ bool ensureSdDir(const char* path, std::string* err = nullptr)
         if (mkdir(path, 0775) == 0 || errno == EEXIST) return true;
         const int saved_errno = errno;
         if (attempt == 0) {
-            resetSdMount();
-            if (initSd()) continue;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
         }
         if (err) {
             *err = "mkdir ";
