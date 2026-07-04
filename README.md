@@ -183,9 +183,10 @@ Endpoints:
 - `/api/list?path=/music` lists a whitelisted SD folder.
 - `/api/download?path=/notes/NOTE0001.TXT` downloads a whitelisted SD file.
 - `/api/write-test` writes `/sdcard/CARDPTR/WTEST.TXT` for SD write diagnostics; GET and POST are both accepted for easier browser testing.
-- `POST /api/upload?path=/books/B1.TXT` uploads a raw request body to a whitelisted SD folder.
+- `POST /api/upload?path=/books/B1.TXT` uploads a small raw request body to a whitelisted SD folder.
+- `POST /api/upload-begin`, `/api/upload-chunk`, `/api/upload-finish`, `/api/upload-abort` are used by the chunk uploader.
 
-Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Small files can use `/api/upload`; larger files should use the chunk uploader in `tools/cardputer_upload.py`. Delete is not implemented yet.
+Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Small files can use `/api/upload`; larger files should use the chunk uploader in `tools/cardputer_upload.py`. Chunk upload uses conservative 1 KB chunks with delay/retry because the Cardputer AP and SD writes are resource constrained. Delete is not implemented yet.
 
 Basic test flow:
 
@@ -204,6 +205,8 @@ python3 tools/cardputer_upload.py \
   /Users/antonbiletskiy-volokh/Downloads/CardputerTestMusic/test_01_medicine_30s_128k.mp3 \
   /music/T06.MP3
 ```
+
+If the upload is interrupted, the tool calls `/api/upload-abort` to remove the partial file. Use another 8.3 target name if the firmware reports `exists`.
 
 ## SD card layout
 

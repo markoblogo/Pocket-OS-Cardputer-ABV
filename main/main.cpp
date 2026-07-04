@@ -54,7 +54,7 @@ constexpr int CHUNK_MS = 120;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
 constexpr size_t MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
-constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 16 * 1024;
+constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 2 * 1024;
 constexpr int READER_LINES_PER_PAGE = 4;
 constexpr int SPEED_WPM_MIN = 350;
 constexpr int SPEED_WPM_MAX = 1000;
@@ -3226,6 +3226,7 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
         "<p>Small upload: POST raw body to /api/upload?path=/books/B1.TXT</p>"
         "<p>Large upload: use tools/cardputer_upload.py chunk uploader.</p>"
+        "<p>Abort partial upload: POST /api/upload-abort?path=/music/T06.MP3</p>"
         "<p>8.3 names only. No overwrite. Delete later.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
@@ -3517,8 +3518,12 @@ esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
     }
     struct stat st = {};
     if (stat(full_path.c_str(), &st) == 0) {
-        sendHttpError(req, endpoint, "exists");
-        return ESP_OK;
+        if (st.st_size == 0) {
+            unlink(full_path.c_str());
+        } else {
+            sendHttpError(req, endpoint, "exists");
+            return ESP_OK;
+        }
     }
     FILE* f = fopen(full_path.c_str(), "wb");
     if (!f) {
@@ -3567,8 +3572,12 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    char buf[1024];
+    char buf[512];
     int remaining = req->content_len;
+    connection_upload_active = true;
+    connection_upload_done = static_cast<int>(offset);
+    connection_upload_total = static_cast<int>(total);
+    setConnectionStatus(endpoint, "chunk recv");
     bool ok = true;
     while (remaining > 0) {
         int want = std::min<int>(remaining, sizeof(buf));
@@ -3585,18 +3594,25 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
             break;
         }
         remaining -= got;
+        connection_upload_done = static_cast<int>(offset + req->content_len - remaining);
+        connection_dirty = true;
+        vTaskDelay(2);
     }
     if (fflush(f) != 0) ok = false;
     if (fclose(f) != 0) ok = false;
     if (!ok) {
+        connection_upload_active = false;
         sendHttpError(req, endpoint, err[0] ? err : "chunk failed", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
     connection_upload_done = static_cast<int>(offset + req->content_len);
     connection_upload_total = static_cast<int>(total);
+    connection_upload_active = false;
     setConnectionStatus(endpoint, "chunk");
     httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, "OK CHUNK\n");
+    char reply[96];
+    snprintf(reply, sizeof(reply), "OK CHUNK\ndone=%d\ntotal=%d\n", connection_upload_done, connection_upload_total);
+    return httpd_resp_sendstr(req, reply);
 }
 
 esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
@@ -3617,12 +3633,39 @@ esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
     }
     struct stat st = {};
     if (stat(full_path.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != total) {
+        connection_upload_active = false;
         sendHttpError(req, endpoint, "size mismatch", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
+    connection_upload_active = false;
+    connection_upload_done = static_cast<int>(total);
+    connection_upload_total = static_cast<int>(total);
     setConnectionStatus(endpoint, "none");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK FINISH\n");
+}
+
+esp_err_t connectionUploadAbortHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/upload-abort";
+    std::string api_path;
+    if (!getRequestPath(req, &api_path, nullptr)) {
+        sendHttpError(req, endpoint, "missing path");
+        return ESP_OK;
+    }
+    char err[64] = {};
+    std::string parent_api, full_path;
+    if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
+        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    unlink(full_path.c_str());
+    connection_upload_active = false;
+    connection_upload_done = 0;
+    setConnectionStatus(endpoint, "aborted");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "OK ABORT\n");
 }
 
 bool ensureConnectionStack(char* err, size_t err_len)
@@ -3709,6 +3752,7 @@ bool startConnectionHttp(char* err, size_t err_len)
     if (!reg("/api/upload-begin", HTTP_POST, connectionUploadBeginHandler)) return false;
     if (!reg("/api/upload-chunk", HTTP_POST, connectionUploadChunkHandler)) return false;
     if (!reg("/api/upload-finish", HTTP_POST, connectionUploadFinishHandler)) return false;
+    if (!reg("/api/upload-abort", HTTP_POST, connectionUploadAbortHandler)) return false;
 
     connection_http_on = true;
     return true;
