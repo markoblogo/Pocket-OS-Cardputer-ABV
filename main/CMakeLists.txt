@@ -10,6 +10,7 @@ idf_component_register(
         M5Unified
         minimp3
         esp_driver_spi
+        esp_app_format
         esp_driver_gpio
         esp_event
         esp_http_server

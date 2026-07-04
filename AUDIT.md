@@ -21,7 +21,7 @@ Latest verified firmware artifact:
 build/cardputer-abvx-minimal.bin
 ```
 
-The firmware has been repeatedly tested on real Cardputer ADV hardware. Core apps currently work at MVP level: Music, Record, Reader, Notes, Files, Time, Habits, Randomizer, Settings, Connections, Agent quick actions.
+The firmware has been repeatedly tested on real Cardputer ADV hardware. Core apps currently work at MVP level: Music, Record, Reader, Notes, Files, Time, Habits, Randomizer, Settings, and Connections. Agent quick actions are intentionally hidden from the launcher until Agent becomes a real command/AI layer.
 
 ## Hardware assumptions verified
 
@@ -93,15 +93,20 @@ Recommended extraction order:
 
 Do not do a broad rewrite before the next hardware-tested release.
 
-### P1: SD hot-remove/remount
+### P1: SD lifecycle and hot-remove/remount
 
 `sd_ready` is cached after first successful mount. If SD is removed or electrically glitches, apps may keep assuming SD is available.
+
+Current mitigation:
+
+- Settings exposes a manual SD reprobe action.
+- Automatic destructive remount on scan miss is avoided because it caused global `No SD` behavior on hardware.
 
 Future fix:
 
 - Add a lightweight SD health probe before writes.
 - On repeated write/read failure, mark SD unavailable and show a clear error.
-- Add Settings -> SD remount action.
+- Keep remount user-initiated or guarded by clear repeated failure criteria.
 
 ### P2: Time persistence
 
@@ -157,17 +162,18 @@ Before tagging a public firmware release:
 - Files can browse and open known file types.
 - Connections ping/list/download/write-test pass.
 - Upload either passes for a real MP3 or is clearly marked experimental.
-- Firmware version/about screen exists.
+- Firmware About screen exists.
 - GitHub Release includes `.bin`, flash command, known limitations, and SD layout.
 
 ## Current recommendation
 
-Do not add major new product apps until the current MVP is tagged as a test release.
+Do not add Browser or AI until the offline shell and transfer layer are stable. Smaller offline-app v2 work can continue after SD stability is hardware-verified.
 
 Best next engineering steps:
 
-1. Hardware-test the recent audit fixes.
-2. If Connections large upload still fails, implement queued SD write outside HTTP handlers.
-3. Add an About/version screen.
-4. Add `CHANGELOG.md` and tag the first test release.
-5. Then resume feature work from the roadmap.
+1. Hardware-test SD across Music -> Reader -> Notes -> Record -> Files after app switching.
+2. If stable, tag the first test release.
+3. Finish offline apps v2: Record, Reader, Notes, Files, Time, Habits.
+4. Rework Connections upload as queued SD writes outside HTTP handlers.
+5. Then start Text Browser MVP.
+6. Agent/AI remains postponed until app actions and network are reliable.

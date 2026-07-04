@@ -20,7 +20,7 @@ Working blocks:
 - Time: clock, stopwatch, timer, alarm.
 - Habits checklist with manual day rollover and 7D/30D stats.
 - Randomizer: `YES / NO / MB`.
-- Settings: theme, sound, timeout, power-save preset, SD/config status.
+- Settings: theme, sound, timeout, power-save preset, SD reprobe, About, config status.
 - Connections: Wi-Fi AP read-only list/download MVP.
 
 ## Apps
@@ -30,7 +30,7 @@ Working blocks:
 - Up / Down selects apps.
 - OK opens selected app.
 - GO is a quick Music shortcut on launcher.
-- Production launcher currently exposes user apps only; dev diagnostics are not in the normal build.
+- Production launcher exposes user apps only. Agent is hidden until it becomes a real command/AI layer rather than a launcher duplicate.
 
 ### Music
 
@@ -162,7 +162,8 @@ Options:
 - Sound: `OFF`, `LOW`, `MID`, `LOUD`, `MAX`.
 - Timeout: `SHORT`, `NORMAL`, `LONG`.
 - Power preset: green theme, low sound, short timeout.
-- SD/config status.
+- SD reprobe/status.
+- About screen: project, firmware version, build date/time, IDF version.
 - Communications placeholder.
 
 ### Connections
@@ -280,7 +281,7 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Connections supports list/download plus upload MVP. Delete and overwrite are postponed; large upload remains the highest-risk transfer path.
 - Clock does not persist through full power-off.
 - Habits use manual day rollover, not calendar dates.
-- Browser, AI, Mac companion sync, and full Agent are postponed.
+- Browser, AI, Mac companion sync, and full Agent are postponed. Agent is intentionally hidden from launcher for now.
 
 ## Audit
 
@@ -290,16 +291,14 @@ Engineering audit notes and risk register are kept in `AUDIT.md`.
 
 Near-term:
 
-1. Local web file manager: browser UI for list/download/upload/status while Cardputer runs AP mode.
-2. Files v2: size/details and unsupported-file screen polish.
-3. Reader v2: persistent bookmarks.
-4. Notes v2: edit existing notes.
-5. Time sync through Connections or future Mac sync flow.
-6. Agent quick-actions menu after app actions are stable.
+1. Stability baseline: SD lifecycle, Settings SD reprobe, About/version, first tagged test release.
+2. Offline apps v2: Record duration/delete, Reader persistent bookmarks, Notes edit/delete, Files details/delete polish, Time presets/persistence polish, Habits edit/delete.
+3. Connections/Transfer v2: safer queued chunk upload, phone/Mac web file manager, `/cardputer` transfer folder.
+4. Text Browser MVP: URL input, favorites cache, text/link extraction, supported downloads.
+5. Agent + AI: Agent returns only as local command router/memory controller; online OpenAI is optional and later.
 
 Infrastructure later:
 
-- Firmware version/about screen with build info, SD status, and battery.
 - `CHANGELOG.md` and tagged GitHub releases.
 - GitHub Actions build that publishes `.bin` firmware artifacts.
 - Power policy hardening: Wi-Fi only while Connections is open, screen dim/off rules, no deep sleep until state handling is reliable.
@@ -307,9 +306,9 @@ Infrastructure later:
 
 Longer-term product ideas:
 
-- Text-only browser: fetch pages, remove images/video/scripts, keep readable text and links. This stays offline-shell-adjacent and is not a priority until core apps and transfer are stable.
+- Text-only browser: fetch pages, remove images/video/scripts, keep readable text and links, cache 5-10 favorites first-level pages for offline reading.
 - Mac companion app for sync, file preparation, time setting, config, and firmware updates.
-- Offline Agent as quick-actions command center first; online AI later and optional.
+- Offline Agent as deterministic command/memory router first; online OpenAI text/voice later and optional.
 
 Out of scope for this firmware:
 

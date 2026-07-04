@@ -16,6 +16,7 @@
 
 #include <driver/sdspi_host.h>
 #include <driver/spi_master.h>
+#include <esp_app_desc.h>
 #include <esp_event.h>
 #include <esp_http_server.h>
 #include <esp_netif.h>
@@ -265,6 +266,16 @@ bool flushAndClose(FILE* f)
     if (fflush(f) != 0) ok = false;
     if (fclose(f) != 0) ok = false;
     return ok;
+}
+
+bool manualSdReprobe()
+{
+    if (sd_ready && sd_card) {
+        esp_vfs_fat_sdcard_unmount(MOUNT_POINT, sd_card);
+    }
+    sd_card = nullptr;
+    sd_ready = false;
+    return initSd();
 }
 
 void showMessage(const std::string& title, const std::string& body, MessageReturn ret = MessageReturn::Launcher)
@@ -1900,17 +1911,16 @@ constexpr int AGENT_ACTION_COUNT = sizeof(AGENT_ACTIONS) / sizeof(AGENT_ACTIONS[
 
 void openLauncherApp(int index)
 {
-    if (index == 0) { agent_cursor = 0; screen = Screen::Agent; blockInput(250); }
-    else if (index == 1) { scanMusic(); screen = Screen::MusicList; blockInput(250); }
-    else if (index == 2) { scanBooks(); screen = Screen::ReaderList; blockInput(250); }
-    else if (index == 3) { scanNotes(); screen = Screen::NotesList; blockInput(250); }
-    else if (index == 4) { scanRecordings(); screen = Screen::RecorderList; blockInput(250); }
-    else if (index == 5) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; blockInput(250); }
-    else if (index == 6) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; blockInput(250); }
-    else if (index == 7) { random_result = "READY"; screen = Screen::Randomizer; blockInput(250); }
-    else if (index == 8) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
-    else if (index == 9) { screen = Screen::Settings; blockInput(250); }
-    else if (index == 10) { screen = Screen::Connections; blockInput(250); }
+    if (index == 0) { scanMusic(); screen = Screen::MusicList; blockInput(250); }
+    else if (index == 1) { scanBooks(); screen = Screen::ReaderList; blockInput(250); }
+    else if (index == 2) { scanNotes(); screen = Screen::NotesList; blockInput(250); }
+    else if (index == 3) { scanRecordings(); screen = Screen::RecorderList; blockInput(250); }
+    else if (index == 4) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; blockInput(250); }
+    else if (index == 5) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; blockInput(250); }
+    else if (index == 6) { random_result = "READY"; screen = Screen::Randomizer; blockInput(250); }
+    else if (index == 7) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
+    else if (index == 8) { screen = Screen::Settings; blockInput(250); }
+    else if (index == 9) { screen = Screen::Connections; blockInput(250); }
 }
 
 void runAgentAction()
@@ -1972,7 +1982,7 @@ void drawCyberAccent()
 
 void drawLauncher()
 {
-    static const char* labels[] = {"[@] AGENT", "[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
+    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
     drawCyberAccent();
@@ -2975,21 +2985,23 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
 
 void drawSettings()
 {
+    constexpr int settings_count = 7;
     canvas.fillScreen(uiBg());
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("SETTINGS");
     int start = std::max(0, settings_cursor - 1);
-    start = std::min(start, 3);
-    for (int i = start; i < std::min(6, start + 3); ++i) {
+    start = std::min(start, std::max(0, settings_count - 3));
+    for (int i = start; i < std::min(settings_count, start + 3); ++i) {
         canvas.setCursor(8, 34 + (i - start) * 23);
         canvas.setTextColor(i == settings_cursor ? uiBg() : uiFg(), i == settings_cursor ? uiFg() : uiBg());
         if (i == 0) canvas.printf("%c THEME %s", i == settings_cursor ? '>' : ' ', themeName());
         else if (i == 1) canvas.printf("%c SOUND %s", i == settings_cursor ? '>' : ' ', soundName());
         else if (i == 2) canvas.printf("%c TIMEOUT %s", i == settings_cursor ? '>' : ' ', timeoutName());
         else if (i == 3) canvas.printf("%c POWER %s", i == settings_cursor ? '>' : ' ', power_save ? "ON" : "OFF");
-        else if (i == 4) canvas.printf("%c SD STATUS", i == settings_cursor ? '>' : ' ');
+        else if (i == 4) canvas.printf("%c SD REPROBE", i == settings_cursor ? '>' : ' ');
+        else if (i == 5) canvas.printf("%c ABOUT", i == settings_cursor ? '>' : ' ');
         else canvas.printf("%c CONNECTIONS", i == settings_cursor ? '>' : ' ');
     }
     canvas.setTextSize(1);
@@ -4034,7 +4046,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Launcher) {
         if (ev.key == Key::Up) { launcher_index = std::max(0, launcher_index - 1); pulseUi(); }
-        else if (ev.key == Key::Down) { launcher_index = std::min(10, launcher_index + 1); pulseUi(); }
+        else if (ev.key == Key::Down) { launcher_index = std::min(9, launcher_index + 1); pulseUi(); }
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
         dirty = true;
@@ -4530,7 +4542,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Settings) {
         if (ev.key == Key::Up) settings_cursor = std::max(0, settings_cursor - 1);
-        else if (ev.key == Key::Down) settings_cursor = std::min(5, settings_cursor + 1);
+        else if (ev.key == Key::Down) settings_cursor = std::min(6, settings_cursor + 1);
         else if (ev.key == Key::Left || ev.key == Key::Right || ev.key == Key::Ok) {
             int dir = ev.key == Key::Left ? -1 : 1;
             if (settings_cursor == 0) {
@@ -4548,12 +4560,23 @@ void handleKey(KeyEvent ev)
             } else if (settings_cursor == 4 && ev.key == Key::Ok) {
                 uint64_t total = 0;
                 uint64_t free_b = 0;
-                if (sdUsage(&total, &free_b) && total >= free_b) {
-                    showMessage("SD STATUS", "FREE " + formatBytes(free_b) + "\nUSED " + formatBytes(total - free_b));
+                bool ok = manualSdReprobe() && sdUsage(&total, &free_b) && total >= free_b;
+                if (ok) {
+                    showMessage("SD REPROBE", "OK\nFREE " + formatBytes(free_b) + "\nUSED " + formatBytes(total - free_b));
                 } else {
-                    showMessage("SD STATUS", "SD not ready");
+                    showMessage("SD REPROBE", "SD not ready");
                 }
             } else if (settings_cursor == 5 && ev.key == Key::Ok) {
+                const esp_app_desc_t* app = esp_app_get_description();
+                char buf[160];
+                snprintf(buf, sizeof(buf), "%s\nver %s\n%s %s\nIDF %s",
+                         app ? app->project_name : "ABVx",
+                         app ? app->version : "-",
+                         app ? app->date : __DATE__,
+                         app ? app->time : __TIME__,
+                         app ? app->idf_ver : "-");
+                showMessage("ABOUT", buf);
+            } else if (settings_cursor == 6 && ev.key == Key::Ok) {
                 screen = Screen::Connections;
             }
             if (settings_cursor < 4) saveConfig();
