@@ -267,6 +267,14 @@ uint16_t uiDim()
     return theme_mode == ThemeMode::Invert ? 0x8410 : 0x7BEF;
 }
 
+uint16_t uiAccent()
+{
+    if (theme_mode == ThemeMode::Green) return 0xFFE0;   // green theme: yellow signal
+    if (theme_mode == ThemeMode::Yellow) return 0x07E0;  // yellow theme: green signal
+    if (theme_mode == ThemeMode::Invert) return 0xF800;  // inverted theme: red signal
+    return 0xFFFF;                                       // white theme: white signal
+}
+
 const char* themeName()
 {
     if (theme_mode == ThemeMode::Green) return "GREEN";
@@ -1553,6 +1561,7 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
     const int x = 8, y = 76, w = 224, h = 38;
     canvas.fillRect(x, y, w, h, uiBg());
     canvas.drawRect(x, y, w, h, uiDim());
+    canvas.drawFastHLine(x + 1, y + 1, w - 2, uiAccent());
     const int mid = y + h / 2;
     const size_t frames = pcm.size() / std::max(1, channels);
     if (frames == 0) return;
@@ -1563,7 +1572,7 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
         int sample = pcm[std::min(idx, pcm.size() - 1)] >> 9;
         int yy = std::max(y + 1, std::min(y + h - 2, mid - sample));
         int xx = x + px;
-        if (px > 0) canvas.drawLine(prev_x, prev_y, xx, yy, uiFg());
+        if (px > 0) canvas.drawLine(prev_x, prev_y, xx, yy, uiAccent());
         prev_x = xx;
         prev_y = yy;
     }
@@ -1916,10 +1925,11 @@ void drawCyberAccent()
     uint32_t t = M5.millis();
     int scan_y = 18 + ((t / 18) % 5) * 20;
     canvas.drawFastHLine(0, scan_y, SCREEN_W, uiDim());
-    canvas.drawFastHLine(0, scan_y + 1, 44, uiFg());
+    canvas.drawFastHLine(0, scan_y + 1, 44, uiAccent());
     canvas.drawFastVLine(0, 18, 88, uiDim());
     canvas.drawFastVLine(SCREEN_W - 1, 18, 88, uiDim());
     canvas.drawRect(3, 3, SCREEN_W - 6, SCREEN_H - 6, uiDim());
+    canvas.drawPixel(5 + (t / 30) % 20, 5, uiAccent());
 }
 
 void drawLauncher()
@@ -2116,10 +2126,16 @@ void drawHabitsEdit()
 void drawMusicList()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.printf("MUSIC  %d/%d", tracks.empty() ? 0 : selected_track + 1, static_cast<int>(tracks.size()));
+    canvas.printf("MUSIC %d/%d", tracks.empty() ? 0 : selected_track + 1, static_cast<int>(tracks.size()));
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(160, 14);
+    canvas.printf("SHUF:%s", shuffle_on ? "ON" : "OFF");
+    canvas.setTextSize(2);
     if (tracks.empty()) {
         canvas.setCursor(8, 42);
         canvas.println(sd_ready ? "No MP3" : "No SD");
@@ -2139,13 +2155,14 @@ void drawMusicList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.printf("OK PLAY  1 SHUF:%s  GO BACK", shuffle_on ? "ON" : "OFF");
+    canvas.print("OK PLAY   1 SHUF   GO BACK");
     canvas.pushSprite(0, 0);
 }
 
 void drawMusicPlaying()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
@@ -2153,7 +2170,10 @@ void drawMusicPlaying()
     canvas.setCursor(8, 34);
     canvas.printf("%.14s", !override_music_path.empty() ? baseName(override_music_path).c_str() : (tracks.empty() ? "" : tracks[selected_track].c_str()));
     canvas.setCursor(8, 58);
-    canvas.printf("V:%s S:%s C:%d", volumeName(), shuffle_on ? "ON" : "OFF", decoded_chunks);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.printf("VOL:%s", volumeName());
+    canvas.setCursor(118, 58);
+    canvas.printf("SHUF:%s", shuffle_on ? "ON" : "OFF");
     drawWaveform(pcm_chunk, pcm_channels);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
