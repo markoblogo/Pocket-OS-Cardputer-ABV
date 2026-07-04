@@ -2423,11 +2423,16 @@ void drawNotesEdit()
 void drawRecorderList()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     if (recorder_cursor == 0) canvas.print(recordings.empty() ? "REC 0/0" : "REC NEW");
     else canvas.printf("REC %d/%d", recorder_cursor, static_cast<int>(recordings.size()));
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(158, 14);
+    canvas.print("WAV");
 
     const int total = static_cast<int>(recordings.size()) + 1;
     int start = std::max(0, recorder_cursor - 1);
@@ -2458,14 +2463,16 @@ void drawRecorderList()
 void drawRecorderRecording()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.println("RECORDING");
+    canvas.println("REC LIVE");
     canvas.setCursor(8, 34);
     canvas.printf("%.14s", active_recording_name.c_str());
     canvas.setCursor(8, 58);
-    canvas.printf("%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.printf("TIME:%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
@@ -2477,14 +2484,16 @@ void drawRecorderRecording()
 void drawRecorderPlaying()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.println("REC PLAY");
+    canvas.println("PLAY REC");
     canvas.setCursor(8, 34);
     canvas.printf("%.14s", active_recording_name.c_str());
     canvas.setCursor(8, 58);
-    canvas.printf("C:%lu", static_cast<unsigned long>(rec_play_chunks));
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.printf("CHUNK:%lu", static_cast<unsigned long>(rec_play_chunks));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
