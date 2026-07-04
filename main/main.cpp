@@ -3770,46 +3770,55 @@ void stopConnections()
 void drawConnections()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     if (connection_wifi_on || connection_http_on) {
-        canvas.print("WIFI TRANSFER");
+        canvas.print("WIFI SYNC");
+        canvas.setTextColor(uiAccent(), uiBg());
+        canvas.setCursor(8, 32);
+        canvas.printf("AP %s", connection_wifi_on ? "ON" : "OFF");
+        canvas.setCursor(104, 32);
+        canvas.printf("HTTP %s", connection_http_on ? "ON" : "OFF");
         canvas.setTextSize(1);
         canvas.setTextColor(uiFg(), uiBg());
-        canvas.setCursor(8, 34);
-        canvas.printf("SSID: ABVX-Cardputer");
-        canvas.setCursor(8, 46);
-        canvas.printf("PASS: cardputer");
         canvas.setCursor(8, 58);
-        canvas.printf("URL:  http://192.168.4.1");
-        canvas.setCursor(8, 74);
-        canvas.printf("AP:%s HTTP:%s REQ:%d", connection_wifi_on ? "ON" : "OFF", connection_http_on ? "ON" : "OFF", connection_req_count);
-        canvas.setCursor(8, 86);
+        canvas.print("SSID ABVX-Cardputer");
+        canvas.setCursor(8, 70);
+        canvas.print("PASS cardputer");
+        canvas.setCursor(8, 82);
+        canvas.print("URL  192.168.4.1");
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 96);
+        canvas.printf("REQ:%d", connection_req_count);
+        canvas.setCursor(70, 96);
         canvas.printf("LAST: %.22s", connection_last_endpoint);
-        canvas.setCursor(8, 98);
+        canvas.setCursor(8, 108);
         if (connection_upload_active) {
-            canvas.printf("UP: %d/%d", connection_upload_done, connection_upload_total);
+            canvas.printf("UPLOAD %d/%d", connection_upload_done, connection_upload_total);
         } else {
-            canvas.printf("ERR: %.24s", connection_last_error);
+            canvas.printf("ERR: %.28s", connection_last_error);
         }
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 122);
-        canvas.print("LIST/DL/WRTEST       GO STOP");
+        canvas.print("OK STATUS           GO STOP");
         canvas.pushSprite(0, 0);
         return;
     }
     canvas.print("CONNECTIONS");
-    canvas.setCursor(8, 38);
-    canvas.print("> WiFi Transfer");
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 36);
+    canvas.print("AP OFF");
+    canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 62);
-    canvas.print("  Bluetooth later");
-    canvas.setCursor(8, 86);
-    canvas.print("  USB later");
+    canvas.print("OK START");
+    canvas.setCursor(8, 84);
+    canvas.print("WiFi file transfer");
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
-    canvas.setCursor(8, 112);
-    canvas.print("AP ping/status MVP");
+    canvas.setCursor(8, 106);
+    canvas.print("SSID after start");
     canvas.setCursor(8, 122);
     canvas.print("OK START         GO BACK");
     canvas.pushSprite(0, 0);

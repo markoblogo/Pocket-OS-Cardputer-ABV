@@ -167,7 +167,7 @@ Options:
 
 ### Connections
 
-Current MVP starts a Cardputer Wi-Fi AP and exposes read-only SD browsing endpoints.
+Current MVP starts a Cardputer Wi-Fi AP and exposes SD browsing/download plus limited upload diagnostics. The device screen shows AP/HTTP state, request count, last endpoint, and last error.
 
 AP:
 
@@ -186,6 +186,15 @@ Endpoints:
 - `POST /api/upload?path=/books/B1.TXT` uploads a raw request body to a whitelisted SD folder.
 
 Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Small files can use `/api/upload`; larger files should use the chunk uploader in `tools/cardputer_upload.py`. Delete is not implemented yet.
+
+Basic test flow:
+
+```sh
+curl http://192.168.4.1/api/ping
+curl http://192.168.4.1/api/status
+curl "http://192.168.4.1/api/list?path=/music"
+curl "http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT"
+```
 
 
 Chunk upload example:
