@@ -2477,7 +2477,7 @@ void drawReaderList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK READ   GO BACK");
+    canvas.print("OK READ  *BMK  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -2490,16 +2490,20 @@ void drawReaderView()
     canvas.printf("%.14s %d/%d", active_book_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
-    for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
-        int idx = reader_scroll + row;
-        if (idx >= static_cast<int>(reader_lines.size())) break;
-        canvas.setCursor(8, 22 + row * 24);
-        drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
+    if (reader_lines.empty()) {
+        canvas.setCursor(8, 48);
+        canvas.print("EMPTY");
+    } else {
+        for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
+            int idx = reader_scroll + row;
+            if (idx >= static_cast<int>(reader_lines.size())) break;
+            drawTextLineSmart(8, 22 + row * 24, reader_lines[idx]);
+        }
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("UP/DN LINE  L/R PAGE  1 SPEED");
+    canvas.print("UP/DN LINE L/R PAGE 1 SPD GO LIST");
     canvas.pushSprite(0, 0);
 }
 
