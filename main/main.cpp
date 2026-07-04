@@ -298,10 +298,19 @@ uint16_t uiDim()
 
 uint16_t uiAccent()
 {
+    if (theme_mode == ThemeMode::White) return 0x07FF;   // white theme: cyan cyber accent
     if (theme_mode == ThemeMode::Green) return 0xFFE0;   // green theme: yellow signal
     if (theme_mode == ThemeMode::Yellow) return 0x07E0;  // yellow theme: green signal
     if (theme_mode == ThemeMode::Invert) return 0xF800;  // inverted theme: red signal
-    return 0xFFFF;                                       // white theme: white signal
+    return 0x07FF;
+}
+
+uint16_t uiSignal()
+{
+    if (theme_mode == ThemeMode::Green) return 0xFFE0;   // green theme: yellow waveform
+    if (theme_mode == ThemeMode::Yellow) return 0x07E0;  // yellow theme: green waveform
+    if (theme_mode == ThemeMode::Invert) return 0xF800;  // inverted theme: red waveform
+    return 0xFFFF;                                       // white theme: white waveform
 }
 
 const char* themeName()
@@ -1586,9 +1595,10 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
 {
     if (display_off || pcm.empty()) return;
     const int x = 8, y = 76, w = 224, h = 38;
+    const uint16_t signal = uiSignal();
     canvas.fillRect(x, y, w, h, uiBg());
     canvas.drawRect(x, y, w, h, uiDim());
-    canvas.drawFastHLine(x + 1, y + 1, w - 2, uiAccent());
+    canvas.drawFastHLine(x + 1, y + 1, w - 2, signal);
     const int mid = y + h / 2;
     const size_t frames = pcm.size() / std::max(1, channels);
     if (frames == 0) return;
@@ -1599,7 +1609,7 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
         int sample = pcm[std::min(idx, pcm.size() - 1)] >> 9;
         int yy = std::max(y + 1, std::min(y + h - 2, mid - sample));
         int xx = x + px;
-        if (px > 0) canvas.drawLine(prev_x, prev_y, xx, yy, uiAccent());
+        if (px > 0) canvas.drawLine(prev_x, prev_y, xx, yy, signal);
         prev_x = xx;
         prev_y = yy;
     }
