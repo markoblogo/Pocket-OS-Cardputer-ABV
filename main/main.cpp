@@ -3708,17 +3708,27 @@ void drawConnections()
 void drawMessage()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
-    canvas.setCursor(8, 12);
+    canvas.setCursor(8, 10);
     canvas.println(message_title.c_str());
     canvas.setTextSize(2);
-    canvas.setCursor(8, 42);
-    canvas.println(message_body.c_str());
+    int y = 42;
+    size_t pos = 0;
+    while (pos <= message_body.size() && y <= 94) {
+        size_t nl = message_body.find('\n', pos);
+        std::string line = message_body.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+        canvas.setCursor(8, y);
+        canvas.printf("%.18s", line.c_str());
+        if (nl == std::string::npos) break;
+        pos = nl + 1;
+        y += 24;
+    }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("GO BACK");
+    canvas.print("OK/GO BACK");
     canvas.pushSprite(0, 0);
 }
 
