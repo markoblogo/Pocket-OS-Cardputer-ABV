@@ -2741,7 +2741,7 @@ void drawFilesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 30);
-    canvas.printf("%.28s", files_path == MOUNT_POINT ? "/" : files_path.substr(std::strlen(MOUNT_POINT)).c_str());
+    canvas.printf("%.28s", files_path == MOUNT_POINT ? "ROOT /" : files_path.substr(std::strlen(MOUNT_POINT)).c_str());
     uint64_t total = 0, free_b = 0;
     canvas.setCursor(8, 40);
     if (sdUsage(&total, &free_b) && total >= free_b) {
@@ -2770,7 +2770,7 @@ void drawFilesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN  GO BACK  KNOWN FILES");
+    canvas.print("OK OPEN  1 ROOT  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -4162,6 +4162,10 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Down && !file_entries.empty()) files_cursor = std::min(static_cast<int>(file_entries.size()) - 1, files_cursor + 1);
         else if (ev.key == Key::Left && !file_entries.empty()) files_cursor = std::max(0, files_cursor - 4);
         else if (ev.key == Key::Right && !file_entries.empty()) files_cursor = std::min(static_cast<int>(file_entries.size()) - 1, files_cursor + 4);
+        else if (ev.key == Key::One) {
+            scanFiles(MOUNT_POINT);
+            blockInput(220);
+        }
         else if (ev.key == Key::Ok && !file_entries.empty()) {
             std::string err;
             if (!openFileEntry(file_entries[files_cursor], &err)) {
