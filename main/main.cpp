@@ -216,6 +216,8 @@ uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
 int recorder_cursor = 0;
+bool rec_write_error = false;
+std::string rec_write_error_text;
 std::string active_recording_name;
 std::string active_book_name;
 std::string active_note_name;
@@ -254,6 +256,15 @@ std::vector<std::string> random_history;
 
 bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
+
+bool flushAndClose(FILE* f)
+{
+    if (!f) return false;
+    bool ok = true;
+    if (fflush(f) != 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    return ok;
+}
 
 uint16_t uiBg()
 {
@@ -374,7 +385,10 @@ void saveConfig()
     fprintf(f, "SOUND=%s\n", soundName());
     fprintf(f, "TIMEOUT=%s\n", timeoutName());
     fprintf(f, "POWER=%d\n", power_save ? 1 : 0);
-    fclose(f);
+    if (!flushAndClose(f)) {
+        config_status = "RAM";
+        return;
+    }
     config_status = "SAVED";
 }
 
@@ -831,8 +845,7 @@ bool ensureDefaultHabits(std::string* err = nullptr)
     fputs("MEDS|Take pills|1\n", f);
     fputs("WALK|Walk|1\n", f);
     fputs("READ|Read|1\n", f);
-    fclose(f);
-    return true;
+    return flushAndClose(f);
 }
 
 void loadHabitState()
@@ -851,7 +864,7 @@ void saveHabitState()
     FILE* f = fopen(HABIT_STATE_FILE, "wb");
     if (!f) return;
     fprintf(f, "%d\n", habit_day);
-    fclose(f);
+    flushAndClose(f);
 }
 
 void loadHabitLogForDay()
@@ -899,7 +912,7 @@ void saveHabitLogForDay()
         if (!h.active) continue;
         fprintf(out, "%s|%s|%d\n", day.c_str(), h.id.c_str(), h.done ? 1 : 0);
     }
-    fclose(out);
+    flushAndClose(out);
 }
 
 void scanHabits()
@@ -973,8 +986,7 @@ bool appendHabit(const std::string& title, std::string* err = nullptr)
         if (c == '|' || static_cast<unsigned char>(c) < 32) c = ' ';
     }
     fprintf(f, "%s|%s|1\n", nextHabitId().c_str(), clean.c_str());
-    fclose(f);
-    return true;
+    return flushAndClose(f);
 }
 
 bool disableHabit(const std::string& id, std::string* err = nullptr)
@@ -1004,8 +1016,7 @@ bool disableHabit(const std::string& id, std::string* err = nullptr)
         return false;
     }
     for (const auto& s : lines) fputs(s.c_str(), out);
-    fclose(out);
-    return true;
+    return flushAndClose(out);
 }
 
 int habitDoneCount(const std::string& id, int start_day, int end_day)
@@ -1311,10 +1322,10 @@ bool saveNewNote(std::string* out_name, std::string* err = nullptr)
     body += "\n";
     size_t n = fwrite(body.data(), 1, body.size(), f);
     bool ok = n == body.size();
-    if (fflush(f) != 0) ok = false;
-    fclose(f);
+    if (!flushAndClose(f)) ok = false;
     if (!ok) {
         if (err) *err = "write failed";
+        unlink(path.c_str());
         return false;
     }
     if (out_name) *out_name = name;
@@ -1668,6 +1679,8 @@ bool startRecording(std::string* err = nullptr)
     }
     writeWavHeader(rec_file, 0);
     rec_samples_written = 0;
+    rec_write_error = false;
+    rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
 
@@ -1690,18 +1703,37 @@ void stopRecording(bool save)
         M5.delay(1);
     }
     M5.Mic.end();
+    bool failed = rec_write_error;
+    std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
+    std::string failed_path = active_recording_name.empty() ? "" : std::string(RECORDINGS_DIR) + "/" + active_recording_name;
     if (rec_file) {
-        if (save) {
+        if (save && !failed) {
             writeWavHeader(rec_file, rec_samples_written);
-            fflush(rec_file);
+            if (!flushAndClose(rec_file)) {
+                failed = true;
+                failed_text = "close failed";
+            }
+        } else {
+            fclose(rec_file);
         }
-        fclose(rec_file);
         rec_file = nullptr;
     }
+    if (failed && !failed_path.empty()) unlink(failed_path.c_str());
     M5.Speaker.begin();
     applyVolume();
     scanRecordings();
-    screen = Screen::RecorderList;
+    if (failed) {
+        message_title = "Record failed";
+        message_body = failed_text;
+        message_returns_music = false;
+        message_returns_notes = false;
+        message_returns_files = false;
+        screen = Screen::Message;
+    } else {
+        screen = Screen::RecorderList;
+    }
+    rec_write_error = false;
+    rec_write_error_text.clear();
     dirty = true;
     blockInput(400);
 }
@@ -1709,9 +1741,16 @@ void stopRecording(bool save)
 void updateRecording()
 {
     if (screen != Screen::RecorderRecording || !rec_file || rec_buffer.empty()) return;
+    if (rec_write_error) return;
     if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), REC_SAMPLE_RATE)) {
-        fwrite(rec_buffer.data(), sizeof(int16_t), rec_buffer.size(), rec_file);
-        rec_samples_written += rec_buffer.size();
+        size_t wrote = fwrite(rec_buffer.data(), sizeof(int16_t), rec_buffer.size(), rec_file);
+        if (wrote != rec_buffer.size()) {
+            rec_write_error = true;
+            rec_write_error_text = errno ? std::string("write: ") + std::strerror(errno) : "short write";
+            dirty = true;
+            return;
+        }
+        rec_samples_written += wrote;
         pcm_chunk = rec_buffer;
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
@@ -2511,7 +2550,8 @@ void drawRecorderRecording()
     canvas.printf("%.14s", active_recording_name.c_str());
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
-    canvas.printf("TIME:%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
+    if (rec_write_error) canvas.print("WRITE ERR");
+    else canvas.printf("TIME:%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
