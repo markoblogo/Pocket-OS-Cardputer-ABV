@@ -2835,8 +2835,8 @@ void drawSettings()
         else if (i == 1) canvas.printf("%c SOUND %s", i == settings_cursor ? '>' : ' ', soundName());
         else if (i == 2) canvas.printf("%c TIMEOUT %s", i == settings_cursor ? '>' : ' ', timeoutName());
         else if (i == 3) canvas.printf("%c POWER %s", i == settings_cursor ? '>' : ' ', power_save ? "ON" : "OFF");
-        else if (i == 4) canvas.printf("%c SD status", i == settings_cursor ? '>' : ' ');
-        else canvas.printf("%c COMM later", i == settings_cursor ? '>' : ' ');
+        else if (i == 4) canvas.printf("%c SD STATUS", i == settings_cursor ? '>' : ' ');
+        else canvas.printf("%c CONNECTIONS", i == settings_cursor ? '>' : ' ');
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
@@ -2848,9 +2848,9 @@ void drawSettings()
         canvas.print("SD --");
     }
     canvas.setCursor(8, 112);
-    canvas.printf("CFG %s  COMM later", config_status.c_str());
+    canvas.printf("CFG %s", config_status.c_str());
     canvas.setCursor(8, 122);
-    canvas.print("L/R CHANGE       GO BACK");
+    canvas.print("OK OPEN/CHANGE       GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -4304,8 +4304,22 @@ void handleKey(KeyEvent ev)
             } else if (settings_cursor == 3) {
                 power_save = !power_save;
                 applyPowerSavePreset();
+            } else if (settings_cursor == 4 && ev.key == Key::Ok) {
+                uint64_t total = 0;
+                uint64_t free_b = 0;
+                message_title = "SD STATUS";
+                if (sdUsage(&total, &free_b) && total >= free_b) {
+                    message_body = "FREE " + formatBytes(free_b) + "\nUSED " + formatBytes(total - free_b);
+                } else {
+                    message_body = "SD not ready";
+                }
+                message_returns_music = false;
+                message_returns_notes = false;
+                screen = Screen::Message;
+            } else if (settings_cursor == 5 && ev.key == Key::Ok) {
+                screen = Screen::Connections;
             }
-            saveConfig();
+            if (settings_cursor < 4) saveConfig();
             blockInput(220);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
