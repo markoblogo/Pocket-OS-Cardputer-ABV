@@ -92,6 +92,7 @@ enum class TimeSetField { Hours = 0, Minutes = 1, Seconds = 2 };
 enum class ThemeMode { White = 0, Green = 1, Yellow = 2, Invert = 3 };
 enum class SoundMode { Off = 0, Low = 1, Mid = 2, Loud = 3, Max = 4 };
 enum class TimeoutMode { Short = 0, Normal = 1, Long = 2 };
+enum class MessageReturn { Launcher, Music, Notes, Files };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -264,6 +265,16 @@ bool flushAndClose(FILE* f)
     if (fflush(f) != 0) ok = false;
     if (fclose(f) != 0) ok = false;
     return ok;
+}
+
+void showMessage(const std::string& title, const std::string& body, MessageReturn ret = MessageReturn::Launcher)
+{
+    message_title = title;
+    message_body = body;
+    message_returns_music = ret == MessageReturn::Music;
+    message_returns_notes = ret == MessageReturn::Notes;
+    message_returns_files = ret == MessageReturn::Files;
+    screen = Screen::Message;
 }
 
 uint16_t uiBg()
@@ -1645,10 +1656,7 @@ void updateAudio()
             }
         } else {
             stopPlayback();
-            message_title = "Playback failed";
-            message_body = err.empty() ? "decode failed" : err;
-            message_returns_music = true;
-            screen = Screen::Message;
+            showMessage("Playback failed", err.empty() ? "decode failed" : err, MessageReturn::Music);
         }
         dirty = true;
         blockInput(350);
@@ -1723,12 +1731,7 @@ void stopRecording(bool save)
     applyVolume();
     scanRecordings();
     if (failed) {
-        message_title = "Record failed";
-        message_body = failed_text;
-        message_returns_music = false;
-        message_returns_notes = false;
-        message_returns_files = false;
-        screen = Screen::Message;
+        showMessage("Record failed", failed_text);
     } else {
         screen = Screen::RecorderList;
     }
@@ -1921,40 +1924,28 @@ void runAgentAction()
     else if (agent_cursor == 8) { screen = Screen::Settings; }
     else if (agent_cursor == 9) { screen = Screen::Connections; }
     else if (agent_cursor == 10) {
-        message_title = "AGENT HELP";
-        message_body = "open apps\nstatus/settings\nGO back";
-        message_returns_music = false;
-        message_returns_notes = false;
-        message_returns_files = false;
-        screen = Screen::Message;
+        showMessage("AGENT HELP", "open apps\nstatus/settings\nGO back");
     }
     else {
-        message_title = "ABVX STATUS";
         int bat = batteryPercent();
         uint64_t total = 0;
         uint64_t free_b = 0;
+        char buf[128];
         if (sdUsage(&total, &free_b) && total >= free_b) {
-            char buf[128];
             snprintf(buf, sizeof(buf), "BAT %s%% %s\nSD %s free\nSND %s WIFI %s",
                      bat >= 0 ? std::to_string(bat).c_str() : "--",
                      themeName(),
                      formatBytes(free_b).c_str(),
                      soundName(),
                      connection_wifi_on ? "ON" : "OFF");
-            message_body = buf;
         } else {
-            char buf[96];
             snprintf(buf, sizeof(buf), "BAT %s%% %s\nSD --\nSND %s WIFI %s",
                      bat >= 0 ? std::to_string(bat).c_str() : "--",
                      themeName(),
                      soundName(),
                      connection_wifi_on ? "ON" : "OFF");
-            message_body = buf;
         }
-        message_returns_music = false;
-        message_returns_notes = false;
-        message_returns_files = false;
-        screen = Screen::Message;
+        showMessage("ABVX STATUS", buf);
     }
     blockInput(250);
 }
@@ -2976,12 +2967,7 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
         screen = Screen::RecorderPlaying;
         return true;
     }
-    message_title = "FILE INFO";
-    message_body = e.name + " " + formatBytes(e.size);
-    message_returns_music = false;
-    message_returns_notes = false;
-    message_returns_files = true;
-    screen = Screen::Message;
+    showMessage("FILE INFO", e.name + " " + formatBytes(e.size), MessageReturn::Files);
     return true;
 }
 
@@ -4078,10 +4064,7 @@ void handleKey(KeyEvent ev)
                 override_music_path.clear();
                 std::string err;
                 if (!startPlayback(&err)) {
-                    message_title = "Playback failed";
-                    message_body = err.empty() ? "open failed" : err;
-                    message_returns_music = true;
-                    screen = Screen::Message;
+                    showMessage("Playback failed", err.empty() ? "open failed" : err, MessageReturn::Music);
                     blockInput(500);
                 }
             }
@@ -4122,11 +4105,7 @@ void handleKey(KeyEvent ev)
                     screen = Screen::ReaderView;
                     blockInput(300);
                 } else {
-                    message_title = "Read failed";
-                    message_body = err.empty() ? "open" : err;
-                    message_returns_music = false;
-                    message_returns_notes = false;
-                    screen = Screen::Message;
+                    showMessage("Read failed", err.empty() ? "open" : err);
                     blockInput(350);
                 }
             }
@@ -4209,11 +4188,7 @@ void handleKey(KeyEvent ev)
                     screen = Screen::NotesView;
                     blockInput(300);
                 } else {
-                    message_title = "Note failed";
-                    message_body = err.empty() ? "open" : err;
-                    message_returns_music = false;
-                    message_returns_notes = true;
-                    screen = Screen::Message;
+                    showMessage("Note failed", err.empty() ? "open" : err, MessageReturn::Notes);
                 }
             }
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
@@ -4244,24 +4219,14 @@ void handleKey(KeyEvent ev)
             blockInput(250);
         } else if (ev.key == Key::Ok) {
             if (note_input.empty()) {
-                message_title = "Note empty";
-                message_body = "not saved";
                 screen = Screen::NotesList;
             } else {
                 std::string name;
                 std::string err;
                 if (saveNewNote(&name, &err)) {
-                    message_title = "Note saved";
-                    message_body = name;
-                    message_returns_music = false;
-                    message_returns_notes = true;
-                    screen = Screen::Message;
+                    showMessage("Note saved", name, MessageReturn::Notes);
                 } else {
-                    message_title = "Save failed";
-                    message_body = err.empty() ? "write" : err;
-                    message_returns_music = false;
-                    message_returns_notes = true;
-                    screen = Screen::Message;
+                    showMessage("Save failed", err.empty() ? "write" : err, MessageReturn::Notes);
                 }
             }
             blockInput(400);
@@ -4290,11 +4255,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::One) {
             std::string err;
             if (!startRecording(&err)) {
-                message_title = "Record failed";
-                message_body = err.empty() ? "start" : err;
-                message_returns_music = false;
-                message_returns_notes = false;
-                screen = Screen::Message;
+                showMessage("Record failed", err.empty() ? "start" : err);
             }
             blockInput(300);
         }
@@ -4302,19 +4263,11 @@ void handleKey(KeyEvent ev)
             std::string err;
             if (recorder_cursor == 0) {
                 if (!startRecording(&err)) {
-                    message_title = "Record failed";
-                    message_body = err.empty() ? "start" : err;
-                    message_returns_music = false;
-                    message_returns_notes = false;
-                    screen = Screen::Message;
+                    showMessage("Record failed", err.empty() ? "start" : err);
                 }
             } else {
                 if (!startRecordingPlayback(&err)) {
-                    message_title = "Play failed";
-                    message_body = err.empty() ? "open" : err;
-                    message_returns_music = false;
-                    message_returns_notes = false;
-                    screen = Screen::Message;
+                    showMessage("Play failed", err.empty() ? "open" : err);
                 }
             }
             blockInput(300);
@@ -4420,19 +4373,13 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok && !file_entries.empty()) {
             std::string err;
             if (!openFileEntry(file_entries[files_cursor], &err)) {
-                message_title = "Open failed";
-                message_body = err.empty() ? "unsupported" : err;
-                message_returns_files = true;
-                screen = Screen::Message;
+                showMessage("Open failed", err.empty() ? "unsupported" : err, MessageReturn::Files);
             }
             blockInput(350);
         } else if (ev.key == Key::Backspace && !file_entries.empty()) {
             const auto& e = file_entries[files_cursor];
             if (e.is_dir) {
-                message_title = "Delete skipped";
-                message_body = "folders disabled";
-                message_returns_files = true;
-                screen = Screen::Message;
+                showMessage("Delete skipped", "folders disabled", MessageReturn::Files);
             } else {
                 pending_delete_path = e.path;
                 pending_delete_name = e.name;
@@ -4451,17 +4398,13 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::FilesDeleteConfirm) {
         if (ev.key == Key::Ok) {
             if (!pending_delete_path.empty() && unlink(pending_delete_path.c_str()) == 0) {
-                message_title = "Deleted";
-                message_body = pending_delete_name;
+                showMessage("Deleted", pending_delete_name, MessageReturn::Files);
                 scanFiles(files_path);
             } else {
-                message_title = "Delete failed";
-                message_body = pending_delete_name + "\n" + std::strerror(errno);
+                showMessage("Delete failed", pending_delete_name + "\n" + std::strerror(errno), MessageReturn::Files);
             }
             pending_delete_path.clear();
             pending_delete_name.clear();
-            message_returns_files = true;
-            screen = Screen::Message;
             blockInput(400);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             pending_delete_path.clear();
@@ -4603,15 +4546,11 @@ void handleKey(KeyEvent ev)
             } else if (settings_cursor == 4 && ev.key == Key::Ok) {
                 uint64_t total = 0;
                 uint64_t free_b = 0;
-                message_title = "SD STATUS";
                 if (sdUsage(&total, &free_b) && total >= free_b) {
-                    message_body = "FREE " + formatBytes(free_b) + "\nUSED " + formatBytes(total - free_b);
+                    showMessage("SD STATUS", "FREE " + formatBytes(free_b) + "\nUSED " + formatBytes(total - free_b));
                 } else {
-                    message_body = "SD not ready";
+                    showMessage("SD STATUS", "SD not ready");
                 }
-                message_returns_music = false;
-                message_returns_notes = false;
-                screen = Screen::Message;
             } else if (settings_cursor == 5 && ev.key == Key::Ok) {
                 screen = Screen::Connections;
             }
