@@ -105,7 +105,7 @@ Known openings:
 - `.TXT` -> Reader/Notes viewer depending on path.
 - `.WAV` / `.PCM` -> Record playback path.
 
-Files also shows SD free/used status. Delete/rename are postponed.
+Files also shows SD free/used status. File delete has confirmation; folder delete and rename are postponed.
 
 ### Time
 
@@ -276,11 +276,15 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - Notes RU input is translit-save, not a native Cyrillic keyboard.
 - Reader bookmarks are RAM-only for now.
 - Music playback is stable enough for MVP but still uses chunked blocking playback.
-- Files is read/open only; delete/rename need confirmation UX later.
-- Connections supports list/download plus upload MVP. Delete and overwrite are postponed.
+- Files can browse/open known file types and delete files with confirmation; folder delete and rename are postponed.
+- Connections supports list/download plus upload MVP. Delete and overwrite are postponed; large upload remains the highest-risk transfer path.
 - Clock does not persist through full power-off.
 - Habits use manual day rollover, not calendar dates.
 - Browser, AI, Mac companion sync, and full Agent are postponed.
+
+## Audit
+
+Engineering audit notes and risk register are kept in `AUDIT.md`.
 
 ## Roadmap
 
