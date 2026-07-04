@@ -78,6 +78,8 @@ char connection_last_error[64] = "none";
 volatile bool connection_upload_active = false;
 volatile int connection_upload_done = 0;
 volatile int connection_upload_total = 0;
+bool connection_upload_session = false;
+std::string connection_upload_path;
 
 LGFX_Sprite canvas(&M5.Display);
 
@@ -200,6 +202,7 @@ bool mp3_eof = false;
 bool playing = false;
 uint32_t playback_decode_after_ms = 0;
 std::vector<int16_t> pcm_chunk;
+std::vector<mp3d_sample_t> mp3_frame_pcm;
 int pcm_rate = 44100;
 int pcm_channels = 2;
 int decoded_chunks = 0;
@@ -534,7 +537,7 @@ bool initSd()
     host.max_freq_khz = 400;
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 5,
+        .max_files = 8,
         .allocation_unit_size = 16 * 1024,
         .disk_status_check_enable = false,
         .use_one_fat = false,
@@ -573,22 +576,6 @@ bool hasMp3Ext(const std::string& name)
 bool hasTextExt(const std::string& name)
 {
     return lowerExt(name) == ".txt";
-}
-
-size_t findSyncInBytes(const uint8_t* data, size_t len)
-{
-    for (size_t i = 0; i + 1 < len; ++i) {
-        if (data[i] == 0xFF && (data[i + 1] & 0xE0) == 0xE0) return i;
-        if ((i & 0x3FF) == 0) {
-            vTaskDelay(1);
-        }
-    }
-    return std::string::npos;
-}
-
-size_t findSyncInBuffer(const std::vector<uint8_t>& buf, size_t len)
-{
-    return findSyncInBytes(buf.data(), len);
 }
 
 bool hasRecordingExt(const std::string& name)
@@ -1531,6 +1518,7 @@ bool startPlayback(std::string* err = nullptr)
     }
     mp3dec_init(&mp3_dec);
     mp3_buf.assign(INPUT_BUF_SIZE, 0);
+    mp3_frame_pcm.assign(MINIMP3_MAX_SAMPLES_PER_FRAME, 0);
     mp3_len = 0;
     mp3_pos = 0;
     mp3_eof = false;
@@ -1590,7 +1578,10 @@ bool decodeChunk(std::string* err = nullptr)
     }
     pcm_chunk.clear();
     int target_values = 44100 * 2 * CHUNK_MS / 1000;
-    std::vector<mp3d_sample_t> frame_pcm(MINIMP3_MAX_SAMPLES_PER_FRAME);
+    if (mp3_frame_pcm.size() < MINIMP3_MAX_SAMPLES_PER_FRAME) {
+        mp3_frame_pcm.assign(MINIMP3_MAX_SAMPLES_PER_FRAME, 0);
+    }
+    pcm_chunk.reserve(target_values + MINIMP3_MAX_SAMPLES_PER_FRAME);
     bool saw_sync = false;
     for (int attempts = 0; attempts < 512 && static_cast<int>(pcm_chunk.size()) < target_values;) {
         if (!refillInput()) break;
@@ -1603,13 +1594,13 @@ bool decodeChunk(std::string* err = nullptr)
         saw_sync = true;
         mp3_pos = sync;
         mp3dec_frame_info_t info = {};
-        int samples = mp3dec_decode_frame(&mp3_dec, mp3_buf.data() + mp3_pos, static_cast<int>(mp3_len - mp3_pos), frame_pcm.data(), &info);
+        int samples = mp3dec_decode_frame(&mp3_dec, mp3_buf.data() + mp3_pos, static_cast<int>(mp3_len - mp3_pos), mp3_frame_pcm.data(), &info);
         ++attempts;
         if (samples > 0 && info.frame_bytes > 0 && info.channels > 0) {
             pcm_rate = info.hz;
             pcm_channels = info.channels;
             const size_t values = static_cast<size_t>(samples) * info.channels;
-            pcm_chunk.insert(pcm_chunk.end(), frame_pcm.begin(), frame_pcm.begin() + values);
+            pcm_chunk.insert(pcm_chunk.end(), mp3_frame_pcm.begin(), mp3_frame_pcm.begin() + values);
             mp3_pos += info.frame_bytes;
             target_values = std::max(1024, info.hz * info.channels * CHUNK_MS / 1000);
         } else {
@@ -3532,6 +3523,8 @@ esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
         return ESP_OK;
     }
     fclose(f);
+    connection_upload_session = true;
+    connection_upload_path = api_path;
     connection_upload_done = 0;
     connection_upload_total = static_cast<int>(total);
     setConnectionStatus(endpoint, "begin");
@@ -3552,6 +3545,10 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
     if (req->content_len <= 0 || static_cast<size_t>(req->content_len) > MAX_UPLOAD_CHUNK_BYTES ||
         total == 0 || total > MAX_UPLOAD_BYTES || offset + static_cast<size_t>(req->content_len) > total) {
         sendHttpError(req, endpoint, "bad chunk");
+        return ESP_OK;
+    }
+    if (!connection_upload_session || connection_upload_path != api_path) {
+        sendHttpError(req, endpoint, "no session");
         return ESP_OK;
     }
     char err[64] = {};
@@ -3637,9 +3634,15 @@ esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "size mismatch", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
+    if (!connection_upload_session || connection_upload_path != api_path) {
+        sendHttpError(req, endpoint, "no session");
+        return ESP_OK;
+    }
     connection_upload_active = false;
     connection_upload_done = static_cast<int>(total);
     connection_upload_total = static_cast<int>(total);
+    connection_upload_session = false;
+    connection_upload_path.clear();
     setConnectionStatus(endpoint, "none");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK FINISH\n");
@@ -3654,6 +3657,10 @@ esp_err_t connectionUploadAbortHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "missing path");
         return ESP_OK;
     }
+    if (!connection_upload_session || connection_upload_path != api_path) {
+        sendHttpError(req, endpoint, "no session");
+        return ESP_OK;
+    }
     char err[64] = {};
     std::string parent_api, full_path;
     if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
@@ -3663,6 +3670,8 @@ esp_err_t connectionUploadAbortHandler(httpd_req_t* req)
     unlink(full_path.c_str());
     connection_upload_active = false;
     connection_upload_done = 0;
+    connection_upload_session = false;
+    connection_upload_path.clear();
     setConnectionStatus(endpoint, "aborted");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK ABORT\n");
@@ -3799,6 +3808,9 @@ bool startConnections(char* err, size_t err_len)
 
 void stopConnections()
 {
+    connection_upload_active = false;
+    connection_upload_session = false;
+    connection_upload_path.clear();
     if (connection_httpd) {
         httpd_stop(connection_httpd);
         connection_httpd = nullptr;
