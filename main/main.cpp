@@ -1855,11 +1855,11 @@ static const char* AGENT_ACTIONS[] = {
     "OPEN FILES",
     "OPEN TIME",
     "OPEN HABITS",
-    "RANDOM YES/NO",
-    "SETTINGS",
-    "CONNECTIONS",
+    "OPEN RANDOM",
+    "OPEN SETTINGS",
+    "OPEN CONNECT",
     "HELP",
-    "STATUS"
+    "SYSTEM STATUS"
 };
 constexpr int AGENT_ACTION_COUNT = sizeof(AGENT_ACTIONS) / sizeof(AGENT_ACTIONS[0]);
 
@@ -1892,9 +1892,10 @@ void runAgentAction()
     else if (agent_cursor == 9) { screen = Screen::Connections; }
     else if (agent_cursor == 10) {
         message_title = "AGENT HELP";
-        message_body = "OK run\nGO back";
+        message_body = "open apps\nstatus/settings\nGO back";
         message_returns_music = false;
         message_returns_notes = false;
+        message_returns_files = false;
         screen = Screen::Message;
     }
     else {
@@ -1903,16 +1904,26 @@ void runAgentAction()
         uint64_t total = 0;
         uint64_t free_b = 0;
         if (sdUsage(&total, &free_b) && total >= free_b) {
-            char buf[96];
-            snprintf(buf, sizeof(buf), "BAT %s%%\nSD %s free", bat >= 0 ? std::to_string(bat).c_str() : "--", formatBytes(free_b).c_str());
+            char buf[128];
+            snprintf(buf, sizeof(buf), "BAT %s%% %s\nSD %s free\nSND %s WIFI %s",
+                     bat >= 0 ? std::to_string(bat).c_str() : "--",
+                     themeName(),
+                     formatBytes(free_b).c_str(),
+                     soundName(),
+                     connection_wifi_on ? "ON" : "OFF");
             message_body = buf;
         } else {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "BAT %s%%\nSD --", bat >= 0 ? std::to_string(bat).c_str() : "--");
+            char buf[96];
+            snprintf(buf, sizeof(buf), "BAT %s%% %s\nSD --\nSND %s WIFI %s",
+                     bat >= 0 ? std::to_string(bat).c_str() : "--",
+                     themeName(),
+                     soundName(),
+                     connection_wifi_on ? "ON" : "OFF");
             message_body = buf;
         }
         message_returns_music = false;
         message_returns_notes = false;
+        message_returns_files = false;
         screen = Screen::Message;
     }
     blockInput(250);
@@ -1978,6 +1989,9 @@ void drawAgent()
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 28);
     canvas.print("offline quick actions");
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(174, 28);
+    canvas.printf("%d/%d", agent_cursor + 1, AGENT_ACTION_COUNT);
     canvas.setTextSize(2);
     int start = std::max(0, agent_cursor - 1);
     start = std::min(start, std::max(0, AGENT_ACTION_COUNT - 4));
