@@ -81,7 +81,7 @@ volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -155,6 +155,7 @@ std::string message_title;
 std::string message_body;
 bool message_returns_music = false;
 bool message_returns_notes = false;
+bool message_returns_files = false;
 uint32_t message_hold_until_ms = 0;
 
 std::vector<std::string> tracks;
@@ -163,6 +164,8 @@ std::vector<std::string> notes;
 std::vector<std::string> recordings;
 std::vector<FileEntry> file_entries;
 std::vector<Habit> habits;
+std::string pending_delete_path;
+std::string pending_delete_name;
 std::string files_path = MOUNT_POINT;
 int files_cursor = 0;
 int habits_cursor = 0;
@@ -2867,7 +2870,27 @@ void drawFilesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN  1 ROOT  GO BACK");
+    canvas.print("OK OPEN  BKSP DEL  GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawFilesDeleteConfirm()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("DELETE?");
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 42);
+    canvas.printf("%.14s", pending_delete_name.c_str());
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 78);
+    canvas.print("file only, no folders");
+    canvas.setCursor(8, 122);
+    canvas.print("OK DELETE       GO KEEP");
     canvas.pushSprite(0, 0);
 }
 
@@ -2912,6 +2935,7 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
     message_body = e.name + " " + formatBytes(e.size);
     message_returns_music = false;
     message_returns_notes = false;
+    message_returns_files = true;
     screen = Screen::Message;
     return true;
 }
@@ -3822,6 +3846,7 @@ void drawIfDirty()
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
     else if (screen == Screen::TimeApp) drawTimeApp();
     else if (screen == Screen::FilesList) drawFilesList();
+    else if (screen == Screen::FilesDeleteConfirm) drawFilesDeleteConfirm();
     else if (screen == Screen::Randomizer) drawRandomizer();
     else if (screen == Screen::HabitsList) drawHabitsList();
     else if (screen == Screen::HabitsStats) drawHabitsStats();
@@ -4278,12 +4303,51 @@ void handleKey(KeyEvent ev)
             if (!openFileEntry(file_entries[files_cursor], &err)) {
                 message_title = "Open failed";
                 message_body = err.empty() ? "unsupported" : err;
+                message_returns_files = true;
                 screen = Screen::Message;
             }
             blockInput(350);
+        } else if (ev.key == Key::Backspace && !file_entries.empty()) {
+            const auto& e = file_entries[files_cursor];
+            if (e.is_dir) {
+                message_title = "Delete skipped";
+                message_body = "folders disabled";
+                message_returns_files = true;
+                screen = Screen::Message;
+            } else {
+                pending_delete_path = e.path;
+                pending_delete_name = e.name;
+                screen = Screen::FilesDeleteConfirm;
+            }
+            blockInput(300);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             if (files_path == MOUNT_POINT) screen = Screen::Launcher;
             else scanFiles(parentPath(files_path));
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::FilesDeleteConfirm) {
+        if (ev.key == Key::Ok) {
+            if (!pending_delete_path.empty() && unlink(pending_delete_path.c_str()) == 0) {
+                message_title = "Deleted";
+                message_body = pending_delete_name;
+                scanFiles(files_path);
+            } else {
+                message_title = "Delete failed";
+                message_body = pending_delete_name + "\n" + std::strerror(errno);
+            }
+            pending_delete_path.clear();
+            pending_delete_name.clear();
+            message_returns_files = true;
+            screen = Screen::Message;
+            blockInput(400);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            pending_delete_path.clear();
+            pending_delete_name.clear();
+            screen = Screen::FilesList;
             blockInput(250);
         }
         dirty = true;
@@ -4469,6 +4533,9 @@ void handleKey(KeyEvent ev)
             message_returns_notes = false;
             scanNotes();
             screen = Screen::NotesList;
+        } else if (message_returns_files && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
+            message_returns_files = false;
+            screen = Screen::FilesList;
         } else if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
             screen = Screen::Launcher;
         }
