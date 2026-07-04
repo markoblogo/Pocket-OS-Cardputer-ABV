@@ -145,6 +145,8 @@ bool fn_down = false;
 std::string last_key_name;
 uint32_t last_key_ms = 0;
 uint32_t input_block_until_ms = 0;
+uint32_t ui_anim_until_ms = 0;
+uint32_t ui_anim_last_frame_ms = 0;
 
 Screen screen = Screen::Launcher;
 int launcher_index = 0;
@@ -1903,15 +1905,37 @@ void runAgentAction()
     blockInput(250);
 }
 
+void pulseUi()
+{
+    ui_anim_until_ms = M5.millis() + 180;
+    ui_anim_last_frame_ms = 0;
+}
+
+void drawCyberAccent()
+{
+    uint32_t t = M5.millis();
+    int scan_y = 18 + ((t / 18) % 5) * 20;
+    canvas.drawFastHLine(0, scan_y, SCREEN_W, uiDim());
+    canvas.drawFastHLine(0, scan_y + 1, 44, uiFg());
+    canvas.drawFastVLine(0, 18, 88, uiDim());
+    canvas.drawFastVLine(SCREEN_W - 1, 18, 88, uiDim());
+    canvas.drawRect(3, 3, SCREEN_W - 6, SCREEN_H - 6, uiDim());
+}
+
 void drawLauncher()
 {
     static const char* labels[] = {"[@] AGENT", "[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("ABVx");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(74, 12);
+    canvas.printf("%d/%d", launcher_index + 1, launcher_count);
     drawBatteryWidget(166, 8);
     canvas.setTextSize(2);
     int start = std::max(0, launcher_index - 1);
@@ -1931,6 +1955,7 @@ void drawLauncher()
 void drawAgent()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
@@ -3794,19 +3819,19 @@ void handleKey(KeyEvent ev)
     }
 
     if (screen == Screen::Launcher) {
-        if (ev.key == Key::Up) launcher_index = std::max(0, launcher_index - 1);
-        else if (ev.key == Key::Down) launcher_index = std::min(10, launcher_index + 1);
-        else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; }
+        if (ev.key == Key::Up) { launcher_index = std::max(0, launcher_index - 1); pulseUi(); }
+        else if (ev.key == Key::Down) { launcher_index = std::min(10, launcher_index + 1); pulseUi(); }
+        else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
         dirty = true;
         return;
     }
 
     if (screen == Screen::Agent) {
-        if (ev.key == Key::Up) agent_cursor = std::max(0, agent_cursor - 1);
-        else if (ev.key == Key::Down) agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 1);
-        else if (ev.key == Key::Left) agent_cursor = std::max(0, agent_cursor - 4);
-        else if (ev.key == Key::Right) agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 4);
+        if (ev.key == Key::Up) { agent_cursor = std::max(0, agent_cursor - 1); pulseUi(); }
+        else if (ev.key == Key::Down) { agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 1); pulseUi(); }
+        else if (ev.key == Key::Left) { agent_cursor = std::max(0, agent_cursor - 4); pulseUi(); }
+        else if (ev.key == Key::Right) { agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 4); pulseUi(); }
         else if (ev.key == Key::Ok) runAgentAction();
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
@@ -4390,6 +4415,11 @@ extern "C" void app_main(void)
         handleKey(ev);
         if (connection_dirty) {
             connection_dirty = false;
+            dirty = true;
+        }
+        uint32_t now = M5.millis();
+        if ((screen == Screen::Launcher || screen == Screen::Agent) && now < ui_anim_until_ms && now - ui_anim_last_frame_ms >= 33) {
+            ui_anim_last_frame_ms = now;
             dirty = true;
         }
         if (connection_upload_active) {
