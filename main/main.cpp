@@ -539,9 +539,32 @@ bool initKeyboard()
     return true;
 }
 
+void resetSdMount()
+{
+    if (sd_ready && sd_card) {
+        esp_vfs_fat_sdcard_unmount(MOUNT_POINT, sd_card);
+    }
+    sd_card = nullptr;
+    sd_ready = false;
+}
+
+bool sdRootAlive()
+{
+    DIR* dir = opendir(MOUNT_POINT);
+    if (!dir) return false;
+    closedir(dir);
+    return true;
+}
+
 bool initSd()
 {
-    if (sd_ready) return true;
+    if (sd_ready) {
+        if (sdRootAlive()) return true;
+        // After display idle/wake some boards can leave the VFS mount stale:
+        // the old sd_ready flag remains true, but all app scans see 0 files.
+        // Drop the stale mount and remount before reporting SD failure.
+        resetSdMount();
+    }
     esp_err_t ret;
     if (!spi_ready) {
         sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -573,6 +596,41 @@ bool initSd()
     ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &host, &slot_config, &mount_config, &sd_card);
     sd_ready = (ret == ESP_OK);
     return sd_ready;
+}
+
+DIR* openSdDirWithRetry(const char* path)
+{
+    if (!initSd()) return nullptr;
+    DIR* dir = opendir(path);
+    if (dir) return dir;
+    resetSdMount();
+    if (!initSd()) return nullptr;
+    return opendir(path);
+}
+
+bool ensureSdDir(const char* path, std::string* err = nullptr)
+{
+    if (!initSd()) {
+        if (err) *err = "sd mount";
+        return false;
+    }
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        errno = 0;
+        if (mkdir(path, 0775) == 0 || errno == EEXIST) return true;
+        const int saved_errno = errno;
+        if (attempt == 0) {
+            resetSdMount();
+            if (initSd()) continue;
+        }
+        if (err) {
+            *err = "mkdir ";
+            *err += std::to_string(saved_errno);
+            *err += " ";
+            *err += std::strerror(saved_errno);
+        }
+        return false;
+    }
+    return true;
 }
 
 bool isHidden(const std::string& name)
@@ -626,8 +684,7 @@ void scanFiles(const std::string& path)
     file_entries.clear();
     files_path = path.empty() ? std::string(MOUNT_POINT) : path;
     files_cursor = 0;
-    if (!initSd()) return;
-    DIR* dir = opendir(files_path.c_str());
+    DIR* dir = openSdDirWithRetry(files_path.c_str());
     if (!dir) return;
     if (files_path != MOUNT_POINT) {
         file_entries.push_back({"..", "", true, 0});
@@ -691,21 +748,7 @@ void writeWavHeader(FILE* f, uint32_t samples)
 
 bool ensureRecordingsDir(std::string* err = nullptr)
 {
-    if (!initSd()) {
-        if (err) *err = "sd mount";
-        return false;
-    }
-    errno = 0;
-    if (mkdir(RECORDINGS_DIR, 0775) != 0 && errno != EEXIST) {
-        if (err) {
-            *err = "mkdir ";
-            *err += std::to_string(errno);
-            *err += " ";
-            *err += std::strerror(errno);
-        }
-        return false;
-    }
-    return true;
+    return ensureSdDir(RECORDINGS_DIR, err);
 }
 
 std::string nextRecordingName()
@@ -731,8 +774,7 @@ std::string nextRecordingName()
 void scanBooks()
 {
     books.clear();
-    if (!initSd()) return;
-    DIR* dir = opendir(BOOKS_DIR);
+    DIR* dir = openSdDirWithRetry(BOOKS_DIR);
     if (!dir) return;
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
@@ -754,28 +796,14 @@ std::string selectedBookPath()
 
 bool ensureNotesDir(std::string* err = nullptr)
 {
-    if (!initSd()) {
-        if (err) *err = "sd mount";
-        return false;
-    }
-    errno = 0;
-    if (mkdir(NOTES_DIR, 0775) != 0 && errno != EEXIST) {
-        if (err) {
-            *err = "mkdir ";
-            *err += std::to_string(errno);
-            *err += " ";
-            *err += std::strerror(errno);
-        }
-        return false;
-    }
-    return true;
+    return ensureSdDir(NOTES_DIR, err);
 }
 
 void scanNotes()
 {
     notes.clear();
     if (!ensureNotesDir()) return;
-    DIR* dir = opendir(NOTES_DIR);
+    DIR* dir = openSdDirWithRetry(NOTES_DIR);
     if (!dir) return;
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
@@ -823,21 +851,7 @@ std::string habitDayId()
 
 bool ensureHabitsDir(std::string* err = nullptr)
 {
-    if (!initSd()) {
-        if (err) *err = "sd mount";
-        return false;
-    }
-    errno = 0;
-    if (mkdir(HABITS_DIR, 0775) != 0 && errno != EEXIST) {
-        if (err) {
-            *err = "mkdir ";
-            *err += std::to_string(errno);
-            *err += " ";
-            *err += std::strerror(errno);
-        }
-        return false;
-    }
-    return true;
+    return ensureSdDir(HABITS_DIR, err);
 }
 
 bool ensureDefaultHabits(std::string* err = nullptr)
@@ -1429,8 +1443,7 @@ uint32_t speedIntervalMs()
 void scanMusic()
 {
     tracks.clear();
-    if (!initSd()) return;
-    DIR* dir = opendir(MUSIC_DIR);
+    DIR* dir = openSdDirWithRetry(MUSIC_DIR);
     if (!dir) return;
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
@@ -1447,7 +1460,7 @@ void scanRecordings()
 {
     recordings.clear();
     if (!ensureRecordingsDir()) return;
-    DIR* dir = opendir(RECORDINGS_DIR);
+    DIR* dir = openSdDirWithRetry(RECORDINGS_DIR);
     if (!dir) return;
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
