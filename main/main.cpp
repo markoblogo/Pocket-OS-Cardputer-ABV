@@ -2719,12 +2719,14 @@ void updateAlert()
 void drawTimeApp()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 6);
     canvas.print("TIME");
     canvas.setCursor(88, 6);
     const char* mode = time_mode == TimeMode::Clock ? "CLOCK" : (time_mode == TimeMode::Stopwatch ? "STOP" : (time_mode == TimeMode::Timer ? "TIMER" : "ALARM"));
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.print(mode);
 
     char buf[16];
@@ -2732,7 +2734,7 @@ void drawTimeApp()
         formatHMS(elapsedClockSeconds(), buf, sizeof(buf));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
-        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setTextColor(uiAccent(), uiBg());
         canvas.setCursor(8, 96);
         canvas.printf("SET:%s  1 FIELD", timeFieldName());
     } else if (time_mode == TimeMode::Stopwatch) {
@@ -2744,7 +2746,7 @@ void drawTimeApp()
         canvas.setCursor(8, 52);
         canvas.print(buf);
         canvas.setTextSize(1);
-        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setTextColor(stopwatch_running ? uiAccent() : uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.print(stopwatch_running ? "RUN" : "PAUSE");
     } else if (time_mode == TimeMode::Timer) {
@@ -2752,14 +2754,14 @@ void drawTimeApp()
         snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu", static_cast<unsigned long>(sec / 3600), static_cast<unsigned long>((sec / 60) % 60), static_cast<unsigned long>(sec % 60));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
-        canvas.setTextColor(timer_done ? uiFg() : uiDim(), uiBg());
+        canvas.setTextColor((timer_done || timer_running) ? uiAccent() : uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.printf("%s SET:%s", timer_done ? "DONE" : (timer_running ? "RUN" : "SET"), timeFieldName());
     } else {
         formatHMS(alarm_seconds, buf, sizeof(buf));
         drawBigTime(buf, 48);
         canvas.setTextSize(1);
-        canvas.setTextColor((alarm_enabled || alarm_ringing) ? uiFg() : uiDim(), uiBg());
+        canvas.setTextColor((alarm_enabled || alarm_ringing) ? uiAccent() : uiDim(), uiBg());
         canvas.setCursor(8, 96);
         canvas.printf("%s SET:%s", alarm_ringing ? "RING" : (alarm_enabled ? "ON" : "OFF"), timeFieldName());
     }
@@ -2804,12 +2806,13 @@ void updateTimeApp()
 void drawFilesList()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("FILES %d/%d", file_entries.empty() ? 0 : files_cursor + 1, static_cast<int>(file_entries.size()));
     canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 30);
     canvas.printf("%.28s", files_path == MOUNT_POINT ? "ROOT /" : files_path.substr(std::strlen(MOUNT_POINT)).c_str());
     uint64_t total = 0, free_b = 0;
