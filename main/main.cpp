@@ -613,11 +613,27 @@ bool ensureSdDir(const char* path, std::string* err = nullptr)
         if (err) *err = "sd mount";
         return false;
     }
+    DIR* existing = opendir(path);
+    if (existing) {
+        closedir(existing);
+        return true;
+    }
+    struct stat st = {};
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return true;
+
     for (int attempt = 0; attempt < 2; ++attempt) {
         errno = 0;
         if (mkdir(path, 0775) == 0 || errno == EEXIST) return true;
         const int saved_errno = errno;
         if (attempt == 0) {
+            if (saved_errno == EIO) {
+                manualSdReprobe();
+                DIR* after_reprobe = opendir(path);
+                if (after_reprobe) {
+                    closedir(after_reprobe);
+                    return true;
+                }
+            }
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
@@ -2269,6 +2285,7 @@ void drawNotesList()
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(166, 14);
     canvas.print("TXT");
+    canvas.setTextSize(2);
     const int total = static_cast<int>(notes.size()) + 1;
     int rows = 4;
     int start = std::max(0, notes_cursor - 1);
