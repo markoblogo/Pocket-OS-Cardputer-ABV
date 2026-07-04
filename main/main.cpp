@@ -2185,11 +2185,16 @@ void drawMusicPlaying()
 void drawNotesList()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     if (notes_cursor == 0) canvas.print(notes.empty() ? "NOTES 0/0" : "NOTES NEW");
     else canvas.printf("NOTES %d/%d", notes_cursor, static_cast<int>(notes.size()));
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(166, 14);
+    canvas.print("TXT");
     const int total = static_cast<int>(notes.size()) + 1;
     int rows = 4;
     int start = std::max(0, notes_cursor - 1);
@@ -2367,8 +2372,9 @@ void drawTextLineSmart(int x, int y, const std::string& text)
 void drawNotesView()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 5);
     canvas.printf("%.12s %d/%d", active_note_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
     canvas.setTextSize(2);
@@ -2393,12 +2399,13 @@ void drawNotesView()
 void drawNotesEdit()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("NEW NOTE");
     canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 34);
     canvas.printf("%s  1 toggle", note_ru_mode ? "RU translit" : "LAT text");
     canvas.setTextSize(2);
@@ -2505,10 +2512,16 @@ void drawRecorderPlaying()
 void drawReaderList()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.printf("BOOKS %d/%d", books.empty() ? 0 : selected_book + 1, static_cast<int>(books.size()));
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(166, 14);
+    canvas.print("TXT");
+    canvas.setTextSize(2);
     if (books.empty()) {
         canvas.setCursor(8, 42);
         canvas.println(sd_ready ? "No books" : "No SD");
@@ -2538,8 +2551,9 @@ void drawReaderList()
 void drawReaderView()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 5);
     canvas.printf("%.14s %d/%d", active_book_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
     canvas.setTextSize(2);
@@ -2598,6 +2612,7 @@ void drawCenteredText(const std::string& text, int y, int text_size, uint16_t co
 void drawReaderSpeed()
 {
     canvas.fillScreen(uiBg());
+    drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 6);
@@ -2605,6 +2620,7 @@ void drawReaderSpeed()
     canvas.setCursor(92, 6);
     canvas.printf("%s", speedModeName());
     canvas.setCursor(8, 30);
+    canvas.setTextColor(uiAccent(), uiBg());
     canvas.printf("%d WPM", speed_wpm);
     canvas.setCursor(136, 30);
     canvas.print(speed_paused ? "PAUSE" : "RUN");
