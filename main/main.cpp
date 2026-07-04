@@ -1843,6 +1843,7 @@ static const char* AGENT_ACTIONS[] = {
     "RANDOM YES/NO",
     "SETTINGS",
     "CONNECTIONS",
+    "HELP",
     "STATUS"
 };
 constexpr int AGENT_ACTION_COUNT = sizeof(AGENT_ACTIONS) / sizeof(AGENT_ACTIONS[0]);
@@ -1874,18 +1875,25 @@ void runAgentAction()
     else if (agent_cursor == 7) { random_result = "READY"; screen = Screen::Randomizer; }
     else if (agent_cursor == 8) { screen = Screen::Settings; }
     else if (agent_cursor == 9) { screen = Screen::Connections; }
+    else if (agent_cursor == 10) {
+        message_title = "AGENT HELP";
+        message_body = "OK run\nGO back";
+        message_returns_music = false;
+        message_returns_notes = false;
+        screen = Screen::Message;
+    }
     else {
-        message_title = "STATUS";
+        message_title = "ABVX STATUS";
         int bat = batteryPercent();
         uint64_t total = 0;
         uint64_t free_b = 0;
         if (sdUsage(&total, &free_b) && total >= free_b) {
             char buf[96];
-            snprintf(buf, sizeof(buf), "BAT %s  SD %s free", bat >= 0 ? std::to_string(bat).c_str() : "--", formatBytes(free_b).c_str());
+            snprintf(buf, sizeof(buf), "BAT %s%%\nSD %s free", bat >= 0 ? std::to_string(bat).c_str() : "--", formatBytes(free_b).c_str());
             message_body = buf;
         } else {
             char buf[64];
-            snprintf(buf, sizeof(buf), "BAT %s  SD --", bat >= 0 ? std::to_string(bat).c_str() : "--");
+            snprintf(buf, sizeof(buf), "BAT %s%%\nSD --", bat >= 0 ? std::to_string(bat).c_str() : "--");
             message_body = buf;
         }
         message_returns_music = false;
@@ -1930,7 +1938,7 @@ void drawAgent()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 28);
-    canvas.print("quick actions");
+    canvas.print("offline quick actions");
     canvas.setTextSize(2);
     int start = std::max(0, agent_cursor - 1);
     start = std::min(start, std::max(0, AGENT_ACTION_COUNT - 4));
