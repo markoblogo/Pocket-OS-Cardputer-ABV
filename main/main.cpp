@@ -173,6 +173,7 @@ std::vector<Habit> habits;
 std::string pending_delete_path;
 std::string pending_delete_name;
 std::string files_path = MOUNT_POINT;
+std::string files_status = "EMPTY";
 int files_cursor = 0;
 int habits_cursor = 0;
 int habit_day = 1;
@@ -214,7 +215,7 @@ int decoded_chunks = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 512;
-constexpr uint32_t REC_MAX_SECONDS = 10;
+constexpr uint32_t REC_MAX_SECONDS = 5;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
@@ -710,8 +711,11 @@ void scanFiles(const std::string& path)
     file_entries.clear();
     files_path = path.empty() ? std::string(MOUNT_POINT) : path;
     files_cursor = 0;
+    files_status = "OPEN FAIL";
     DIR* dir = openSdDirWithRetry(files_path.c_str());
+    if (!dir && files_path == MOUNT_POINT) files_status = "NO SD";
     if (!dir) return;
+    files_status = "EMPTY";
     if (files_path != MOUNT_POINT) {
         file_entries.push_back({"..", "", true, 0});
     }
@@ -1717,8 +1721,7 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    rec_capture.clear();
-    rec_capture.reserve(REC_SAMPLE_RATE);
+    rec_capture.assign(REC_MAX_SAMPLES, 0);
 
     M5.Speaker.end();
     auto cfg = M5.Mic.config();
@@ -1735,7 +1738,7 @@ bool startRecording(std::string* err = nullptr)
 
 bool saveCapturedRecording(std::string* err = nullptr)
 {
-    if (rec_capture.empty()) {
+    if (rec_samples_written == 0 || rec_capture.empty()) {
         if (err) *err = "empty";
         return false;
     }
@@ -1762,9 +1765,9 @@ bool saveCapturedRecording(std::string* err = nullptr)
         }
         return false;
     }
-    writeWavHeader(f, static_cast<uint32_t>(rec_capture.size()));
-    const size_t wrote = fwrite(rec_capture.data(), sizeof(int16_t), rec_capture.size(), f);
-    bool ok = wrote == rec_capture.size();
+    writeWavHeader(f, rec_samples_written);
+    const size_t wrote = fwrite(rec_capture.data(), sizeof(int16_t), rec_samples_written, f);
+    bool ok = wrote == rec_samples_written;
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
         if (err) {
@@ -1812,17 +1815,17 @@ void updateRecording()
     if (screen != Screen::RecorderRecording || rec_buffer.empty()) return;
     if (rec_write_error) return;
     if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), REC_SAMPLE_RATE)) {
-        const size_t room = REC_MAX_SAMPLES > rec_capture.size() ? REC_MAX_SAMPLES - rec_capture.size() : 0;
+        const size_t room = REC_MAX_SAMPLES > rec_samples_written ? REC_MAX_SAMPLES - rec_samples_written : 0;
         const size_t take = std::min(room, rec_buffer.size());
         if (take > 0) {
-            rec_capture.insert(rec_capture.end(), rec_buffer.begin(), rec_buffer.begin() + take);
+            std::memcpy(rec_capture.data() + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
         }
-        rec_samples_written = static_cast<uint32_t>(rec_capture.size());
+        rec_samples_written += static_cast<uint32_t>(take);
         pcm_chunk = rec_buffer;
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
         if (!display_off) dirty = true;
-        if (take < rec_buffer.size() || rec_capture.size() >= REC_MAX_SAMPLES) {
+        if (take < rec_buffer.size() || rec_samples_written >= REC_MAX_SAMPLES) {
             stopRecording(true);
         }
     }
@@ -2956,7 +2959,7 @@ void drawFilesList()
         canvas.setTextSize(2);
         canvas.setTextColor(uiFg(), uiBg());
         canvas.setCursor(8, 62);
-        canvas.print(sd_ready ? "EMPTY" : "NO SD");
+        canvas.print(files_status.c_str());
     } else {
         int rows = 3;
         int start = std::max(0, files_cursor - 1);
