@@ -19,6 +19,7 @@
 #include <esp_app_desc.h>
 #include <esp_event.h>
 #include <esp_http_server.h>
+#include <esp_heap_caps.h>
 #include <esp_netif.h>
 #include <esp_random.h>
 #include <esp_vfs_fat.h>
@@ -219,7 +220,8 @@ constexpr uint32_t REC_MAX_SECONDS = 5;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
-std::vector<int16_t> rec_capture;
+int16_t* rec_capture = nullptr;
+size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
@@ -1713,6 +1715,11 @@ void updateAudio()
 bool startRecording(std::string* err = nullptr)
 {
     stopPlayback();
+    if (rec_capture) {
+        heap_caps_free(rec_capture);
+        rec_capture = nullptr;
+        rec_capture_capacity = 0;
+    }
     // Do not touch SD here. On Cardputer ADV, SD mkdir/write during live mic
     // setup can destabilize the card. Capture to RAM first, save after stop.
     active_recording_name = newRecordingNameFromMillis();
@@ -1721,7 +1728,16 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    rec_capture.assign(REC_MAX_SAMPLES, 0);
+    rec_capture_capacity = REC_MAX_SAMPLES;
+    rec_capture = static_cast<int16_t*>(heap_caps_malloc(rec_capture_capacity * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!rec_capture) {
+        rec_capture = static_cast<int16_t*>(heap_caps_malloc(rec_capture_capacity * sizeof(int16_t), MALLOC_CAP_8BIT));
+    }
+    if (!rec_capture) {
+        rec_capture_capacity = 0;
+        if (err) *err = "ram alloc";
+        return false;
+    }
 
     M5.Speaker.end();
     auto cfg = M5.Mic.config();
@@ -1738,7 +1754,7 @@ bool startRecording(std::string* err = nullptr)
 
 bool saveCapturedRecording(std::string* err = nullptr)
 {
-    if (rec_samples_written == 0 || rec_capture.empty()) {
+    if (rec_samples_written == 0 || !rec_capture) {
         if (err) *err = "empty";
         return false;
     }
@@ -1766,7 +1782,7 @@ bool saveCapturedRecording(std::string* err = nullptr)
         return false;
     }
     writeWavHeader(f, rec_samples_written);
-    const size_t wrote = fwrite(rec_capture.data(), sizeof(int16_t), rec_samples_written, f);
+    const size_t wrote = fwrite(rec_capture, sizeof(int16_t), rec_samples_written, f);
     bool ok = wrote == rec_samples_written;
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
@@ -1805,7 +1821,11 @@ void stopRecording(bool save)
     }
     rec_write_error = false;
     rec_write_error_text.clear();
-    rec_capture.clear();
+    if (rec_capture) {
+        heap_caps_free(rec_capture);
+        rec_capture = nullptr;
+    }
+    rec_capture_capacity = 0;
     dirty = true;
     blockInput(400);
 }
@@ -1815,17 +1835,17 @@ void updateRecording()
     if (screen != Screen::RecorderRecording || rec_buffer.empty()) return;
     if (rec_write_error) return;
     if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), REC_SAMPLE_RATE)) {
-        const size_t room = REC_MAX_SAMPLES > rec_samples_written ? REC_MAX_SAMPLES - rec_samples_written : 0;
+        const size_t room = rec_capture_capacity > rec_samples_written ? rec_capture_capacity - rec_samples_written : 0;
         const size_t take = std::min(room, rec_buffer.size());
-        if (take > 0) {
-            std::memcpy(rec_capture.data() + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
+        if (take > 0 && rec_capture) {
+            std::memcpy(rec_capture + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
         }
         rec_samples_written += static_cast<uint32_t>(take);
         pcm_chunk = rec_buffer;
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
         if (!display_off) dirty = true;
-        if (take < rec_buffer.size() || rec_samples_written >= REC_MAX_SAMPLES) {
+        if (take < rec_buffer.size() || rec_samples_written >= rec_capture_capacity) {
             stopRecording(true);
         }
     }
