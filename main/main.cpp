@@ -1766,6 +1766,7 @@ void stopRecording(bool save)
     }
     M5.Mic.end();
     bool failed = rec_write_error;
+    bool close_failed = false;
     std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
     std::string failed_path = active_recording_name.empty() ? "" : recordings_dir + "/" + active_recording_name;
     if (rec_file) {
@@ -1773,6 +1774,7 @@ void stopRecording(bool save)
             writeWavHeader(rec_file, rec_samples_written);
             if (!flushAndClose(rec_file)) {
                 failed = true;
+                close_failed = true;
                 failed_text = "close failed";
             }
         } else {
@@ -1780,7 +1782,18 @@ void stopRecording(bool save)
         }
         rec_file = nullptr;
     }
-    if (failed && !failed_path.empty()) unlink(failed_path.c_str());
+    if (close_failed && !failed_path.empty()) {
+        // FATFS can report an I/O error on close even after data was written.
+        // Do not delete a usable recording in that case; reprobe and keep it
+        // if the file exists with audio payload after the WAV header.
+        manualSdReprobe();
+        struct stat st = {};
+        if (stat(failed_path.c_str(), &st) == 0 && st.st_size > 44) {
+            failed = false;
+            failed_text.clear();
+        }
+    }
+    if (failed && !close_failed && !failed_path.empty()) unlink(failed_path.c_str());
     M5.Speaker.begin();
     applyVolume();
     scanRecordings();
