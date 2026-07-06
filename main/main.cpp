@@ -218,6 +218,7 @@ constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 512;
 constexpr uint32_t REC_MAX_SECONDS = 5;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
+constexpr uint32_t REC_MIN_SECONDS = 1;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
 int16_t* rec_capture = nullptr;
@@ -1728,14 +1729,22 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    rec_capture_capacity = REC_MAX_SAMPLES;
-    rec_capture = static_cast<int16_t*>(heap_caps_malloc(rec_capture_capacity * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!rec_capture) {
-        rec_capture = static_cast<int16_t*>(heap_caps_malloc(rec_capture_capacity * sizeof(int16_t), MALLOC_CAP_8BIT));
+    const uint32_t candidates[] = {5, 3, 2, 1};
+    rec_capture_capacity = 0;
+    for (uint32_t sec : candidates) {
+        const size_t samples = REC_SAMPLE_RATE * sec;
+        rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (!rec_capture) {
+            rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_8BIT));
+        }
+        if (rec_capture) {
+            rec_capture_capacity = samples;
+            break;
+        }
     }
     if (!rec_capture) {
         rec_capture_capacity = 0;
-        if (err) *err = "ram alloc";
+        if (err) *err = "ram alloc <1s";
         return false;
     }
 
@@ -2632,7 +2641,7 @@ void drawRecorderRecording()
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
     if (rec_write_error) canvas.print("WRITE ERR");
-    else canvas.printf("RAM:%lus/%lus", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE), static_cast<unsigned long>(REC_MAX_SECONDS));
+    else canvas.printf("RAM:%lus/%lus", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE), static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
