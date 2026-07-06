@@ -52,7 +52,7 @@ Notes:
 
 ### Record
 
-Stores recordings in `/sdcard/rec` as 16-bit mono 16 kHz WAV.
+Stores recordings in `/sdcard/rec` as 16-bit mono 16 kHz WAV. If `/sdcard/rec` reports SD I/O errors, the recorder falls back to `/sdcard/RECS`.
 
 Controls:
 
@@ -187,7 +187,7 @@ Endpoints:
 - `POST /api/upload?path=/books/B1.TXT` uploads a small raw request body to a whitelisted SD folder.
 - `POST /api/upload-begin`, `/api/upload-chunk`, `/api/upload-finish`, `/api/upload-abort` are used by the chunk uploader.
 
-Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Small files can use `/api/upload`; larger files should use the chunk uploader in `tools/cardputer_upload.py`. Chunk upload uses conservative 1 KB chunks with delay/retry because the Cardputer AP and SD writes are resource constrained. Delete is not implemented yet.
+Upload MVP limits: direct child of `/music`, `/books`, `/notes`, `/rec`, `/recs`, or `/cardputer`; 8.3 filename only; max 2 MB; no overwrite. Small files can use `/api/upload`; larger files should use the chunk uploader in `tools/cardputer_upload.py`. Chunk upload uses conservative 1 KB chunks with delay/retry because the Cardputer AP and SD writes are resource constrained. Delete is not implemented yet.
 
 Basic test flow:
 
@@ -220,6 +220,7 @@ Use FATFS 8.3-safe names for now.
 /sdcard/books/RU1.TXT
 /sdcard/notes/NOTE0001.TXT
 /sdcard/rec/REC0001.WAV
+/sdcard/RECS/REC0001.WAV
 /sdcard/habits/HABITS.TXT
 /sdcard/CARDPTR/CONFIG.TXT
 ```

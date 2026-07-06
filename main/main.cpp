@@ -42,6 +42,7 @@ constexpr const char* MUSIC_DIR = "/sdcard/music";
 constexpr const char* BOOKS_DIR = "/sdcard/books";
 constexpr const char* NOTES_DIR = "/sdcard/notes";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
+constexpr const char* RECORDINGS_FALLBACK_DIR = "/sdcard/RECS";
 constexpr const char* HABITS_DIR = "/sdcard/habits";
 constexpr const char* HABITS_FILE = "/sdcard/habits/HABITS.TXT";
 constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
@@ -183,6 +184,7 @@ SoundMode sound_mode = SoundMode::Mid;
 TimeoutMode timeout_mode = TimeoutMode::Normal;
 bool power_save = false;
 std::string config_status = "RAM";
+std::string recordings_dir = RECORDINGS_DIR;
 int selected_track = 0;
 std::string override_music_path;
 int selected_book = 0;
@@ -763,7 +765,18 @@ void writeWavHeader(FILE* f, uint32_t samples)
 
 bool ensureRecordingsDir(std::string* err = nullptr)
 {
-    return ensureSdDir(RECORDINGS_DIR, err);
+    std::string primary_err;
+    if (ensureSdDir(RECORDINGS_DIR, &primary_err)) {
+        recordings_dir = RECORDINGS_DIR;
+        return true;
+    }
+    std::string fallback_err;
+    if (ensureSdDir(RECORDINGS_FALLBACK_DIR, &fallback_err)) {
+        recordings_dir = RECORDINGS_FALLBACK_DIR;
+        return true;
+    }
+    if (err) *err = fallback_err.empty() ? primary_err : fallback_err;
+    return false;
 }
 
 std::string nextRecordingName()
@@ -1475,7 +1488,7 @@ void scanRecordings()
 {
     recordings.clear();
     if (!ensureRecordingsDir()) return;
-    DIR* dir = openSdDirWithRetry(RECORDINGS_DIR);
+    DIR* dir = openSdDirWithRetry(recordings_dir.c_str());
     if (!dir) return;
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
@@ -1705,14 +1718,26 @@ bool startRecording(std::string* err = nullptr)
     }
     scanRecordings();
     active_recording_name = nextRecordingName();
-    const std::string path = std::string(RECORDINGS_DIR) + "/" + active_recording_name;
+    std::string path = recordings_dir + "/" + active_recording_name;
     rec_file = fopen(path.c_str(), "wb+");
     if (!rec_file) {
-        if (err) {
-            *err = "open: ";
-            *err += std::strerror(errno);
+        const int first_errno = errno;
+        if (recordings_dir != RECORDINGS_FALLBACK_DIR && ensureSdDir(RECORDINGS_FALLBACK_DIR, nullptr)) {
+            recordings_dir = RECORDINGS_FALLBACK_DIR;
+            path = recordings_dir + "/" + active_recording_name;
+            rec_file = fopen(path.c_str(), "wb+");
         }
-        return false;
+        if (!rec_file) {
+            if (err) {
+                *err = "open ";
+                *err += std::to_string(first_errno);
+                *err += "/";
+                *err += std::to_string(errno);
+                *err += " ";
+                *err += std::strerror(errno);
+            }
+            return false;
+        }
     }
     writeWavHeader(rec_file, 0);
     rec_samples_written = 0;
@@ -1742,7 +1767,7 @@ void stopRecording(bool save)
     M5.Mic.end();
     bool failed = rec_write_error;
     std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
-    std::string failed_path = active_recording_name.empty() ? "" : std::string(RECORDINGS_DIR) + "/" + active_recording_name;
+    std::string failed_path = active_recording_name.empty() ? "" : recordings_dir + "/" + active_recording_name;
     if (rec_file) {
         if (save && !failed) {
             writeWavHeader(rec_file, rec_samples_written);
@@ -1793,7 +1818,7 @@ void updateRecording()
 std::string selectedRecordingPath()
 {
     if (recordings.empty() || recorder_cursor <= 0) return "";
-    return std::string(RECORDINGS_DIR) + "/" + recordings[recorder_cursor - 1];
+    return recordings_dir + "/" + recordings[recorder_cursor - 1];
 }
 
 bool startRecordingPlayback(std::string* err = nullptr)
@@ -3106,7 +3131,7 @@ bool getQueryUint(httpd_req_t* req, const char* key, size_t* out)
 
 bool isAllowedApiPath(const std::string& path)
 {
-    static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/cardputer"};
+    static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/recs", "/cardputer"};
     if (path == "/") return true;
     for (const char* root : roots) {
         size_t n = std::strlen(root);
@@ -3172,7 +3197,7 @@ bool uploadPathAllowed(const std::string& api_path, std::string* parent_api, std
     }
     *parent_api = api_path.substr(0, slash);
     *filename = api_path.substr(slash + 1);
-    static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/cardputer"};
+    static const char* roots[] = {"/music", "/books", "/notes", "/rec", "/recs", "/cardputer"};
     bool direct_root = false;
     for (const char* root : roots) {
         if (*parent_api == root) {
