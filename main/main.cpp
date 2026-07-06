@@ -85,7 +85,7 @@ std::string connection_upload_path;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -168,6 +168,7 @@ std::vector<std::string> books;
 std::vector<std::string> notes;
 std::vector<std::string> recordings;
 std::vector<FileEntry> file_entries;
+FileEntry file_info_entry;
 std::vector<Habit> habits;
 std::string pending_delete_path;
 std::string pending_delete_name;
@@ -693,9 +694,15 @@ std::string baseName(const std::string& path)
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
-bool isKnownFileExt(const std::string& name)
+std::string fileTypeLabel(const FileEntry& e)
 {
-    return hasMp3Ext(name) || hasTextExt(name) || hasRecordingExt(name);
+    if (e.is_dir) return "DIR";
+    const std::string ext = lowerExt(e.name);
+    if (ext == ".mp3") return "MP3 audio";
+    if (ext == ".txt") return "TXT text";
+    if (ext == ".wav") return "WAV audio";
+    if (ext == ".pcm") return "PCM audio";
+    return "UNSUPPORTED";
 }
 
 void scanFiles(const std::string& path)
@@ -715,7 +722,6 @@ void scanFiles(const std::string& path)
         struct stat st = {};
         if (stat(full.c_str(), &st) != 0) continue;
         bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
-        if (!dir_flag && !isKnownFileExt(name)) continue;
         file_entries.push_back({name, full, dir_flag, static_cast<size_t>(st.st_size)});
     }
     closedir(dir);
@@ -2997,6 +3003,35 @@ void drawFilesDeleteConfirm()
     canvas.pushSprite(0, 0);
 }
 
+void drawFilesInfo()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("FILE INFO");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 32);
+    canvas.printf("NAME %.24s", file_info_entry.name.c_str());
+    canvas.setCursor(8, 46);
+    canvas.printf("TYPE %s", fileTypeLabel(file_info_entry).c_str());
+    canvas.setCursor(8, 60);
+    canvas.printf("SIZE %s", file_info_entry.is_dir ? "-" : formatBytes(file_info_entry.size).c_str());
+    canvas.setCursor(8, 74);
+    std::string rel = file_info_entry.path.rfind(MOUNT_POINT, 0) == 0
+        ? file_info_entry.path.substr(std::strlen(MOUNT_POINT))
+        : file_info_entry.path;
+    canvas.printf("PATH %.26s", rel.c_str());
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 102);
+    canvas.print(file_info_entry.is_dir ? "OK opens folder" : "Unsupported files stay here");
+    canvas.setCursor(8, 122);
+    canvas.print("OK/BACK FILES    GO FILES");
+    canvas.pushSprite(0, 0);
+}
+
 bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
 {
     if (e.is_dir) {
@@ -3034,7 +3069,8 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
         screen = Screen::RecorderPlaying;
         return true;
     }
-    showMessage("FILE INFO", e.name + " " + formatBytes(e.size), MessageReturn::Files);
+    file_info_entry = e;
+    screen = Screen::FilesInfo;
     return true;
 }
 
@@ -4020,6 +4056,7 @@ void drawIfDirty()
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
     else if (screen == Screen::TimeApp) drawTimeApp();
     else if (screen == Screen::FilesList) drawFilesList();
+    else if (screen == Screen::FilesInfo) drawFilesInfo();
     else if (screen == Screen::FilesDeleteConfirm) drawFilesDeleteConfirm();
     else if (screen == Screen::Randomizer) drawRandomizer();
     else if (screen == Screen::HabitsList) drawHabitsList();
@@ -4458,6 +4495,15 @@ void handleKey(KeyEvent ev)
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             if (files_path == MOUNT_POINT) screen = Screen::Launcher;
             else scanFiles(parentPath(files_path));
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::FilesInfo) {
+        if (ev.key == Key::Ok || ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::FilesList;
             blockInput(250);
         }
         dirty = true;
