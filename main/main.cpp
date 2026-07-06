@@ -214,7 +214,7 @@ int decoded_chunks = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 512;
-constexpr uint32_t REC_MAX_SECONDS = 30;
+constexpr uint32_t REC_MAX_SECONDS = 10;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
@@ -659,7 +659,7 @@ bool isHidden(const std::string& name)
     // FATFS without long filename support exposes macOS AppleDouble "._FILE.EXT"
     // sidecars as short aliases like "_FILE_~1.TXT". Hide that pattern from all
     // user-facing SD lists while still allowing deliberate normal "_NAME" files.
-    return name[0] == '_' && name.find('~') != std::string::npos;
+    return name[0] == '_' && (name.find('~') != std::string::npos || name.size() >= 8);
 }
 
 std::string lowerExt(const std::string& name)
@@ -787,23 +787,11 @@ bool ensureRecordingsDir(std::string* err = nullptr)
     return false;
 }
 
-std::string nextRecordingName()
+std::string newRecordingNameFromMillis()
 {
-    bool used[1000] = {};
-    for (const auto& name : recordings) {
-        if (name.size() == 11 && name.rfind("REC", 0) == 0 && lowerExt(name) == ".wav") {
-            int n = std::atoi(name.substr(3, 4).c_str());
-            if (n >= 0 && n < 1000) used[n] = true;
-        }
-    }
-    for (int i = 1; i < 1000; ++i) {
-        if (!used[i]) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), "REC%04d.WAV", i);
-            return buf;
-        }
-    }
-    return "REC9999.WAV";
+    char buf[16];
+    snprintf(buf, sizeof(buf), "REC%05lu.WAV", static_cast<unsigned long>((M5.millis() / 100) % 100000));
+    return buf;
 }
 
 
@@ -1721,18 +1709,16 @@ void updateAudio()
 bool startRecording(std::string* err = nullptr)
 {
     stopPlayback();
-    if (!ensureRecordingsDir(err)) {
-        return false;
-    }
-    scanRecordings();
-    active_recording_name = nextRecordingName();
+    // Do not touch SD here. On Cardputer ADV, SD mkdir/write during live mic
+    // setup can destabilize the card. Capture to RAM first, save after stop.
+    active_recording_name = newRecordingNameFromMillis();
     rec_samples_written = 0;
     rec_write_error = false;
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
     rec_capture.clear();
-    rec_capture.reserve(std::min<size_t>(REC_MAX_SAMPLES, REC_SAMPLE_RATE * 5));
+    rec_capture.reserve(REC_SAMPLE_RATE);
 
     M5.Speaker.end();
     auto cfg = M5.Mic.config();
@@ -1755,6 +1741,14 @@ bool saveCapturedRecording(std::string* err = nullptr)
     }
     if (!ensureRecordingsDir(err)) return false;
     std::string path = recordings_dir + "/" + active_recording_name;
+    for (int i = 0; i < 20; ++i) {
+        struct stat st = {};
+        if (stat(path.c_str(), &st) != 0) break;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "REC%05lu.WAV", static_cast<unsigned long>(((M5.millis() / 100) + i + 1) % 100000));
+        active_recording_name = buf;
+        path = recordings_dir + "/" + active_recording_name;
+    }
     FILE* f = fopen(path.c_str(), "wb");
     if (!f && recordings_dir != RECORDINGS_FALLBACK_DIR && ensureSdDir(RECORDINGS_FALLBACK_DIR, nullptr)) {
         recordings_dir = RECORDINGS_FALLBACK_DIR;
@@ -3041,6 +3035,11 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
         return true;
     }
     std::string ext = lowerExt(e.name);
+    if (e.size == 0 || (ext != ".txt" && ext != ".mp3" && ext != ".wav" && ext != ".pcm")) {
+        file_info_entry = e;
+        screen = Screen::FilesInfo;
+        return true;
+    }
     if (ext == ".txt") {
         active_book_name = e.name;
         active_note_name = e.name;
