@@ -213,9 +213,11 @@ int decoded_chunks = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 512;
-FILE* rec_file = nullptr;
+constexpr uint32_t REC_MAX_SECONDS = 30;
+constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
+std::vector<int16_t> rec_capture;
 uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
@@ -1718,33 +1720,13 @@ bool startRecording(std::string* err = nullptr)
     }
     scanRecordings();
     active_recording_name = nextRecordingName();
-    std::string path = recordings_dir + "/" + active_recording_name;
-    rec_file = fopen(path.c_str(), "wb+");
-    if (!rec_file) {
-        const int first_errno = errno;
-        if (recordings_dir != RECORDINGS_FALLBACK_DIR && ensureSdDir(RECORDINGS_FALLBACK_DIR, nullptr)) {
-            recordings_dir = RECORDINGS_FALLBACK_DIR;
-            path = recordings_dir + "/" + active_recording_name;
-            rec_file = fopen(path.c_str(), "wb+");
-        }
-        if (!rec_file) {
-            if (err) {
-                *err = "open ";
-                *err += std::to_string(first_errno);
-                *err += "/";
-                *err += std::to_string(errno);
-                *err += " ";
-                *err += std::strerror(errno);
-            }
-            return false;
-        }
-    }
-    writeWavHeader(rec_file, 0);
     rec_samples_written = 0;
     rec_write_error = false;
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
+    rec_capture.clear();
+    rec_capture.reserve(std::min<size_t>(REC_MAX_SAMPLES, REC_SAMPLE_RATE * 5));
 
     M5.Speaker.end();
     auto cfg = M5.Mic.config();
@@ -1759,6 +1741,42 @@ bool startRecording(std::string* err = nullptr)
     return true;
 }
 
+bool saveCapturedRecording(std::string* err = nullptr)
+{
+    if (rec_capture.empty()) {
+        if (err) *err = "empty";
+        return false;
+    }
+    if (!ensureRecordingsDir(err)) return false;
+    std::string path = recordings_dir + "/" + active_recording_name;
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f && recordings_dir != RECORDINGS_FALLBACK_DIR && ensureSdDir(RECORDINGS_FALLBACK_DIR, nullptr)) {
+        recordings_dir = RECORDINGS_FALLBACK_DIR;
+        path = recordings_dir + "/" + active_recording_name;
+        f = fopen(path.c_str(), "wb");
+    }
+    if (!f) {
+        if (err) {
+            *err = "open: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    writeWavHeader(f, static_cast<uint32_t>(rec_capture.size()));
+    const size_t wrote = fwrite(rec_capture.data(), sizeof(int16_t), rec_capture.size(), f);
+    bool ok = wrote == rec_capture.size();
+    if (!flushAndClose(f)) ok = false;
+    if (!ok) {
+        if (err) {
+            *err = "save: ";
+            *err += errno ? std::strerror(errno) : "short write";
+        }
+        unlink(path.c_str());
+        return false;
+    }
+    return true;
+}
+
 void stopRecording(bool save)
 {
     while (M5.Mic.isRecording()) {
@@ -1766,34 +1784,14 @@ void stopRecording(bool save)
     }
     M5.Mic.end();
     bool failed = rec_write_error;
-    bool close_failed = false;
     std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
-    std::string failed_path = active_recording_name.empty() ? "" : recordings_dir + "/" + active_recording_name;
-    if (rec_file) {
-        if (save && !failed) {
-            writeWavHeader(rec_file, rec_samples_written);
-            if (!flushAndClose(rec_file)) {
-                failed = true;
-                close_failed = true;
-                failed_text = "close failed";
-            }
-        } else {
-            fclose(rec_file);
-        }
-        rec_file = nullptr;
-    }
-    if (close_failed && !failed_path.empty()) {
-        // FATFS can report an I/O error on close even after data was written.
-        // Do not delete a usable recording in that case; reprobe and keep it
-        // if the file exists with audio payload after the WAV header.
-        manualSdReprobe();
-        struct stat st = {};
-        if (stat(failed_path.c_str(), &st) == 0 && st.st_size > 44) {
-            failed = false;
-            failed_text.clear();
+    if (save && !failed) {
+        std::string err;
+        if (!saveCapturedRecording(&err)) {
+            failed = true;
+            failed_text = err.empty() ? "save failed" : err;
         }
     }
-    if (failed && !close_failed && !failed_path.empty()) unlink(failed_path.c_str());
     M5.Speaker.begin();
     applyVolume();
     scanRecordings();
@@ -1804,27 +1802,29 @@ void stopRecording(bool save)
     }
     rec_write_error = false;
     rec_write_error_text.clear();
+    rec_capture.clear();
     dirty = true;
     blockInput(400);
 }
 
 void updateRecording()
 {
-    if (screen != Screen::RecorderRecording || !rec_file || rec_buffer.empty()) return;
+    if (screen != Screen::RecorderRecording || rec_buffer.empty()) return;
     if (rec_write_error) return;
     if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), REC_SAMPLE_RATE)) {
-        size_t wrote = fwrite(rec_buffer.data(), sizeof(int16_t), rec_buffer.size(), rec_file);
-        if (wrote != rec_buffer.size()) {
-            rec_write_error = true;
-            rec_write_error_text = errno ? std::string("write: ") + std::strerror(errno) : "short write";
-            dirty = true;
-            return;
+        const size_t room = REC_MAX_SAMPLES > rec_capture.size() ? REC_MAX_SAMPLES - rec_capture.size() : 0;
+        const size_t take = std::min(room, rec_buffer.size());
+        if (take > 0) {
+            rec_capture.insert(rec_capture.end(), rec_buffer.begin(), rec_buffer.begin() + take);
         }
-        rec_samples_written += wrote;
+        rec_samples_written = static_cast<uint32_t>(rec_capture.size());
         pcm_chunk = rec_buffer;
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
         if (!display_off) dirty = true;
+        if (take < rec_buffer.size() || rec_capture.size() >= REC_MAX_SAMPLES) {
+            stopRecording(true);
+        }
     }
 }
 
@@ -2609,7 +2609,7 @@ void drawRecorderRecording()
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
     if (rec_write_error) canvas.print("WRITE ERR");
-    else canvas.printf("TIME:%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
+    else canvas.printf("RAM:%lus/%lus", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE), static_cast<unsigned long>(REC_MAX_SECONDS));
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());

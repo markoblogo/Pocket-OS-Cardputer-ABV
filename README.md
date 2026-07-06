@@ -52,7 +52,7 @@ Notes:
 
 ### Record
 
-Stores recordings in `/sdcard/rec` as 16-bit mono 16 kHz WAV. If `/sdcard/rec` reports SD I/O errors, the recorder falls back to `/sdcard/RECS`.
+Stores recordings in `/sdcard/rec` as 16-bit mono 16 kHz WAV. Recording is RAM-first: audio is captured to RAM, then saved to SD when stopped. If `/sdcard/rec` reports SD I/O errors, the recorder falls back to `/sdcard/RECS`. MVP recording length is capped at 30 seconds.
 
 Controls:
 
