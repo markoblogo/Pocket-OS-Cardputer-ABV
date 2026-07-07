@@ -75,6 +75,7 @@ One Button Capture from launcher:
 - `N`: new text note.
 - `M`: play selected music.
 - `2` or `S`: resume last used context in the current session.
+- `D` or `0`: open session dashboard.
 
 ## SD layout
 

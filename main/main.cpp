@@ -105,7 +105,7 @@ size_t connection_pending_offset = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Dashboard, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -262,6 +262,7 @@ bool rec_write_error = false;
 std::string rec_write_error_text;
 std::string active_recording_name;
 std::string active_book_name;
+bool reader_opened_this_session = false;
 std::string active_note_name;
 std::string note_input;
 bool note_edit_existing = false;
@@ -1445,6 +1446,7 @@ bool loadSelectedBook(std::string* err = nullptr)
     }
     if (!loadTextFile(selectedBookPath(), books[selected_book], err)) return false;
     last_reader_book = active_book_name;
+    reader_opened_this_session = true;
     auto it = reader_bookmarks.find(active_book_name);
     if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
     saveReaderState();
@@ -2367,7 +2369,7 @@ void resumeContext()
             break;
         case ResumeTarget::Reader:
             scanBooks();
-            if (!last_reader_book.empty() && !books.empty()) {
+            if (reader_opened_this_session && !last_reader_book.empty() && !books.empty()) {
                 auto it = std::find(books.begin(), books.end(), last_reader_book);
                 if (it != books.end()) selected_book = static_cast<int>(std::distance(books.begin(), it));
                 std::string err;
@@ -2497,7 +2499,45 @@ void drawLauncher()
     canvas.setCursor(8, 106);
     canvas.printf("2/S RESUME %s", resumeName());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN  R REC N NOTE M PLAY");
+    canvas.print("OK OPEN  D DASH  R/N/M");
+    canvas.pushSprite(0, 0);
+}
+
+void drawDashboard()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("DASH");
+    drawBatteryWidget(166, 8);
+
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 34);
+    canvas.printf("RESUME %s", resumeName());
+
+    uint64_t total = 0;
+    uint64_t free_b = 0;
+    canvas.setCursor(8, 50);
+    if (sdUsage(&total, &free_b) && total >= free_b) {
+        canvas.printf("SD FREE %s USED %s", formatBytes(free_b).c_str(), formatBytes(total - free_b).c_str());
+    } else {
+        canvas.print("SD NOT READY");
+    }
+
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setTextSize(2);
+    canvas.setCursor(8, 72);
+    canvas.printf("M:%d B:%d", static_cast<int>(tracks.size()), static_cast<int>(books.size()));
+    canvas.setCursor(8, 96);
+    canvas.printf("N:%d R:%d", static_cast<int>(notes.size()), static_cast<int>(recordings.size()));
+
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 122);
+    canvas.print("OK RESUME      GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -4763,6 +4803,7 @@ void drawIfDirty()
 {
     if (!dirty || display_off) return;
     if (screen == Screen::Launcher) drawLauncher();
+    else if (screen == Screen::Dashboard) drawDashboard();
     else if (screen == Screen::Agent) drawAgent();
     else if (screen == Screen::MusicList) drawMusicList();
     else if (screen == Screen::MusicPlaying) drawMusicPlaying();
@@ -4891,6 +4932,12 @@ bool handleOneButtonCapture(KeyEvent ev)
         dirty = true;
         return true;
     }
+    if (c == 'd' || c == '0') {
+        screen = Screen::Dashboard;
+        blockInput(250);
+        dirty = true;
+        return true;
+    }
     if (c == '2' || c == '@' || c == 's') {
         resumeContext();
         return true;
@@ -4927,6 +4974,16 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
         else if (ev.key == Key::Two) resumeContext();
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::Dashboard) {
+        if (ev.key == Key::Ok) resumeContext();
+        else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
         dirty = true;
         return;
     }
