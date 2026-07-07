@@ -232,10 +232,13 @@ bool mp3_eof = false;
 bool playing = false;
 uint32_t playback_decode_after_ms = 0;
 std::vector<int16_t> pcm_chunk;
+std::vector<int16_t> pcm_next_chunk;
+bool pcm_next_ready = false;
 std::vector<mp3d_sample_t> mp3_frame_pcm;
 int pcm_rate = 44100;
 int pcm_channels = 2;
 int decoded_chunks = 0;
+int music_underruns = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
@@ -1734,6 +1737,10 @@ void stopPlayback()
     mp3_pos = 0;
     mp3_eof = false;
     decoded_chunks = 0;
+    music_underruns = 0;
+    pcm_chunk.clear();
+    pcm_next_chunk.clear();
+    pcm_next_ready = false;
     playback_decode_after_ms = 0;
 }
 
@@ -1785,12 +1792,15 @@ bool startPlayback(std::string* err = nullptr)
     mp3_pos = 0;
     mp3_eof = false;
     pcm_chunk.clear();
+    pcm_next_chunk.clear();
+    pcm_next_ready = false;
     decoded_chunks = 0;
+    music_underruns = 0;
     M5.Mic.end();
     M5.Speaker.begin();
     applyVolume();
     playing = true;
-    playback_decode_after_ms = M5.millis() + 800;
+    playback_decode_after_ms = M5.millis() + 150;
     screen = Screen::MusicPlaying;
     dirty = true;
     blockInput(400);
@@ -1841,20 +1851,20 @@ int16_t safeAudioSample(int32_t v)
     return static_cast<int16_t>(v);
 }
 
-bool decodeChunk(std::string* err = nullptr)
+bool decodeChunkInto(std::vector<int16_t>& out, std::string* err = nullptr)
 {
     if (!playing || !mp3_file) {
         if (err) *err = "not playing";
         return false;
     }
-    pcm_chunk.clear();
+    out.clear();
     int target_values = AUDIO_OUTPUT_RATE * CHUNK_MS / 1000;
     if (mp3_frame_pcm.size() < MINIMP3_MAX_SAMPLES_PER_FRAME) {
         mp3_frame_pcm.assign(MINIMP3_MAX_SAMPLES_PER_FRAME, 0);
     }
-    pcm_chunk.reserve(target_values + MINIMP3_MAX_SAMPLES_PER_FRAME);
+    out.reserve(target_values + MINIMP3_MAX_SAMPLES_PER_FRAME);
     bool saw_sync = false;
-    for (int attempts = 0; attempts < 512 && static_cast<int>(pcm_chunk.size()) < target_values;) {
+    for (int attempts = 0; attempts < 512 && static_cast<int>(out.size()) < target_values;) {
         if (!refillInput()) break;
         size_t sync = findSync(mp3_pos);
         if (sync == std::string::npos) {
@@ -1872,7 +1882,7 @@ bool decodeChunk(std::string* err = nullptr)
             pcm_channels = 1;
             const int src_rate = info.hz > 0 ? info.hz : AUDIO_OUTPUT_RATE;
             const int out_samples = std::max(1, samples * AUDIO_OUTPUT_RATE / src_rate);
-            pcm_chunk.reserve(pcm_chunk.size() + out_samples);
+            out.reserve(out.size() + out_samples);
             for (int out_i = 0; out_i < out_samples; ++out_i) {
                 int src_i = out_i * src_rate / AUDIO_OUTPUT_RATE;
                 if (src_i >= samples) src_i = samples - 1;
@@ -1883,7 +1893,7 @@ bool decodeChunk(std::string* err = nullptr)
                 } else {
                     sample = mp3_frame_pcm[src_i * info.channels];
                 }
-                pcm_chunk.push_back(safeAudioSample(sample));
+                out.push_back(safeAudioSample(sample));
             }
             mp3_pos += info.frame_bytes;
             target_values = std::max(1024, AUDIO_OUTPUT_RATE * CHUNK_MS / 1000);
@@ -1891,7 +1901,7 @@ bool decodeChunk(std::string* err = nullptr)
             ++mp3_pos;
         }
     }
-    if (pcm_chunk.empty()) {
+    if (out.empty()) {
         if (err) {
             if (!saw_sync) *err = mp3_eof ? "no mpeg sync / eof" : "no mpeg sync";
             else *err = "decode produced no pcm";
@@ -1901,13 +1911,30 @@ bool decodeChunk(std::string* err = nullptr)
     return true;
 }
 
+bool decodeChunk(std::string* err = nullptr)
+{
+    return decodeChunkInto(pcm_chunk, err);
+}
+
 void updateAudio()
 {
     if (!playing) return;
     if (M5.millis() < playback_decode_after_ms) return;
-    if (M5.Speaker.isPlaying()) return;
     std::string err;
-    if (!decodeChunk(&err)) {
+    if (M5.Speaker.isPlaying()) {
+        if (!pcm_next_ready) {
+            if (decodeChunkInto(pcm_next_chunk, &err)) {
+                pcm_next_ready = true;
+            }
+        }
+        return;
+    }
+
+    if (pcm_next_ready) {
+        pcm_chunk.swap(pcm_next_chunk);
+        pcm_next_chunk.clear();
+        pcm_next_ready = false;
+    } else if (!decodeChunk(&err)) {
         const bool eof = mp3_eof && err.find("eof") != std::string::npos;
         if (eof) {
             if (tracks.size() > 1) {
@@ -1923,6 +1950,8 @@ void updateAudio()
         dirty = true;
         blockInput(350);
         return;
+    } else if (decoded_chunks > 0) {
+        ++music_underruns;
     }
     ++decoded_chunks;
     if (!display_off) dirty = true;
@@ -2602,6 +2631,12 @@ void drawMusicPlaying()
     canvas.printf("VOL:%s", volumeName());
     canvas.setCursor(118, 58);
     canvas.printf("SHUF:%s", shuffle_on ? "ON" : "OFF");
+    if (music_underruns > 0) {
+        canvas.setTextSize(1);
+        canvas.setCursor(202, 62);
+        canvas.printf("U%d", music_underruns);
+        canvas.setTextSize(2);
+    }
     drawWaveform(pcm_chunk, pcm_channels);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
