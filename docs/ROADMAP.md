@@ -72,6 +72,16 @@ Goal: text-first web reader, not graphical browser.
 - Offline cache for first-level favorite pages.
 - Downloads to `/books`, `/notes`, `/music`, or `/cardputer`.
 
+## Phase 4.5: Mac Companion
+
+Goal: local Mac tool for preparing and moving files to Cardputer SD.
+
+- Import books and convert to clean TXT for `/books`.
+- Import music and convert/rename to Cardputer-friendly MP3 for `/music`.
+- Pull notes and recordings from SD.
+- Sync time/config later.
+- Use BookOrbit as reference for library/import ideas, not as direct base. See `docs/MAC_COMPANION_REFERENCES.md`.
+
 ## Phase 5: Agent / AI
 
 Agent returns only when it adds value beyond launcher.
