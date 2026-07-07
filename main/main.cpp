@@ -115,6 +115,7 @@ enum class ThemeMode { White = 0, Green = 1, Yellow = 2, Invert = 3 };
 enum class SoundMode { Off = 0, Low = 1, Mid = 2, Loud = 3, Max = 4 };
 enum class TimeoutMode { Short = 0, Normal = 1, Long = 2 };
 enum class MessageReturn { Launcher, Music, Notes, Files, Recorder };
+enum class ResumeTarget { Music = 0, Reader = 1, Notes = 2, Recorder = 3, Time = 4, Files = 5, Randomizer = 6, Habits = 7, Settings = 8, Connections = 9 };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -184,6 +185,7 @@ bool message_returns_notes = false;
 bool message_returns_files = false;
 bool message_returns_recorder = false;
 uint32_t message_hold_until_ms = 0;
+ResumeTarget last_resume_target = ResumeTarget::Music;
 
 std::vector<std::string> tracks;
 std::map<std::string, std::string> music_titles;
@@ -2326,6 +2328,7 @@ constexpr int AGENT_ACTION_COUNT = sizeof(AGENT_ACTIONS) / sizeof(AGENT_ACTIONS[
 
 void openLauncherApp(int index)
 {
+    if (index >= 0 && index <= 9) last_resume_target = static_cast<ResumeTarget>(index);
     if (index == 0) { scanMusic(); screen = Screen::MusicList; blockInput(250); }
     else if (index == 1) { scanBooks(); screen = Screen::ReaderList; blockInput(250); }
     else if (index == 2) { scanNotes(); screen = Screen::NotesList; blockInput(250); }
@@ -2336,6 +2339,81 @@ void openLauncherApp(int index)
     else if (index == 7) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
     else if (index == 8) { screen = Screen::Settings; blockInput(250); }
     else if (index == 9) { screen = Screen::Connections; blockInput(250); }
+}
+
+const char* resumeName()
+{
+    switch (last_resume_target) {
+        case ResumeTarget::Music: return "LISTEN";
+        case ResumeTarget::Reader: return "READ";
+        case ResumeTarget::Notes: return "WRITE";
+        case ResumeTarget::Recorder: return "VOICE";
+        case ResumeTarget::Time: return "TIME";
+        case ResumeTarget::Files: return "FILES";
+        case ResumeTarget::Randomizer: return "DECIDE";
+        case ResumeTarget::Habits: return "ROUTINES";
+        case ResumeTarget::Settings: return "SETTINGS";
+        case ResumeTarget::Connections: return "TRANSFER";
+    }
+    return "LISTEN";
+}
+
+void resumeContext()
+{
+    switch (last_resume_target) {
+        case ResumeTarget::Music:
+            scanMusic();
+            screen = Screen::MusicList;
+            break;
+        case ResumeTarget::Reader:
+            scanBooks();
+            if (!last_reader_book.empty() && !books.empty()) {
+                auto it = std::find(books.begin(), books.end(), last_reader_book);
+                if (it != books.end()) selected_book = static_cast<int>(std::distance(books.begin(), it));
+                std::string err;
+                if (loadTextFile(selectedBookPath(), books[selected_book], &err)) {
+                    auto bm = reader_bookmarks.find(active_book_name);
+                    if (bm != reader_bookmarks.end()) reader_scroll = clampReaderLine(bm->second);
+                    screen = Screen::ReaderView;
+                    break;
+                }
+            }
+            screen = Screen::ReaderList;
+            break;
+        case ResumeTarget::Notes:
+            scanNotes();
+            screen = Screen::NotesList;
+            break;
+        case ResumeTarget::Recorder:
+            scanRecordings();
+            screen = Screen::RecorderList;
+            break;
+        case ResumeTarget::Time:
+            time_mode = TimeMode::Clock;
+            clock_base_ms = M5.millis();
+            screen = Screen::TimeApp;
+            break;
+        case ResumeTarget::Files:
+            scanFiles(files_path.empty() ? std::string(MOUNT_POINT) : files_path);
+            screen = Screen::FilesList;
+            break;
+        case ResumeTarget::Randomizer:
+            random_result = "READY";
+            screen = Screen::Randomizer;
+            break;
+        case ResumeTarget::Habits:
+            scanHabits();
+            screen = Screen::HabitsList;
+            break;
+        case ResumeTarget::Settings:
+            screen = Screen::Settings;
+            break;
+        case ResumeTarget::Connections:
+            screen = Screen::Connections;
+            break;
+    }
+    blockInput(250);
+    dirty = true;
 }
 
 void runAgentAction()
@@ -2416,6 +2494,8 @@ void drawLauncher()
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 106);
+    canvas.printf("2 RESUME %s", resumeName());
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN  R REC N NOTE M PLAY");
     canvas.pushSprite(0, 0);
@@ -4784,6 +4864,7 @@ bool handleOneButtonCapture(KeyEvent ev)
     char c = shortcutChar(ev);
     if (!c) return false;
     if (c == 'r') {
+        last_resume_target = ResumeTarget::Recorder;
         std::string err;
         if (!startRecording(&err)) {
             showMessage("Record failed", err.empty() ? "start" : err);
@@ -4793,6 +4874,7 @@ bool handleOneButtonCapture(KeyEvent ev)
         return true;
     }
     if (c == 'n') {
+        last_resume_target = ResumeTarget::Notes;
         note_input.clear();
         note_edit_existing = false;
         screen = Screen::NotesEdit;
@@ -4801,6 +4883,7 @@ bool handleOneButtonCapture(KeyEvent ev)
         return true;
     }
     if (c == 'm') {
+        last_resume_target = ResumeTarget::Music;
         scanMusic();
         screen = Screen::MusicList;
         music_autostart_pending = true;
@@ -4838,6 +4921,7 @@ void handleKey(KeyEvent ev)
         if (ev.key == Key::Up) { launcher_index = std::max(0, launcher_index - 1); pulseUi(); }
         else if (ev.key == Key::Down) { launcher_index = std::min(9, launcher_index + 1); pulseUi(); }
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
+        else if (ev.key == Key::Two) resumeContext();
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
         dirty = true;
         return;
