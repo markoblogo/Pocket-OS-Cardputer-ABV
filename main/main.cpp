@@ -95,7 +95,7 @@ enum class TimeSetField { Hours = 0, Minutes = 1, Seconds = 2 };
 enum class ThemeMode { White = 0, Green = 1, Yellow = 2, Invert = 3 };
 enum class SoundMode { Off = 0, Low = 1, Mid = 2, Loud = 3, Max = 4 };
 enum class TimeoutMode { Short = 0, Normal = 1, Long = 2 };
-enum class MessageReturn { Launcher, Music, Notes, Files };
+enum class MessageReturn { Launcher, Music, Notes, Files, Recorder };
 
 struct KeyEvent {
     Key key = Key::None;
@@ -162,6 +162,7 @@ std::string message_body;
 bool message_returns_music = false;
 bool message_returns_notes = false;
 bool message_returns_files = false;
+bool message_returns_recorder = false;
 uint32_t message_hold_until_ms = 0;
 
 std::vector<std::string> tracks;
@@ -294,6 +295,7 @@ void showMessage(const std::string& title, const std::string& body, MessageRetur
     message_returns_music = ret == MessageReturn::Music;
     message_returns_notes = ret == MessageReturn::Notes;
     message_returns_files = ret == MessageReturn::Files;
+    message_returns_recorder = ret == MessageReturn::Recorder;
     screen = Screen::Message;
 }
 
@@ -1824,9 +1826,13 @@ void stopRecording(bool save)
     applyVolume();
     scanRecordings();
     if (failed) {
-        showMessage("Record failed", failed_text);
+        showMessage("Record failed", failed_text, MessageReturn::Recorder);
     } else {
-        screen = Screen::RecorderList;
+        auto it = std::find(recordings.begin(), recordings.end(), active_recording_name);
+        if (it != recordings.end()) {
+            recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
+        }
+        showMessage("Record saved", active_recording_name, MessageReturn::Recorder);
     }
     rec_write_error = false;
     rec_write_error_text.clear();
@@ -2607,12 +2613,13 @@ void drawRecorderList()
     start = std::min(start, std::max(0, total - 3));
     int end = std::min(total, start + 3);
     for (int i = start; i < end; ++i) {
+        canvas.setTextSize(2);
         canvas.setCursor(8, 38 + (i - start) * 24);
         canvas.setTextColor(i == recorder_cursor ? uiBg() : uiFg(), i == recorder_cursor ? uiFg() : uiBg());
         if (i == 0) {
             canvas.printf("%c NEW REC", i == recorder_cursor ? '>' : ' ');
         } else {
-            canvas.printf("%c %.13s", i == recorder_cursor ? '>' : ' ', recordings[i - 1].c_str());
+            canvas.printf("%c %.11s", i == recorder_cursor ? '>' : ' ', recordings[i - 1].c_str());
         }
     }
     if (recordings.empty()) {
@@ -4751,6 +4758,10 @@ void handleKey(KeyEvent ev)
         } else if (message_returns_files && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
             message_returns_files = false;
             screen = Screen::FilesList;
+        } else if (message_returns_recorder && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
+            message_returns_recorder = false;
+            scanRecordings();
+            screen = Screen::RecorderList;
         } else if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
             screen = Screen::Launcher;
         }
