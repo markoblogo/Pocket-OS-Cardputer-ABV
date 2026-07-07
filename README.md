@@ -65,7 +65,7 @@ App highlights:
 - Listen: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle.
 - Read: Up/Down line, Left/Right page, `1` speed mode, OK pause/resume in speed mode.
 - Write: `1` new/edit, Backspace delete from list.
-- Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays saved recording.
+- Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays saved recording. Target max is 30s with RAM fallback shown on screen.
 - Routines: OK toggles, `1` next day, Right stats, Left manage.
 - Transfer: OK starts AP, GO stops it.
 

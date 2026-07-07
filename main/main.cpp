@@ -245,7 +245,8 @@ int music_underruns = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
-constexpr uint32_t REC_MAX_SECONDS = 120;
+constexpr uint32_t REC_SAFE_SECONDS = 30;
+constexpr uint32_t REC_MAX_SECONDS = REC_SAFE_SECONDS;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
@@ -1988,7 +1989,9 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    const uint32_t candidates[] = {120, 90, 60, 45, 30, 15, 10, 5, 3, 2, 1};
+    // Voice v0.x targets quick memory notes, not meetings. Try 30s first,
+    // then fall back honestly if RAM is lower on the current boot.
+    const uint32_t candidates[] = {REC_SAFE_SECONDS, 20, 10, 5, 3, 2, 1};
     rec_capture_capacity = 0;
     for (uint32_t sec : candidates) {
         const size_t samples = REC_SAMPLE_RATE * sec;
@@ -2106,7 +2109,7 @@ void stopRecording(bool save)
         if (it != recordings.end()) {
             recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
         }
-        const unsigned long sec = static_cast<unsigned long>((M5.millis() - rec_started_ms + 500) / 1000);
+        const unsigned long sec = static_cast<unsigned long>((rec_samples_written + REC_SAMPLE_RATE / 2) / REC_SAMPLE_RATE);
         showMessage("Record saved", active_recording_name + "\n" + std::to_string(sec) + " sec", MessageReturn::Recorder);
     }
     rec_write_error = false;
@@ -2206,6 +2209,12 @@ bool startRecordingPlayback(std::string* err = nullptr)
     if (file_size <= data_offset) {
         fclose(f);
         if (err) *err = "empty";
+        return false;
+    }
+    const size_t samples = static_cast<size_t>((file_size - data_offset) / sizeof(int16_t));
+    if (samples < REC_SAMPLE_RATE / 4) {
+        fclose(f);
+        if (err) *err = "bad rec";
         return false;
     }
     fseek(f, data_offset, SEEK_SET);
@@ -3082,7 +3091,7 @@ void drawRecorderList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(158, 14);
-    canvas.print("WAV");
+    canvas.printf("MAX%lus", static_cast<unsigned long>(REC_SAFE_SECONDS));
 
     const int total = static_cast<int>(recordings.size()) + 1;
     int start = std::max(0, recorder_cursor - 1);
@@ -3154,6 +3163,11 @@ void drawRecorderRecording()
     canvas.println("VOICE REC");
     canvas.setCursor(8, 34);
     canvas.printf("%.14s", active_recording_name.c_str());
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(158, 38);
+    canvas.printf("MAX %lus", static_cast<unsigned long>(rec_capture_capacity / REC_SAMPLE_RATE));
+    canvas.setTextSize(2);
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
     if (rec_write_error) {
@@ -5249,7 +5263,7 @@ void handleKey(KeyEvent ev)
                 }
             } else {
                 if (!startRecordingPlayback(&err)) {
-                    showMessage("Play failed", err.empty() ? "open" : err);
+                    showMessage(err == "bad rec" ? "BAD REC" : "Play failed", err.empty() ? "open" : err, MessageReturn::Recorder);
                 }
             }
             blockInput(300);
