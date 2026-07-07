@@ -158,6 +158,7 @@ uint32_t last_key_ms = 0;
 uint32_t input_block_until_ms = 0;
 uint32_t ui_anim_until_ms = 0;
 uint32_t ui_anim_last_frame_ms = 0;
+uint32_t marquee_last_frame_ms = 0;
 
 Screen screen = Screen::Launcher;
 int launcher_index = 0;
@@ -743,6 +744,20 @@ std::string baseName(const std::string& path)
 {
     size_t slash = path.find_last_of('/');
     return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+std::string marqueeText(const std::string& text, size_t width)
+{
+    if (width == 0) return "";
+    if (text.size() <= width) return text;
+    std::string loop = text + "   ";
+    const size_t off = (M5.millis() / 180) % loop.size();
+    std::string out;
+    out.reserve(width);
+    for (size_t i = 0; i < width; ++i) {
+        out.push_back(loop[(off + i) % loop.size()]);
+    }
+    return out;
 }
 
 std::string fileTypeLabel(const FileEntry& e)
@@ -2487,7 +2502,9 @@ void drawMusicList()
         for (int i = start; i < end; ++i) {
             canvas.setCursor(8, 38 + (i - start) * 24);
             canvas.setTextColor(i == selected_track ? uiBg() : uiFg(), i == selected_track ? uiFg() : uiBg());
-            canvas.printf("%c %.13s", i == selected_track ? '>' : ' ', musicDisplayName(tracks[i]).c_str());
+            std::string label = musicDisplayName(tracks[i]);
+            if (i == selected_track) label = marqueeText(label, 13);
+            canvas.printf("%c %.13s", i == selected_track ? '>' : ' ', label.c_str());
         }
     }
     canvas.setTextSize(1);
@@ -2506,7 +2523,8 @@ void drawMusicPlaying()
     canvas.setCursor(8, 8);
     canvas.println("PLAYING");
     canvas.setCursor(8, 34);
-    canvas.printf("%.14s", !override_music_path.empty() ? baseName(override_music_path).c_str() : (tracks.empty() ? "" : musicDisplayName(tracks[selected_track]).c_str()));
+    std::string play_label = !override_music_path.empty() ? baseName(override_music_path) : (tracks.empty() ? "" : musicDisplayName(tracks[selected_track]));
+    canvas.printf("%.14s", marqueeText(play_label, 14).c_str());
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.printf("VOL:%s", volumeName());
@@ -2543,7 +2561,11 @@ void drawNotesList()
         canvas.setCursor(8, 34 + (i - start) * 21);
         canvas.setTextColor(i == notes_cursor ? uiBg() : uiFg(), i == notes_cursor ? uiFg() : uiBg());
         if (i == 0) canvas.printf("%c NEW NOTE", i == notes_cursor ? '>' : ' ');
-        else canvas.printf("%c %.13s", i == notes_cursor ? '>' : ' ', notes[i - 1].c_str());
+        else {
+            std::string label = notes[i - 1];
+            if (i == notes_cursor) label = marqueeText(label, 13);
+            canvas.printf("%c %.13s", i == notes_cursor ? '>' : ' ', label.c_str());
+        }
     }
     if (notes.empty()) {
         canvas.setTextSize(1);
@@ -2820,7 +2842,9 @@ void drawRecorderList()
             canvas.setCursor(28, row_y + 18);
             canvas.print("OK start voice note");
         } else {
-            canvas.printf("%c %.11s", i == recorder_cursor ? '>' : ' ', recordings[i - 1].c_str());
+            std::string label = recordings[i - 1];
+            if (i == recorder_cursor) label = marqueeText(label, 11);
+            canvas.printf("%c %.11s", i == recorder_cursor ? '>' : ' ', label.c_str());
             canvas.setTextSize(1);
             canvas.setTextColor(uiDim(), uiBg());
             canvas.setCursor(28, row_y + 18);
@@ -2941,7 +2965,9 @@ void drawReaderList()
         for (int i = start; i < end; ++i) {
             canvas.setCursor(8, 34 + (i - start) * 21);
             canvas.setTextColor(i == selected_book ? uiBg() : uiFg(), i == selected_book ? uiFg() : uiBg());
-            canvas.printf("%c%c%.12s", i == selected_book ? '>' : ' ', reader_bookmarks.count(books[i]) ? '*' : ' ', books[i].c_str());
+            std::string label = books[i];
+            if (i == selected_book) label = marqueeText(label, 12);
+            canvas.printf("%c%c%.12s", i == selected_book ? '>' : ' ', reader_bookmarks.count(books[i]) ? '*' : ' ', label.c_str());
         }
     }
     canvas.setTextSize(1);
@@ -3245,7 +3271,9 @@ void drawFilesList()
             const auto& e = file_entries[i];
             canvas.setCursor(8, 58 + (i - start) * 20);
             canvas.setTextColor(i == files_cursor ? uiBg() : uiFg(), i == files_cursor ? uiFg() : uiBg());
-            canvas.printf("%c%c%.12s", i == files_cursor ? '>' : ' ', e.is_dir ? '/' : ' ', e.name.c_str());
+            std::string label = e.name;
+            if (i == files_cursor) label = marqueeText(label, 12);
+            canvas.printf("%c%c%.12s", i == files_cursor ? '>' : ' ', e.is_dir ? '/' : ' ', label.c_str());
         }
     }
     canvas.setTextSize(1);
@@ -5207,6 +5235,14 @@ extern "C" void app_main(void)
         if ((screen == Screen::Launcher || screen == Screen::Agent) && now < ui_anim_until_ms && now - ui_anim_last_frame_ms >= 33) {
             ui_anim_last_frame_ms = now;
             dirty = true;
+        }
+        if (!display_off && now - marquee_last_frame_ms >= 180) {
+            if (screen == Screen::MusicList || screen == Screen::MusicPlaying ||
+                screen == Screen::ReaderList || screen == Screen::NotesList ||
+                screen == Screen::RecorderList || screen == Screen::FilesList) {
+                marquee_last_frame_ms = now;
+                dirty = true;
+            }
         }
         if (connection_upload_active) {
             last_input_ms = M5.millis();
