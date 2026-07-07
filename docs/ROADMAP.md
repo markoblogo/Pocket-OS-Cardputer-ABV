@@ -62,14 +62,15 @@ Acceptance:
 
 ## Phase 4: Text Browser MVP
 
-Goal: text-first web reader, not graphical browser.
+Goal: prepared-first text browser for a small set of favorite sites, not a graphical browser. See `docs/BROWSER_ARCHITECTURE.md`.
 
 - Wi-Fi client mode.
 - URL input.
 - Favorites list.
-- HTML-to-text extraction.
+- Mac-prepared favorite packages first.
+- HTML-to-text extraction primarily in Mac Companion.
 - Link list navigation.
-- Offline cache for first-level favorite pages.
+- Offline cache for favorite pages.
 - Downloads to `/books`, `/notes`, `/music`, or `/cardputer`.
 
 ## Phase 4.5: Mac Companion
