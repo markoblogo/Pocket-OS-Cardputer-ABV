@@ -88,7 +88,7 @@ std::string connection_upload_path;
 LGFX_Sprite canvas(&M5.Display);
 
 enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
-enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
+enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
 enum class TimeMode { Clock = 0, Stopwatch = 1, Timer = 2, Alarm = 3 };
@@ -219,7 +219,7 @@ int decoded_chunks = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 512;
-constexpr uint32_t REC_MAX_SECONDS = 5;
+constexpr uint32_t REC_MAX_SECONDS = 15;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 FILE* rec_play_file = nullptr;
@@ -549,6 +549,7 @@ Key keyFromName(const char* name)
     if (!strcmp(name, "del")) return Key::Backspace;
     if (!strcmp(name, "'" ) || !strcmp(name, "esc")) return Key::Back;
     if (!strcmp(name, "1")) return Key::One;
+    if (!strcmp(name, "2")) return Key::Two;
     return Key::None;
 }
 
@@ -764,6 +765,47 @@ std::string filesDisplayPath(const std::string& path)
 bool isSupportedOpenFile(const FileEntry& e)
 {
     return !e.is_dir && (hasMp3Ext(e.name) || hasTextExt(e.name) || hasRecordingExt(e.name));
+}
+
+bool createUnsupportedTestFile(std::string* err = nullptr)
+{
+    struct stat st = {};
+    if (stat(CONFIG_DIR, &st) != 0) {
+        if (mkdir(CONFIG_DIR, 0775) != 0 && errno != EEXIST) {
+            if (err) {
+                *err = "mkdir: ";
+                *err += std::strerror(errno);
+            }
+            return false;
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        if (err) *err = "CARDPTR not dir";
+        return false;
+    }
+    const std::string path = std::string(CONFIG_DIR) + "/X.BIN";
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) {
+        if (err) {
+            *err = "open: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    static constexpr const char kBody[] = "ABVx unsupported file test\n";
+    const size_t want = sizeof(kBody) - 1;
+    const size_t wrote = fwrite(kBody, 1, want, f);
+    bool ok = wrote == want;
+    if (fflush(f) != 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        if (err) {
+            *err = "write: ";
+            *err += errno ? std::strerror(errno) : "short write";
+        }
+        unlink(path.c_str());
+        return false;
+    }
+    return true;
 }
 
 void scanFiles(const std::string& path)
@@ -1798,7 +1840,7 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    const uint32_t candidates[] = {5, 3, 2, 1};
+    const uint32_t candidates[] = {15, 10, 5, 3, 2, 1};
     rec_capture_capacity = 0;
     for (uint32_t sec : candidates) {
         const size_t samples = REC_SAMPLE_RATE * sec;
@@ -3168,7 +3210,7 @@ void drawFilesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN  BKSP DEL  1 ROOT");
+    canvas.print("OK OPEN  BKSP DEL  2 TEST");
     canvas.pushSprite(0, 0);
 }
 
@@ -4743,6 +4785,16 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::One) {
             scanFiles(MOUNT_POINT);
             blockInput(220);
+        }
+        else if (ev.key == Key::Two) {
+            std::string err;
+            if (createUnsupportedTestFile(&err)) {
+                scanFiles(CONFIG_DIR);
+                showMessage("Test file", "/CARDPTR/X.BIN", MessageReturn::Files);
+            } else {
+                showMessage("Test failed", err.empty() ? "write failed" : err, MessageReturn::Files);
+            }
+            blockInput(350);
         }
         else if (ev.key == Key::Ok && !file_entries.empty()) {
             std::string err;
