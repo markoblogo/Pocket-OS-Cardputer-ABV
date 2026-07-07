@@ -53,16 +53,14 @@ Next acceptance:
 
 ### 2.2 Universal Inbox
 
-Status: MVP implemented as append-only log.
+- Add `/sdcard/inbox/INBOX.TXT`.
+- Log voice saves, note saves, habit checks, reading opens, music plays, timer events.
+- Start as append-only text log.
 
-- `/sdcard/inbox/INBOX.TXT`.
-- Logs voice saves, note saves, habit checks, reading opens, music plays, and manual day changes.
-- Timeline UI is later.
+Acceptance:
 
-Next acceptance:
-
-- Hardware-test event appends.
-- Add Timeline/Inbox viewer after log format is stable.
+- Captured activity appears in a single file.
+- Inbox survives reboot.
 
 ### 2.3 Context Resume
 

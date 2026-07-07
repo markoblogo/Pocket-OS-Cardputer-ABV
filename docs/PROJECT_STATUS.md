@@ -15,7 +15,6 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps. P
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: Wi-Fi AP, ping/status/list/download/write-test, small upload limit.
-- Universal Inbox: append-only `/sdcard/inbox/INBOX.TXT` event log for note, voice, music, reading, and habit events.
 
 ## Product reframing
 
