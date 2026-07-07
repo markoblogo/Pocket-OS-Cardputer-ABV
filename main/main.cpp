@@ -50,6 +50,7 @@ constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
 constexpr const char* HABIT_STATE_FILE = "/sdcard/habits/STATE.TXT";
 constexpr const char* CONFIG_DIR = "/sdcard/CARDPTR";
 constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
+constexpr const char* READER_STATE_FILE = "/sdcard/CARDPTR/READER.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 8 * 1024;
@@ -192,6 +193,7 @@ std::string recordings_dir = RECORDINGS_DIR;
 int selected_track = 0;
 std::string override_music_path;
 int selected_book = 0;
+std::string last_reader_book;
 int notes_cursor = 0;
 int selected_recording = 0;
 bool shuffle_on = false;
@@ -455,6 +457,43 @@ void loadConfig()
     fclose(f);
     applyPowerSavePreset();
     config_status = "LOADED";
+}
+
+void saveReaderState()
+{
+    if (!ensureConfigDir()) return;
+    FILE* f = fopen(READER_STATE_FILE, "wb");
+    if (!f) return;
+    if (!last_reader_book.empty()) fprintf(f, "LAST|%s\n", last_reader_book.c_str());
+    for (const auto& item : reader_bookmarks) {
+        fprintf(f, "BMK|%s|%d\n", item.first.c_str(), item.second);
+    }
+    flushAndClose(f);
+}
+
+void loadReaderState()
+{
+    reader_bookmarks.clear();
+    last_reader_book.clear();
+    if (!ensureConfigDir()) return;
+    FILE* f = fopen(READER_STATE_FILE, "rb");
+    if (!f) return;
+    char line[180];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s = line;
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (s.rfind("LAST|", 0) == 0) {
+            last_reader_book = s.substr(5);
+        } else if (s.rfind("BMK|", 0) == 0) {
+            size_t p = s.rfind('|');
+            if (p != std::string::npos && p > 4) {
+                std::string name = s.substr(4, p - 4);
+                int line_no = std::max(0, std::atoi(s.substr(p + 1).c_str()));
+                if (!name.empty()) reader_bookmarks[name] = line_no;
+            }
+        }
+    }
+    fclose(f);
 }
 
 void flushKeyboardEvents()
@@ -818,6 +857,10 @@ void scanBooks()
     closedir(dir);
     std::sort(books.begin(), books.end());
     if (selected_book >= static_cast<int>(books.size())) selected_book = std::max(0, static_cast<int>(books.size()) - 1);
+    if (!last_reader_book.empty()) {
+        auto it = std::find(books.begin(), books.end(), last_reader_book);
+        if (it != books.end()) selected_book = static_cast<int>(std::distance(books.begin(), it));
+    }
 }
 
 std::string selectedBookPath()
@@ -1252,6 +1295,7 @@ int currentReaderLineForBookmark()
 void saveReaderBookmark()
 {
     if (active_book_name.empty() || reader_lines.empty()) return;
+    last_reader_book = active_book_name;
     reader_bookmarks[active_book_name] = clampReaderLine(currentReaderLineForBookmark());
 }
 
@@ -1262,8 +1306,10 @@ bool loadSelectedBook(std::string* err = nullptr)
         return false;
     }
     if (!loadTextFile(selectedBookPath(), books[selected_book], err)) return false;
+    last_reader_book = active_book_name;
     auto it = reader_bookmarks.find(active_book_name);
     if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
+    saveReaderState();
     return true;
 }
 
@@ -4284,6 +4330,7 @@ void handleKey(KeyEvent ev)
             blockInput(300);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             saveReaderBookmark();
+            saveReaderState();
             screen = Screen::ReaderList;
             blockInput(250);
         }
@@ -4309,6 +4356,7 @@ void handleKey(KeyEvent ev)
             reader_scroll = speed_mode == SpeedMode::Line ? speed_index : lineIndexForWord(speed_index);
             reader_scroll = std::min(reader_scroll, std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE));
             saveReaderBookmark();
+            saveReaderState();
             screen = Screen::ReaderView;
             blockInput(250);
         }
@@ -4790,6 +4838,7 @@ extern "C" void app_main(void)
 
     initKeyboard();
     loadConfig();
+    loadReaderState();
     drawSplash();
     last_input_ms = M5.millis();
     dirty = true;
