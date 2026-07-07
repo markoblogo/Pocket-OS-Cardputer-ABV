@@ -1,5 +1,3 @@
-# CardputerABVx
-
 ABVx is a **Pocket OS** for M5Stack Cardputer ADV: a fast offline-first personal tool for capture, memory, reading/listening, routines, and transfer.
 
 It is not just a launcher or a set of apps. The product goal is to minimize friction for common actions:
