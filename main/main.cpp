@@ -258,6 +258,8 @@ size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
+uint32_t rec_mic_chunks = 0;
+size_t rec_last_take = 0;
 int recorder_cursor = 0;
 bool rec_write_error = false;
 std::string rec_write_error_text;
@@ -1988,6 +1990,8 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error = false;
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
+    rec_mic_chunks = 0;
+    rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
     // Voice v0.x targets quick memory notes, not meetings. Try 30s first,
     // then fall back honestly if RAM is lower on the current boot.
@@ -2114,6 +2118,8 @@ void stopRecording(bool save)
     }
     rec_write_error = false;
     rec_write_error_text.clear();
+    rec_mic_chunks = 0;
+    rec_last_take = 0;
     if (rec_capture) {
         heap_caps_free(rec_capture);
         rec_capture = nullptr;
@@ -2134,6 +2140,8 @@ void updateRecording()
             std::memcpy(rec_capture + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
         }
         rec_samples_written += static_cast<uint32_t>(take);
+        ++rec_mic_chunks;
+        rec_last_take = take;
         pcm_chunk = rec_buffer;
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
@@ -3173,11 +3181,12 @@ void drawRecorderRecording()
     if (rec_write_error) {
         canvas.print("WRITE ERR");
     } else {
-        canvas.printf("TIME:%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
+        canvas.printf("PCM:%lus", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE));
         canvas.setTextSize(1);
         canvas.setCursor(8, 82);
-        canvas.printf("BUF %lu/%lu sec", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE), static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
-        canvas.setTextSize(2);
+        canvas.printf("CLK %lus  MAX %lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000), static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
+        canvas.setCursor(8, 94);
+        canvas.printf("CH %lu  TAKE %lu", static_cast<unsigned long>(rec_mic_chunks), static_cast<unsigned long>(rec_last_take));
     }
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);

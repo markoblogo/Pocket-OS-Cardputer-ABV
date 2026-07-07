@@ -37,6 +37,18 @@ At 16 kHz mono 16-bit PCM:
 30s ~= 960 KB
 ```
 
+## Timing diagnostics
+
+The recording screen currently shows both factual PCM time and wall-clock time:
+
+```text
+PCM:<seconds from samples>
+CLK:<wall clock seconds>
+CH:<mic chunks> TAKE:<last copied samples>
+```
+
+This is intentional while diagnosing why hardware captures about 5 seconds of PCM while the visible wall-clock may show about 2 seconds. If PCM and playback duration match, the recorder is saving valid audio and only the UI clock/sample pacing needs calibration.
+
 ## Save strategy
 
 After recording stops, the WAV file is written to SD. Short notes use a simple contiguous write; longer notes use small chunks with short yields.
