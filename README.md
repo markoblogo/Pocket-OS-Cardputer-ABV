@@ -74,7 +74,7 @@ One Button Capture from launcher:
 - `R`: start voice recording.
 - `N`: new text note.
 - `M`: play selected music.
-- `2`: resume last used context in the current session.
+- `2` or `S`: resume last used context in the current session.
 
 ## SD layout
 

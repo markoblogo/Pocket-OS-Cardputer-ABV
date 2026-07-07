@@ -577,7 +577,7 @@ Key keyFromName(const char* name)
     if (!strcmp(name, "del")) return Key::Backspace;
     if (!strcmp(name, "'" ) || !strcmp(name, "esc")) return Key::Back;
     if (!strcmp(name, "1")) return Key::One;
-    if (!strcmp(name, "2")) return Key::Two;
+    if (!strcmp(name, "2") || !strcmp(name, "@")) return Key::Two;
     return Key::None;
 }
 
@@ -2495,7 +2495,7 @@ void drawLauncher()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 106);
-    canvas.printf("2 RESUME %s", resumeName());
+    canvas.printf("2/S RESUME %s", resumeName());
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN  R REC N NOTE M PLAY");
     canvas.pushSprite(0, 0);
@@ -4889,6 +4889,10 @@ bool handleOneButtonCapture(KeyEvent ev)
         music_autostart_pending = true;
         blockInput(350);
         dirty = true;
+        return true;
+    }
+    if (c == '2' || c == '@' || c == 's') {
+        resumeContext();
         return true;
     }
     return false;
