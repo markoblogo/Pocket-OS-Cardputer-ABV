@@ -1166,7 +1166,7 @@ void wrapReaderText()
     std::string word;
     int line_cols = 0;
     int word_cols = 0;
-    constexpr int max_cols = 19;
+    constexpr int max_cols = 17;
     auto flush_word = [&]() {
         if (word.empty()) return;
         if (line_cols > 0 && line_cols + 1 + word_cols > max_cols) {
@@ -2165,20 +2165,16 @@ void runAgentAction()
 
 void pulseUi()
 {
-    ui_anim_until_ms = M5.millis() + 180;
+    // Visual glitch effects are disabled for now. They were visually ambiguous
+    // on hardware and looked like display/input bugs during text work.
+    ui_anim_until_ms = 0;
     ui_anim_last_frame_ms = 0;
 }
 
 void drawCyberAccent()
 {
-    uint32_t t = M5.millis();
-    int scan_y = 18 + ((t / 18) % 5) * 20;
-    canvas.drawFastHLine(0, scan_y, SCREEN_W, uiDim());
-    canvas.drawFastHLine(0, scan_y + 1, 44, uiAccent());
-    canvas.drawFastVLine(0, 18, 88, uiDim());
-    canvas.drawFastVLine(SCREEN_W - 1, 18, 88, uiDim());
-    canvas.drawRect(3, 3, SCREEN_W - 6, SCREEN_H - 6, uiDim());
-    canvas.drawPixel(5 + (t / 30) % 20, 5, uiAccent());
+    // Intentionally empty. Keep call sites so a future stable visual system can
+    // be reintroduced centrally without touching every screen.
 }
 
 void drawLauncher()
