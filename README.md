@@ -14,7 +14,7 @@ Working blocks:
 - Large black/monochrome launcher with battery indicator.
 - Music MP3 playback from SD with waveform.
 - Voice recorder with WAV save/playback and waveform.
-- TXT Reader with English/Russian display and speed-reading mode.
+- TXT Reader with English/Russian display, persistent bookmarks, last-book restore, and speed-reading mode.
 - Notes with plain text save/open and RU translit-save mode.
 - Files SD browser with known file opening.
 - Time: clock, stopwatch, timer, alarm.
@@ -52,13 +52,19 @@ Notes:
 
 ### Record
 
-Stores recordings in `/sdcard/rec` as 16-bit mono 16 kHz WAV. Recording is RAM-first: audio is captured to RAM, then saved to SD when stopped. If `/sdcard/rec` reports SD I/O errors, the recorder falls back to `/sdcard/RECS`. MVP recording length is capped at 30 seconds.
+Stores recordings in `/sdcard/rec` as 16-bit mono 16 kHz WAV. Recording is RAM-first: audio is captured to a small adaptive RAM buffer, then saved to SD when stopped or when the buffer fills. If `/sdcard/rec` reports SD I/O errors, the recorder falls back to `/sdcard/RECS`.
 
 Controls:
 
 - `NEW REC` -> OK starts recording.
 - OK / GO stops and saves.
 - OK on a recording plays it.
+
+Current MVP notes:
+
+- Short voice notes are confirmed working on hardware.
+- The live screen shows real elapsed `TIME` plus diagnostic `BUF x/y sec`.
+- Current recording length is intentionally short because stable long recording needs a different streaming/ring-buffer design.
 
 ### Reader
 
@@ -70,7 +76,7 @@ Features:
 - Up / Down scroll lines.
 - Left / Right page.
 - `1` enters speed-reading mode.
-- In-RAM bookmark returns to the last viewed line while the device remains on.
+- Last opened book and per-book line bookmarks are persisted in `/sdcard/CARDPTR/READER.TXT`.
 
 Speed-reading:
 
@@ -223,6 +229,7 @@ Use FATFS 8.3-safe names for now.
 /sdcard/RECS/REC0001.WAV
 /sdcard/habits/HABITS.TXT
 /sdcard/CARDPTR/CONFIG.TXT
+/sdcard/CARDPTR/READER.TXT
 ```
 
 Long filenames are not treated as reliable yet.
@@ -262,8 +269,8 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 1. Boot and confirm ABVx splash.
 2. Confirm launcher opens and Up / Down navigation works.
 3. Open Music, play `A.MP3`, confirm sound and waveform, stop with OK/GO.
-4. Open Record, create a short recording, save, play it back.
-5. Open Reader, open a `.TXT`, scroll, enter speed mode with `1`, return with GO.
+4. Open Record, create a short recording, confirm `Record saved`, play it back.
+5. Open Reader, open a `.TXT`, scroll, enter speed mode with `1`, return with GO, exit/reopen and confirm bookmark restore.
 6. Open Notes, create and save a note, reopen it.
 7. Open Time, test stopwatch and timer alert.
 8. Open Files, browse SD and open a known `.TXT` or `.MP3`.
@@ -276,8 +283,9 @@ Replace `/dev/cu.usbmodem101` with the actual port.
 - FATFS long filename support is not finalized; use 8.3-safe names. macOS AppleDouble sidecar aliases are hidden from SD lists.
 - Reader/Notes text layer is English/Russian best-effort. French accents and Ukrainian-specific polish are postponed.
 - Notes RU input is translit-save, not a native Cyrillic keyboard.
-- Reader bookmarks are RAM-only for now.
+- Reader bookmarks and last opened book are persisted on SD.
 - Music playback is stable enough for MVP but still uses chunked blocking playback.
+- Recorder is short-note MVP. Long recordings need a future streaming/ring-buffer implementation.
 - Files can browse/open known file types and delete files with confirmation; folder delete and rename are postponed.
 - Connections supports list/download plus upload MVP. Delete and overwrite are postponed; large upload remains the highest-risk transfer path.
 - Clock does not persist through full power-off.
@@ -293,7 +301,7 @@ Engineering audit notes and risk register are kept in `AUDIT.md`.
 Near-term:
 
 1. Stability baseline: SD lifecycle, Settings SD reprobe, About/version, first tagged test release.
-2. Offline apps v2: Record duration/delete, Reader persistent bookmarks, Notes edit/delete, Files details/delete polish, Time presets/persistence polish, Habits edit/delete.
+2. Offline apps v2: Record delete/progress polish, Notes edit/delete, Files details/delete polish, Time presets/persistence polish, Habits edit/delete.
 3. Connections/Transfer v2: safer queued chunk upload, phone/Mac web file manager, `/cardputer` transfer folder.
 4. Text Browser MVP: URL input, favorites cache, text/link extraction, supported downloads.
 5. Agent + AI: Agent returns only as local command router/memory controller; online OpenAI is optional and later.
