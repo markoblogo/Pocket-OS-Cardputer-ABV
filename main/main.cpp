@@ -87,7 +87,7 @@ std::string connection_upload_path;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -237,6 +237,7 @@ std::string active_book_name;
 std::string active_note_name;
 std::string note_input;
 bool note_ru_mode = false;
+bool note_edit_existing = false;
 std::string reader_text;
 std::vector<std::string> reader_lines;
 std::vector<std::string> reader_words;
@@ -1443,6 +1444,67 @@ bool saveNewNote(std::string* out_name, std::string* err = nullptr)
     return true;
 }
 
+bool loadRawNoteForEdit(std::string* err = nullptr)
+{
+    std::string path = selectedNotePath();
+    if (path.empty()) {
+        if (err) *err = "no note";
+        return false;
+    }
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        if (err) {
+            *err = "open: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    std::string body;
+    char buf[128];
+    while (size_t n = fread(buf, 1, sizeof(buf), f)) {
+        if (body.size() + n > 512) {
+            n = 512 - body.size();
+        }
+        body.append(buf, n);
+        if (body.size() >= 512) break;
+    }
+    fclose(f);
+    while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) body.pop_back();
+    note_input = body;
+    active_note_name = notes[notes_cursor - 1];
+    note_ru_mode = false;
+    note_edit_existing = true;
+    return true;
+}
+
+bool saveExistingNote(std::string* err = nullptr)
+{
+    std::string path = selectedNotePath();
+    if (path.empty()) {
+        if (err) *err = "no note";
+        return false;
+    }
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) {
+        if (err) {
+            *err = "open: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    std::string body = noteTextForSave();
+    body += "\n";
+    size_t n = fwrite(body.data(), 1, body.size(), f);
+    bool ok = n == body.size();
+    if (!flushAndClose(f)) ok = false;
+    if (!ok) {
+        if (err) *err = "write failed";
+        return false;
+    }
+    scanNotes();
+    return true;
+}
+
 int utf8Columns(const std::string& text)
 {
     int cols = 0;
@@ -2429,7 +2491,7 @@ void drawNotesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN  1 NEW  GO BACK");
+    canvas.print("OK OPEN 1 NEW BKSP DEL GO");
     canvas.pushSprite(0, 0);
 }
 
@@ -2606,7 +2668,7 @@ void drawNotesView()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("UP/DN LINE  L/R PAGE  GO LIST");
+    canvas.print("UP/DN LINE L/R PAGE 1 EDIT GO LIST");
     canvas.pushSprite(0, 0);
 }
 
@@ -2617,7 +2679,7 @@ void drawNotesEdit()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.println("NEW NOTE");
+    canvas.println(note_edit_existing ? "EDIT NOTE" : "NEW NOTE");
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 34);
@@ -2637,6 +2699,30 @@ void drawNotesEdit()
     canvas.printf("%s %d/512", note_ru_mode ? "RU SAVE" : "LAT", static_cast<int>(note_input.size()));
     canvas.setCursor(8, 122);
     canvas.print("OK SAVE  1 LAT/RU  GO CANCEL");
+    canvas.pushSprite(0, 0);
+}
+
+void drawNotesDeleteConfirm()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("DELETE?");
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 42);
+    if (notes_cursor > 0 && notes_cursor <= static_cast<int>(notes.size())) {
+        canvas.printf("%.13s", notes[notes_cursor - 1].c_str());
+    } else {
+        canvas.print("NO NOTE");
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 88);
+    canvas.print("file only, no undo");
+    canvas.setCursor(8, 122);
+    canvas.print("OK DELETE       GO KEEP");
     canvas.pushSprite(0, 0);
 }
 
@@ -4143,6 +4229,7 @@ void drawIfDirty()
     else if (screen == Screen::NotesList) drawNotesList();
     else if (screen == Screen::NotesView) drawNotesView();
     else if (screen == Screen::NotesEdit) drawNotesEdit();
+    else if (screen == Screen::NotesDeleteConfirm) drawNotesDeleteConfirm();
     else if (screen == Screen::RecorderList) drawRecorderList();
     else if (screen == Screen::RecorderRecording) drawRecorderRecording();
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
@@ -4373,6 +4460,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::One) {
             note_input.clear();
             note_ru_mode = false;
+            note_edit_existing = false;
             screen = Screen::NotesEdit;
             blockInput(300);
         }
@@ -4380,6 +4468,7 @@ void handleKey(KeyEvent ev)
             if (notes_cursor == 0) {
                 note_input.clear();
                 note_ru_mode = false;
+                note_edit_existing = false;
                 screen = Screen::NotesEdit;
                 blockInput(300);
             } else {
@@ -4391,6 +4480,9 @@ void handleKey(KeyEvent ev)
                     showMessage("Note failed", err.empty() ? "open" : err, MessageReturn::Notes);
                 }
             }
+        } else if (ev.key == Key::Backspace && notes_cursor > 0 && notes_cursor <= static_cast<int>(notes.size())) {
+            screen = Screen::NotesDeleteConfirm;
+            blockInput(300);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
@@ -4405,6 +4497,15 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Down) { reader_scroll = std::min(max_scroll, reader_scroll + 1); saveReaderBookmark(); }
         else if (ev.key == Key::Left) { reader_scroll = std::max(0, reader_scroll - READER_LINES_PER_PAGE); saveReaderBookmark(); }
         else if (ev.key == Key::Right) { reader_scroll = std::min(max_scroll, reader_scroll + READER_LINES_PER_PAGE); saveReaderBookmark(); }
+        else if (ev.key == Key::One) {
+            std::string err;
+            if (loadRawNoteForEdit(&err)) {
+                screen = Screen::NotesEdit;
+                blockInput(300);
+            } else {
+                showMessage("Edit failed", err.empty() ? "open" : err, MessageReturn::Notes);
+            }
+        }
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::NotesList;
             blockInput(250);
@@ -4423,17 +4524,20 @@ void handleKey(KeyEvent ev)
             } else {
                 std::string name;
                 std::string err;
-                if (saveNewNote(&name, &err)) {
-                    showMessage("Note saved", name, MessageReturn::Notes);
+                bool ok = note_edit_existing ? saveExistingNote(&err) : saveNewNote(&name, &err);
+                if (ok) {
+                    showMessage("Note saved", note_edit_existing ? active_note_name : name, MessageReturn::Notes);
                 } else {
                     showMessage("Save failed", err.empty() ? "write" : err, MessageReturn::Notes);
                 }
+                note_edit_existing = false;
             }
             blockInput(400);
         } else if (ev.key == Key::Backspace) {
             if (!note_input.empty()) note_input.pop_back();
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             note_input.clear();
+            note_edit_existing = false;
             screen = Screen::NotesList;
             blockInput(250);
         } else if (ev.key == Key::None && ev.name && ev.name[0] && !ev.name[1]) {
@@ -4441,6 +4545,25 @@ void handleKey(KeyEvent ev)
             if (static_cast<unsigned char>(c) >= 32 && static_cast<unsigned char>(c) <= 126 && note_input.size() < 512) {
                 note_input.push_back(c);
             }
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::NotesDeleteConfirm) {
+        if (ev.key == Key::Ok) {
+            std::string path = selectedNotePath();
+            std::string name = (notes_cursor > 0 && notes_cursor <= static_cast<int>(notes.size())) ? notes[notes_cursor - 1] : "";
+            if (!path.empty() && unlink(path.c_str()) == 0) {
+                scanNotes();
+                showMessage("Note deleted", name, MessageReturn::Notes);
+            } else {
+                showMessage("Delete failed", name.empty() ? "note" : name, MessageReturn::Notes);
+            }
+            blockInput(400);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::NotesList;
+            blockInput(250);
         }
         dirty = true;
         return;
