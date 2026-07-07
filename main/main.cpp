@@ -54,8 +54,8 @@ constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
 constexpr const char* READER_STATE_FILE = "/sdcard/CARDPTR/READER.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
-constexpr int INPUT_BUF_SIZE = 16 * 1024;
-constexpr int CHUNK_MS = 320;
+constexpr int INPUT_BUF_SIZE = 32 * 1024;
+constexpr int CHUNK_MS = 900;
 constexpr int AUDIO_OUTPUT_RATE = 16000;
 constexpr bool AUDIO_SAFE_MONO = true;
 constexpr int AUDIO_SAFE_SHIFT = 2;
@@ -5365,7 +5365,7 @@ extern "C" void app_main(void)
             dirty = true;
         }
         if (!display_off && now - marquee_last_frame_ms >= 180) {
-            if (screen == Screen::MusicList || screen == Screen::MusicPlaying ||
+            if (screen == Screen::MusicList ||
                 screen == Screen::ReaderList || screen == Screen::NotesList ||
                 screen == Screen::RecorderList || screen == Screen::FilesList) {
                 marquee_last_frame_ms = now;
