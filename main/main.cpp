@@ -759,6 +759,12 @@ bool hasRecordingExt(const std::string& name)
     return ext == ".wav" || ext == ".pcm";
 }
 
+bool sdPathIsDir(const std::string& path)
+{
+    struct stat st = {};
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 
 std::string baseName(const std::string& path)
 {
@@ -981,7 +987,7 @@ void scanBooks()
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
         if (isHidden(name) || !hasTextExt(name)) continue;
-        if (entry->d_type == DT_DIR) continue;
+        if (sdPathIsDir(std::string(BOOKS_DIR) + "/" + name)) continue;
         books.push_back(name);
     }
     closedir(dir);
@@ -1014,7 +1020,7 @@ void scanNotes()
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
         if (isHidden(name) || !hasTextExt(name)) continue;
-        if (entry->d_type == DT_DIR) continue;
+        if (sdPathIsDir(std::string(NOTES_DIR) + "/" + name)) continue;
         notes.push_back(name);
     }
     closedir(dir);
@@ -1679,7 +1685,7 @@ void scanMusic()
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
         if (isHidden(name) || !hasMp3Ext(name)) continue;
-        if (entry->d_type == DT_DIR) continue;
+        if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
         tracks.push_back(name);
     }
     closedir(dir);
@@ -1696,7 +1702,7 @@ void scanRecordings()
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
         if (isHidden(name) || !hasRecordingExt(name)) continue;
-        if (entry->d_type == DT_DIR) continue;
+        if (sdPathIsDir(recordings_dir + "/" + name)) continue;
         recordings.push_back(name);
     }
     closedir(dir);
@@ -2166,6 +2172,10 @@ bool startRecordingPlayback(std::string* err = nullptr)
 {
     stopPlayback();
     rec_play_all.clear();
+    if (rec_play_file) {
+        fclose(rec_play_file);
+        rec_play_file = nullptr;
+    }
     if (recorder_cursor <= 0 || recordings.empty()) {
         if (err) *err = "no file";
         return false;
@@ -2194,27 +2204,16 @@ bool startRecordingPlayback(std::string* err = nullptr)
         if (err) *err = "empty";
         return false;
     }
-    const size_t samples = static_cast<size_t>((file_size - data_offset) / sizeof(int16_t));
-    rec_play_all.assign(samples, 0);
     fseek(f, data_offset, SEEK_SET);
-    const size_t n = fread(rec_play_all.data(), sizeof(int16_t), samples, f);
-    fclose(f);
-    if (n == 0) {
-        rec_play_all.clear();
-        if (err) *err = "read failed";
-        return false;
-    }
-    rec_play_all.resize(n);
-    rec_play_file = nullptr;
+    rec_play_file = f;
     rec_play_chunks = 0;
     active_recording_name = recordings[recorder_cursor - 1];
     M5.Mic.end();
     M5.Speaker.begin();
     applyVolume();
-    pcm_chunk.assign(rec_play_all.begin(), rec_play_all.begin() + std::min<size_t>(rec_play_all.size(), REC_SAMPLE_RATE));
+    pcm_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
     pcm_channels = 1;
     pcm_rate = wav ? static_cast<int>(wav_rate) : REC_SAMPLE_RATE;
-    M5.Speaker.playRaw(rec_play_all.data(), rec_play_all.size(), pcm_rate, false);
     screen = Screen::RecorderPlaying;
     dirty = true;
     blockInput(500);
@@ -2237,9 +2236,21 @@ void stopRecordingPlayback()
 void updateRecordingPlayback()
 {
     if (screen != Screen::RecorderPlaying) return;
-    if (!M5.Speaker.isPlaying()) {
+    if (M5.Speaker.isPlaying()) return;
+    if (!rec_play_file) {
         stopRecordingPlayback();
+        return;
     }
+    if (pcm_chunk.size() != REC_BUFFER_SAMPLES * 4) pcm_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
+    const size_t n = fread(pcm_chunk.data(), sizeof(int16_t), pcm_chunk.size(), rec_play_file);
+    if (n == 0) {
+        stopRecordingPlayback();
+        return;
+    }
+    pcm_chunk.resize(n);
+    ++rec_play_chunks;
+    if (!display_off) dirty = true;
+    M5.Speaker.playRaw(pcm_chunk.data(), pcm_chunk.size(), pcm_rate, false);
 }
 
 
