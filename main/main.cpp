@@ -244,6 +244,7 @@ constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
+std::vector<int16_t> rec_play_all;
 int16_t* rec_capture = nullptr;
 size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
@@ -2089,26 +2090,50 @@ std::string recordingMetaLine(const std::string& name)
 bool startRecordingPlayback(std::string* err = nullptr)
 {
     stopPlayback();
+    rec_play_all.clear();
     if (recorder_cursor <= 0 || recordings.empty()) {
         if (err) *err = "no file";
         return false;
     }
     const std::string path = selectedRecordingPath();
-    rec_play_file = fopen(path.c_str(), "rb");
-    if (!rec_play_file) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
         if (err) {
             *err = "open: ";
             *err += std::strerror(errno);
         }
         return false;
     }
-    fseek(rec_play_file, 44, SEEK_SET);
-    rec_buffer.assign(REC_BUFFER_SAMPLES * 8, 0);
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    const bool wav = lowerExt(path) == ".wav";
+    const long data_offset = wav ? 44 : 0;
+    if (file_size <= data_offset) {
+        fclose(f);
+        if (err) *err = "empty";
+        return false;
+    }
+    const size_t samples = static_cast<size_t>((file_size - data_offset) / sizeof(int16_t));
+    rec_play_all.assign(samples, 0);
+    fseek(f, data_offset, SEEK_SET);
+    const size_t n = fread(rec_play_all.data(), sizeof(int16_t), samples, f);
+    fclose(f);
+    if (n == 0) {
+        rec_play_all.clear();
+        if (err) *err = "read failed";
+        return false;
+    }
+    rec_play_all.resize(n);
+    rec_play_file = nullptr;
     rec_play_chunks = 0;
     active_recording_name = recordings[recorder_cursor - 1];
     M5.Mic.end();
     M5.Speaker.begin();
     applyVolume();
+    pcm_chunk.assign(rec_play_all.begin(), rec_play_all.begin() + std::min<size_t>(rec_play_all.size(), REC_SAMPLE_RATE));
+    pcm_channels = 1;
+    pcm_rate = REC_SAMPLE_RATE;
+    M5.Speaker.playRaw(rec_play_all.data(), rec_play_all.size(), REC_SAMPLE_RATE, false);
     screen = Screen::RecorderPlaying;
     dirty = true;
     blockInput(500);
@@ -2122,6 +2147,7 @@ void stopRecordingPlayback()
         fclose(rec_play_file);
         rec_play_file = nullptr;
     }
+    rec_play_all.clear();
     screen = Screen::RecorderList;
     dirty = true;
     blockInput(350);
@@ -2129,19 +2155,10 @@ void stopRecordingPlayback()
 
 void updateRecordingPlayback()
 {
-    if (screen != Screen::RecorderPlaying || !rec_play_file) return;
-    if (M5.Speaker.isPlaying()) return;
-    const size_t n = fread(rec_buffer.data(), sizeof(int16_t), rec_buffer.size(), rec_play_file);
-    if (n == 0) {
+    if (screen != Screen::RecorderPlaying) return;
+    if (!M5.Speaker.isPlaying()) {
         stopRecordingPlayback();
-        return;
     }
-    pcm_chunk.assign(rec_buffer.begin(), rec_buffer.begin() + n);
-    pcm_channels = 1;
-    pcm_rate = REC_SAMPLE_RATE;
-    ++rec_play_chunks;
-    if (!display_off) dirty = true;
-    M5.Speaker.playRaw(rec_buffer.data(), n, REC_SAMPLE_RATE, false);
 }
 
 
