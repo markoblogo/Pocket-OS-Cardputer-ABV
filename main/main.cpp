@@ -2380,14 +2380,14 @@ void drawCyberAccent()
 
 void drawLauncher()
 {
-    static const char* labels[] = {"[#] MUSIC", "[=] READER", "[+] NOTES", "[o] RECORD", "[~] TIME", "[*] FILES", "[?] RANDOM", "[x] HABITS", "[%] SETTINGS", "[~] CONNECT"};
+    static const char* labels[] = {"[#] LISTEN", "[=] READ", "[+] WRITE", "[o] VOICE", "[~] TIME", "[*] FILES", "[?] DECIDE", "[x] ROUTINES", "[%] SETTINGS", "[~] TRANSFER"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
     drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.println("ABVx");
+    canvas.println("ABVx OS");
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(74, 12);
@@ -2404,7 +2404,7 @@ void drawLauncher()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN   GO MUSIC");
+    canvas.print("OK OPEN  R REC N NOTE M PLAY");
     canvas.pushSprite(0, 0);
 }
 
@@ -2445,7 +2445,7 @@ void drawRandomizer()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.print("RANDOM");
+    canvas.print("DECIDE");
     canvas.setTextSize(4);
     canvas.setTextColor(uiAccent(), uiBg());
     int result_x = std::max(0, (SCREEN_W - static_cast<int>(canvas.textWidth(random_result.c_str()))) / 2);
@@ -2473,7 +2473,7 @@ void drawHabitsList()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.print("HABITS TODAY");
+    canvas.print("ROUTINES");
     int done_count = 0;
     for (const auto& h : habits) if (h.done) ++done_count;
     int pct = habits.empty() ? 0 : (done_count * 100) / static_cast<int>(habits.size());
@@ -2602,7 +2602,7 @@ void drawMusicList()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.printf("MUSIC %d/%d", tracks.empty() ? 0 : selected_track + 1, static_cast<int>(tracks.size()));
+    canvas.printf("LISTEN %d/%d", tracks.empty() ? 0 : selected_track + 1, static_cast<int>(tracks.size()));
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(160, 14);
@@ -2640,7 +2640,7 @@ void drawMusicPlaying()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.println("PLAYING");
+    canvas.println("LISTENING");
     canvas.setCursor(8, 34);
     std::string play_label = !override_music_path.empty() ? baseName(override_music_path) : (tracks.empty() ? "" : musicDisplayName(tracks[selected_track]));
     canvas.printf("%.14s", marqueeText(play_label, 14).c_str());
@@ -2671,7 +2671,7 @@ void drawNotesList()
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     if (notes_cursor == 0) canvas.print(notes.empty() ? "NOTES 0/0" : "NOTES NEW");
-    else canvas.printf("NOTES %d/%d", notes_cursor, static_cast<int>(notes.size()));
+    else canvas.printf("WRITE %d/%d", notes_cursor, static_cast<int>(notes.size()));
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(166, 14);
@@ -2945,7 +2945,7 @@ void drawRecorderList()
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     if (recorder_cursor == 0) canvas.print(recordings.empty() ? "REC 0/0" : "REC NEW");
-    else canvas.printf("REC %d/%d", recorder_cursor, static_cast<int>(recordings.size()));
+    else canvas.printf("VOICE %d/%d", recorder_cursor, static_cast<int>(recordings.size()));
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(158, 14);
@@ -3018,7 +3018,7 @@ void drawRecorderRecording()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.println("REC LIVE");
+    canvas.println("VOICE REC");
     canvas.setCursor(8, 34);
     canvas.printf("%.14s", active_recording_name.c_str());
     canvas.setCursor(8, 58);
@@ -4590,7 +4590,7 @@ void drawConnections()
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     if (connection_wifi_on || connection_http_on) {
-        canvas.print("WIFI SYNC");
+        canvas.print("TRANSFER");
         canvas.setTextColor(uiAccent(), uiBg());
         canvas.setCursor(8, 32);
         canvas.printf("AP %s", connection_wifi_on ? "ON" : "OFF");
@@ -4621,7 +4621,7 @@ void drawConnections()
         canvas.pushSprite(0, 0);
         return;
     }
-    canvas.print("CONNECTIONS");
+    canvas.print("TRANSFER");
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 36);
     canvas.print("AP OFF");
@@ -4757,14 +4757,58 @@ void wakeDisplay()
     }
 }
 
+char shortcutChar(KeyEvent ev)
+{
+    if (!ev.name || !ev.name[0] || ev.name[1]) return 0;
+    unsigned char c = static_cast<unsigned char>(ev.name[0]);
+    if (c >= 'A' && c <= 'Z') c = static_cast<unsigned char>(c - 'A' + 'a');
+    return static_cast<char>(c);
+}
+
+bool handleOneButtonCapture(KeyEvent ev)
+{
+    if (screen != Screen::Launcher) return false;
+    char c = shortcutChar(ev);
+    if (!c) return false;
+    if (c == 'r') {
+        std::string err;
+        if (!startRecording(&err)) {
+            showMessage("Record failed", err.empty() ? "start" : err);
+        }
+        blockInput(350);
+        dirty = true;
+        return true;
+    }
+    if (c == 'n') {
+        note_input.clear();
+        note_edit_existing = false;
+        screen = Screen::NotesEdit;
+        blockInput(300);
+        dirty = true;
+        return true;
+    }
+    if (c == 'm') {
+        scanMusic();
+        std::string err;
+        if (!startPlayback(&err)) {
+            showMessage("Music failed", err.empty() ? "no music" : err);
+        }
+        blockInput(350);
+        dirty = true;
+        return true;
+    }
+    return false;
+}
+
 void handleKey(KeyEvent ev)
 {
-    if (ev.key == Key::None && screen != Screen::NotesEdit && screen != Screen::HabitsEdit) return;
+    if (ev.key == Key::None && screen != Screen::NotesEdit && screen != Screen::HabitsEdit && screen != Screen::Launcher) return;
     last_input_ms = M5.millis();
     if (display_off || display_dim) {
         wakeDisplay();
         return;
     }
+    if (handleOneButtonCapture(ev)) return;
 
     if (screen == Screen::Launcher) {
         if (ev.key == Key::Up) { launcher_index = std::max(0, launcher_index - 1); pulseUi(); }

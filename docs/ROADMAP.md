@@ -38,18 +38,18 @@ Goal: turn the app set into a fast personal operating layer.
 
 ### 2.1 One Button Capture
 
-- Direct key shortcuts from launcher/dashboard.
-- `R`: start/stop voice recording.
+Status: MVP implemented from launcher.
+
+- `R`: start voice recording.
 - `N`: new note.
-- `M`: music play/stop.
+- `M`: play selected music.
 - `T`: timer shortcut later.
-- If Fn combos are reliable, use `Fn+R`, `Fn+N`, etc.
+- Fn combinations remain optional/later.
 
-Acceptance:
+Next acceptance:
 
-- Voice capture can start without navigating into Record.
-- Text note creation can start without navigating into Notes.
-- Common actions take only a few key presses.
+- Hardware-test launcher shortcuts.
+- Add Inbox logging after shortcuts are stable.
 
 ### 2.2 Universal Inbox
 

@@ -34,16 +34,16 @@ Tested on real Cardputer ADV hardware.
 Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
-- Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
-- Record: WAV voice notes, RAM-first capture, save/play/delete, continuous playback, waveform.
-- Reader: TXT books, English/Russian display, speed reading, persistent bookmarks.
-- Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
+- Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
+- Voice/Record: WAV voice notes, RAM-first capture, save/play/delete, continuous playback, waveform.
+- Read/Reader: TXT books, English/Russian display, speed reading, persistent bookmarks.
+- Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer, alarm.
 - Files: SD browser, file opening, file info, delete confirmation.
-- Habits: daily checklist, manual next day, 7D/30D stats.
-- Randomizer: `YES / NO / MB`.
+- Routines/Habits: daily checklist, manual next day, 7D/30D stats.
+- Decide/Randomizer: `YES / NO / MB`.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Connections: Wi-Fi AP list/download/small-upload diagnostics.
+- Transfer/Connections: Wi-Fi AP list/download/small-upload diagnostics.
 
 Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
 
@@ -62,12 +62,18 @@ Global:
 
 App highlights:
 
-- Music: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle.
-- Reader: Up/Down line, Left/Right page, `1` speed mode, OK pause/resume in speed mode.
-- Notes: `1` new/edit, Backspace delete from list.
-- Record: OK starts `NEW REC`, OK/GO stops and saves, OK plays saved recording.
-- Habits: OK toggles, `1` next day, Right stats, Left manage.
-- Connections: OK starts AP, GO stops it.
+- Listen: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle.
+- Read: Up/Down line, Left/Right page, `1` speed mode, OK pause/resume in speed mode.
+- Write: `1` new/edit, Backspace delete from list.
+- Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays saved recording.
+- Routines: OK toggles, `1` next day, Right stats, Left manage.
+- Transfer: OK starts AP, GO stops it.
+
+One Button Capture from launcher:
+
+- `R`: start voice recording.
+- `N`: new text note.
+- `M`: play selected music.
 
 ## SD layout
 

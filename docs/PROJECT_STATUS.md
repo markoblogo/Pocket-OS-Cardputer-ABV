@@ -14,7 +14,7 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps. P
 - Habits: routines list, daily checks, manual next-day rollover, 7D/30D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Connections: Wi-Fi AP, ping/status/list/download/write-test, small upload limit.
+- Transfer/Connections: Wi-Fi AP, ping/status/list/download/write-test, small upload limit.
 
 ## Product reframing
 
