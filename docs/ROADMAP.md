@@ -184,6 +184,34 @@ MVP:
 
 No offline nano-LLM. No standalone Agent unless it becomes a real command/AI surface beyond launcher duplication.
 
+## Phase 8: Adventure / GPS / LoRa
+
+Goal: use the planned LoRa/GNSS Cardputer ADV module for offline-first outdoor sessions.
+
+Architecture: `docs/ADVENTURE_LORA_ARCHITECTURE.md`
+
+Implementation order:
+
+- GNSS Lab: read NMEA, show fix/lat/lon/speed/altitude.
+- Journey/Breadcrumb MVP: local GPS track in `/sdcard/journeys`.
+- Running Mode: large distance/pace/time screen.
+- Voice Marks: short recording attached to GPS/time.
+- Mac Companion GPX export.
+- LoRa Lab: PING/RSSI/SNR and duty-cycle-safe packets.
+- Home Relay MVP: STATUS, GPS_POINT, WORKOUT_SUMMARY, ACK, TIME_SYNC.
+
+Rules:
+
+- GPS/Journey works fully offline.
+- LoRa is sparse event relay, not file transfer.
+- Relay failure never blocks local capture.
+- No Meshtastic integration in this product track.
+
+Acceptance:
+
+- A walk/run can produce a local journey folder with track data.
+- Later, a home relay can receive small status/checkpoint packets without SD/file sync.
+
 ## Final polish: Visual Layer
 
 After core apps and companion workflows are stable, add Minimal/Art visual modes.

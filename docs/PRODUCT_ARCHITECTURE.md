@@ -188,6 +188,24 @@ Ideas
 
 Each card may hold preferred notes, timers, books, music, and habits.
 
+### Adventure Mode
+
+Future action layer for outdoor sessions after the LoRa/GNSS module arrives.
+
+Adventure Mode groups existing Pocket OS functions into one journey:
+
+```text
+Journey
+├─ GPS track
+├─ Running/Ride metrics
+├─ voice marks
+├─ text notes
+├─ music context
+└─ summary
+```
+
+The first implementation should be GPS-only and local-first. LoRa comes later as sparse relay for short status/checkpoint packets. See `docs/ADVENTURE_LORA_ARCHITECTURE.md`.
+
 ### Progressive Apps
 
 Every app starts simple:
