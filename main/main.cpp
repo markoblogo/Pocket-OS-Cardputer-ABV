@@ -230,6 +230,7 @@ size_t mp3_len = 0;
 size_t mp3_pos = 0;
 bool mp3_eof = false;
 bool playing = false;
+bool music_autostart_pending = false;
 uint32_t playback_decode_after_ms = 0;
 std::vector<int16_t> pcm_chunk;
 std::vector<int16_t> pcm_next_chunk;
@@ -1729,6 +1730,7 @@ const char* volumeName()
 void stopPlayback()
 {
     playing = false;
+    music_autostart_pending = false;
     M5.Speaker.stop();
     if (mp3_file) {
         fclose(mp3_file);
@@ -4789,15 +4791,26 @@ bool handleOneButtonCapture(KeyEvent ev)
     }
     if (c == 'm') {
         scanMusic();
-        std::string err;
-        if (!startPlayback(&err)) {
-            showMessage("Music failed", err.empty() ? "no music" : err);
-        }
+        screen = Screen::MusicList;
+        music_autostart_pending = true;
         blockInput(350);
         dirty = true;
         return true;
     }
     return false;
+}
+
+void processMusicAutostart()
+{
+    if (!music_autostart_pending) return;
+    if (M5.millis() < input_block_until_ms) return;
+    music_autostart_pending = false;
+    if (screen != Screen::MusicList && screen != Screen::Launcher) return;
+    std::string err;
+    if (!startPlayback(&err)) {
+        showMessage("Music failed", err.empty() ? "no music" : err);
+    }
+    dirty = true;
 }
 
 void handleKey(KeyEvent ev)
@@ -5525,6 +5538,7 @@ extern "C" void app_main(void)
             dirty = true;
         }
         drawIfDirty();
+        processMusicAutostart();
         updateAudio();
         processConnectionUploadOps();
         updateRecording();
