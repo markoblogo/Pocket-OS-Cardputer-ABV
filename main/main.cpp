@@ -87,7 +87,7 @@ std::string connection_upload_path;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -1940,6 +1940,31 @@ std::string selectedRecordingPath()
     return recordings_dir + "/" + recordings[recorder_cursor - 1];
 }
 
+std::string recordingPathByName(const std::string& name)
+{
+    return recordings_dir + "/" + name;
+}
+
+std::string recordingMetaLine(const std::string& name)
+{
+    const std::string path = recordingPathByName(name);
+    struct stat st = {};
+    if (stat(path.c_str(), &st) != 0) return "missing";
+    const std::string ext = lowerExt(name);
+    uint32_t seconds = 0;
+    if (ext == ".wav" && st.st_size > 44) {
+        seconds = static_cast<uint32_t>((st.st_size - 44) / sizeof(int16_t) / REC_SAMPLE_RATE);
+    } else if (ext == ".pcm") {
+        seconds = static_cast<uint32_t>(st.st_size / sizeof(int16_t) / REC_SAMPLE_RATE);
+    }
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s  %lus  %luB",
+             ext == ".pcm" ? "PCM" : "WAV",
+             static_cast<unsigned long>(seconds),
+             static_cast<unsigned long>(st.st_size));
+    return buf;
+}
+
 bool startRecordingPlayback(std::string* err = nullptr)
 {
     stopPlayback();
@@ -2702,12 +2727,21 @@ void drawRecorderList()
     int end = std::min(total, start + 3);
     for (int i = start; i < end; ++i) {
         canvas.setTextSize(2);
-        canvas.setCursor(8, 38 + (i - start) * 24);
+        const int row_y = 36 + (i - start) * 28;
+        canvas.setCursor(8, row_y);
         canvas.setTextColor(i == recorder_cursor ? uiBg() : uiFg(), i == recorder_cursor ? uiFg() : uiBg());
         if (i == 0) {
             canvas.printf("%c NEW REC", i == recorder_cursor ? '>' : ' ');
+            canvas.setTextSize(1);
+            canvas.setTextColor(uiDim(), uiBg());
+            canvas.setCursor(28, row_y + 18);
+            canvas.print("OK start voice note");
         } else {
             canvas.printf("%c %.11s", i == recorder_cursor ? '>' : ' ', recordings[i - 1].c_str());
+            canvas.setTextSize(1);
+            canvas.setTextColor(uiDim(), uiBg());
+            canvas.setCursor(28, row_y + 18);
+            canvas.printf("%.24s", recordingMetaLine(recordings[i - 1]).c_str());
         }
     }
     if (recordings.empty()) {
@@ -2719,7 +2753,29 @@ void drawRecorderList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK PLAY  1 NEW  GO BACK");
+    canvas.print("OK PLAY  1 NEW  BKSP DEL");
+    canvas.pushSprite(0, 0);
+}
+
+void drawRecorderDeleteConfirm()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("DELETE REC?");
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 42);
+    canvas.printf("%.14s", pending_delete_name.c_str());
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 72);
+    canvas.printf("%.28s", recordingMetaLine(pending_delete_name).c_str());
+    canvas.setCursor(8, 92);
+    canvas.print("No undo");
+    canvas.setCursor(8, 122);
+    canvas.print("OK DELETE       GO KEEP");
     canvas.pushSprite(0, 0);
 }
 
@@ -4201,6 +4257,7 @@ void drawIfDirty()
     else if (screen == Screen::RecorderList) drawRecorderList();
     else if (screen == Screen::RecorderRecording) drawRecorderRecording();
     else if (screen == Screen::RecorderPlaying) drawRecorderPlaying();
+    else if (screen == Screen::RecorderDeleteConfirm) drawRecorderDeleteConfirm();
     else if (screen == Screen::TimeApp) drawTimeApp();
     else if (screen == Screen::FilesList) drawFilesList();
     else if (screen == Screen::FilesInfo) drawFilesInfo();
@@ -4558,6 +4615,16 @@ void handleKey(KeyEvent ev)
             }
             blockInput(300);
         }
+        else if (ev.key == Key::Backspace) {
+            if (recorder_cursor > 0 && recorder_cursor <= static_cast<int>(recordings.size())) {
+                pending_delete_name = recordings[recorder_cursor - 1];
+                pending_delete_path = recordingPathByName(pending_delete_name);
+                screen = Screen::RecorderDeleteConfirm;
+            } else {
+                showMessage("Delete skipped", "select recording", MessageReturn::Recorder);
+            }
+            blockInput(300);
+        }
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
@@ -4574,6 +4641,27 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::RecorderPlaying) {
         if (ev.key == Key::Ok || ev.key == Key::Home || ev.key == Key::Back) stopRecordingPlayback();
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::RecorderDeleteConfirm) {
+        if (ev.key == Key::Ok) {
+            if (!pending_delete_path.empty() && unlink(pending_delete_path.c_str()) == 0) {
+                showMessage("Rec deleted", pending_delete_name, MessageReturn::Recorder);
+                scanRecordings();
+            } else {
+                showMessage("Delete failed", pending_delete_name + "\n" + std::strerror(errno), MessageReturn::Recorder);
+            }
+            pending_delete_path.clear();
+            pending_delete_name.clear();
+            blockInput(400);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            pending_delete_path.clear();
+            pending_delete_name.clear();
+            screen = Screen::RecorderList;
+            blockInput(250);
+        }
         dirty = true;
         return;
     }
