@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 
 CHUNK = 1024
+SAFE_UPLOAD_LIMIT = 64 * 1024
 
 
 def is_safe_83(path):
@@ -74,6 +75,11 @@ def main():
         raise SystemExit('ERROR: target filename must be FAT 8.3-safe outside /music/*.mp3')
 
     size = os.path.getsize(args.local_file)
+    if size > SAFE_UPLOAD_LIMIT:
+        raise SystemExit(
+            'ERROR: Wi-Fi upload is limited to 64KB for now. '
+            'Large MP3 upload is unstable on Cardputer ADV; use SD reader.'
+        )
     qpath = urllib.parse.quote(args.sd_path, safe='/._-')
     base = args.url.rstrip('/')
     begun = False

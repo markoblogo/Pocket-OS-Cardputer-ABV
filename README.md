@@ -20,7 +20,7 @@ Working:
 - Habits: daily checklist, manual next day, 7D/30D stats.
 - Randomizer: `YES / NO / MB`.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Connections: Wi-Fi AP list/download/upload MVP.
+- Connections: Wi-Fi AP list/download/small-upload diagnostics.
 
 Agent, browser, AI, Mac companion, and long-recording are postponed.
 
@@ -80,13 +80,13 @@ curl "http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT"
 curl http://192.168.4.1/api/write-test
 ```
 
-Chunk upload tool:
+Small upload tool:
 
 ```sh
-python3 tools/cardputer_upload.py ./T01.MP3 /music/T01.MP3
+python3 tools/cardputer_upload.py ./NOTE.TXT /notes/NOTE.TXT
 ```
 
-Upload is still an MVP: 8.3 names, whitelisted folders, no overwrite, conservative chunks.
+Upload is intentionally limited to small files up to 64KB. Large MP3 upload over Wi-Fi is unstable on Cardputer ADV and can temporarily break SD access until reboot/reprobe. Use an SD reader for music files.
 
 ## Build
 
@@ -131,7 +131,7 @@ idf.py -p /dev/cu.usbmodem101 flash
 - Reader Cyrillic display is custom/best-effort; French/Ukrainian polish is postponed.
 - Clock resets after full power-off until Mac/time sync exists.
 - Habits use manual day rollover, not calendar dates.
-- Connections upload is useful but still the riskiest transfer path.
+- Connections large upload is disabled for normal use; list/download/small diagnostics remain useful.
 
 ## Roadmap
 
@@ -139,7 +139,7 @@ Near-term:
 
 1. Files v2 polish: details, unsupported files, safer delete, transfer folder.
 2. Record v2: longer recording architecture, delete confirm, playback progress.
-3. Connections v2: safer queued upload and phone-friendly web UI.
+3. Connections v2: phone-friendly web UI; large upload remains hardware/R&D.
 4. Time/Habits polish: presets, persistence, cleaner summaries.
 5. Browser MVP: text-only pages, favorites, simple downloads.
 6. Agent/AI: later, only when it adds value beyond launcher.

@@ -59,7 +59,7 @@ constexpr int CHUNK_MS = 240;
 constexpr bool AUDIO_SAFE_MONO = true;
 constexpr int AUDIO_SAFE_SHIFT = 1;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
-constexpr size_t MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
+constexpr size_t MAX_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 2 * 1024;
 constexpr int READER_LINES_PER_PAGE = 4;
@@ -3894,9 +3894,8 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "<p><a href=\"/api/write-test\">/api/write-test</a></p>"
         "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
         "<p>Small upload: POST raw body to /api/upload?path=/books/B1.TXT</p>"
-        "<p>Large upload: use tools/cardputer_upload.py chunk uploader.</p>"
-        "<p>Abort partial upload: POST /api/upload-abort?path=/music/T06.MP3</p>"
-        "<p>8.3 names only. No overwrite. Delete later.</p>"
+        "<p>Large upload disabled: use SD reader for MP3 files.</p>"
+        "<p>8.3 names for non-music. No overwrite. Delete later.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
 }
