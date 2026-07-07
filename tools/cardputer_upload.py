@@ -26,6 +26,18 @@ def is_safe_83(path):
     return re.fullmatch(r'[A-Za-z0-9_-]+', base) is not None and (not ext or re.fullmatch(r'[A-Za-z0-9_-]+', ext) is not None)
 
 
+def is_music_mp3(path):
+    return path.lower().startswith('/music/') and path.lower().endswith('.mp3')
+
+
+def parse_field(text, key):
+    prefix = key + '='
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return None
+
+
 def post(url, data=b'', timeout=20):
     req = urllib.request.Request(url, data=data, method='POST')
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -58,8 +70,8 @@ def main():
 
     if args.chunk <= 0 or args.chunk > 2048:
         raise SystemExit('ERROR: chunk must be 1..2048 bytes for current firmware')
-    if not is_safe_83(args.sd_path):
-        raise SystemExit('ERROR: target filename must be FAT 8.3-safe, e.g. /music/T06.MP3')
+    if not is_safe_83(args.sd_path) and not is_music_mp3(args.sd_path):
+        raise SystemExit('ERROR: target filename must be FAT 8.3-safe outside /music/*.mp3')
 
     size = os.path.getsize(args.local_file)
     qpath = urllib.parse.quote(args.sd_path, safe='/._-')
@@ -67,7 +79,13 @@ def main():
     begun = False
 
     try:
-        print(post_retry(f'{base}/api/upload-begin?path={qpath}&size={size}', tries=args.retries).strip())
+        begin_reply = post_retry(f'{base}/api/upload-begin?path={qpath}&size={size}', tries=args.retries).strip()
+        print(begin_reply)
+        stored = parse_field(begin_reply, 'stored')
+        if stored:
+            qpath = urllib.parse.quote(stored, safe='/._-')
+            if stored != args.sd_path:
+                print(f'stored as {stored}')
         begun = True
         sent = 0
         with open(args.local_file, 'rb') as f:
