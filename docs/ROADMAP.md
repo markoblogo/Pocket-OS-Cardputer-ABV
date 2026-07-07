@@ -198,19 +198,19 @@ Implementation order:
 - Voice Marks: short recording attached to GPS/time.
 - Mac Companion GPX export.
 - LoRa Lab: PING/RSSI/SNR and duty-cycle-safe packets.
-- Home Relay MVP: STATUS, GPS_POINT, WORKOUT_SUMMARY, ACK, TIME_SYNC.
+- Direct Computer Relay MVP: STATUS, GPS_POINT, WORKOUT_SUMMARY, ACK, TIME_SYNC with a computer-connected LoRa module.
 
 Rules:
 
 - GPS/Journey works fully offline.
-- LoRa is sparse event relay, not file transfer.
+- LoRa is sparse direct exchange with a computer/home station, not file transfer.
 - Relay failure never blocks local capture.
-- No Meshtastic integration in this product track.
+- No Meshtastic, no mesh, no generic LoRa chat/networking in this product track.
 
 Acceptance:
 
 - A walk/run can produce a local journey folder with track data.
-- Later, a home relay can receive small status/checkpoint packets without SD/file sync.
+- Later, a computer-connected LoRa station can receive small status/checkpoint packets without SD/file sync.
 
 ## Final polish: Visual Layer
 

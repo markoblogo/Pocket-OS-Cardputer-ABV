@@ -33,7 +33,12 @@ The valuable product direction is:
 Pocket OS -> Adventure Mode -> local-first journey memory
 ```
 
-GPS provides context. LoRa provides sparse long-range event relay.
+There are exactly two intended jobs:
+
+1. GPS/GNSS context for outdoor activity and journey memory.
+2. Direct low-bandwidth data exchange with a computer/home station that has another LoRa module.
+
+LoRa is not planned as mesh networking and not planned as Meshtastic integration.
 
 ## Key constraints
 
@@ -212,9 +217,9 @@ Reading: Meditations p117
 
 Implement only after Journey history exists.
 
-### Home Relay
+### Direct Computer Relay
 
-Keep as R&D after GPS/Journey MVP.
+Keep after GPS/Journey MVP. This is a direct Cardputer-to-computer/home-station link using another LoRa module connected to the computer/server.
 
 Architecture:
 
@@ -222,7 +227,7 @@ Architecture:
 Cardputer
   local journey/event buffer
   LoRa short packet
-Home Relay
+Computer LoRa station
   ACK / TIME_SYNC / MESSAGE
 Mac/NAS
   inbox / timeline / GPX builder
@@ -241,7 +246,7 @@ Cardputer -> Home:
 - LOW_BATTERY;
 - RETURNED_HOME.
 
-Home -> Cardputer:
+Computer relay -> Cardputer:
 
 - ACK;
 - TIME_SYNC;
@@ -328,9 +333,9 @@ Acceptance:
 
 - Cardputer can send and receive short packets reliably.
 
-### Phase G: Home Relay MVP
+### Phase G: Direct Computer Relay MVP
 
-Goal: sparse event relay.
+Goal: sparse event exchange with a computer/home station connected to another LoRa module.
 
 - Send STATUS and WORKOUT_SUMMARY.
 - Relay ACKs.
@@ -347,6 +352,7 @@ Do not start with:
 
 - full LoRa mesh;
 - Meshtastic integration;
+- generic LoRa chat/networking as a product goal;
 - continuous live tracking every second;
 - voice/audio over LoRa;
 - map rendering on Cardputer;
@@ -358,7 +364,7 @@ Do not start with:
 Highest value path:
 
 ```text
-GNSS Lab -> Journey Track -> Running Mode -> Voice Marks -> Mac GPX export -> LoRa Relay
+GNSS Lab -> Journey Track -> Running Mode -> Voice Marks -> Mac GPX export -> Direct Computer LoRa Relay
 ```
 
 This preserves the offline-first product philosophy and avoids using LoRa for the wrong job.

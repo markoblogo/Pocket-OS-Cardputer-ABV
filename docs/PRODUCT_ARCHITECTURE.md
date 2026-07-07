@@ -204,7 +204,7 @@ Journey
 └─ summary
 ```
 
-The first implementation should be GPS-only and local-first. LoRa comes later as sparse relay for short status/checkpoint packets. See `docs/ADVENTURE_LORA_ARCHITECTURE.md`.
+The first implementation should be GPS-only and local-first. LoRa comes later only as direct sparse exchange with a computer/home station that has another LoRa module. No Meshtastic or mesh networking is planned. See `docs/ADVENTURE_LORA_ARCHITECTURE.md`.
 
 ### Progressive Apps
 
