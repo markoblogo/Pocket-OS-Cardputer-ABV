@@ -2039,16 +2039,22 @@ bool saveCapturedRecording(std::string* err = nullptr)
     }
     writeWavHeader(f, rec_samples_written);
     bool ok = true;
-    size_t total_wrote = 0;
-    while (total_wrote < rec_samples_written) {
-        const size_t todo = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES, rec_samples_written - total_wrote);
-        const size_t wrote = fwrite(rec_capture + total_wrote, sizeof(int16_t), todo, f);
-        total_wrote += wrote;
-        if (wrote != todo) {
-            ok = false;
-            break;
+    if (rec_samples_written <= REC_SAMPLE_RATE * 15) {
+        // Proven short-note path: one contiguous write was stable in hardware tests.
+        const size_t wrote = fwrite(rec_capture, sizeof(int16_t), rec_samples_written, f);
+        ok = wrote == rec_samples_written;
+    } else {
+        size_t total_wrote = 0;
+        while (total_wrote < rec_samples_written) {
+            const size_t todo = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES, rec_samples_written - total_wrote);
+            const size_t wrote = fwrite(rec_capture + total_wrote, sizeof(int16_t), todo, f);
+            total_wrote += wrote;
+            if (wrote != todo) {
+                ok = false;
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
     }
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
@@ -2068,6 +2074,7 @@ void stopRecording(bool save)
         M5.delay(1);
     }
     M5.Mic.end();
+    M5.delay(250);
     bool failed = rec_write_error;
     std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
     if (save && !failed) {
