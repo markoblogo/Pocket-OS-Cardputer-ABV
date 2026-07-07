@@ -8,7 +8,7 @@ Goal: ABVx should support both a minimal utility mode and a more expressive art 
 
 ### Minimal mode
 
-Default productive mode.
+Default productive mode and firmware default.
 
 - Black background.
 - High-contrast text.
@@ -26,7 +26,7 @@ Optional expressive mode.
 - Music/Record visualizers.
 - More visible personality and atmosphere.
 
-Art mode must be optional and disableable in Settings.
+Art mode must be optional and disableable in Settings. It should only activate when battery level is high enough and automatically fall back to Minimal mode when battery drops below a configured threshold.
 
 ## Design constraints
 
@@ -56,7 +56,17 @@ Future Settings options:
 VISUAL: MIN / ART
 ANIM: OFF / LOW / FULL
 SAVER: OFF / CLOCK / ART
+ART MIN BAT: 40%
+ART OFF BAT: 25%
 ```
+
+Default behavior:
+
+- Firmware boots in Minimal mode.
+- User may enable Art mode manually.
+- If battery is below `ART MIN BAT`, Art mode request is rejected or delayed.
+- If Art mode is active and battery drops below `ART OFF BAT`, firmware automatically switches back to Minimal mode.
+- Charging state may allow Art mode again.
 
 ## Implementation direction
 

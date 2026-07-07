@@ -103,7 +103,7 @@ No offline nano-LLM.
 
 ## Final polish: Visual Layer
 
-After core apps and companion workflows are stable, add a visual layer with Minimal and Art modes. Art mode may include boot/sleep screens, transitions, cyberpunk-style accents, and richer waveform/saver visuals. It must remain optional and battery-aware. See `docs/VISUAL_LAYER_ARCHITECTURE.md`.
+After core apps and companion workflows are stable, add a visual layer with Minimal and Art modes. Art mode may include boot/sleep screens, transitions, cyberpunk-style accents, and richer waveform/saver visuals. Current UI remains default; Art mode is optional, battery-gated, and auto-falls back to Minimal mode when battery is low. See `docs/VISUAL_LAYER_ARCHITECTURE.md`.
 
 ## Out of scope
 
