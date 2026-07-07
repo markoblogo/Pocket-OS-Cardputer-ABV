@@ -32,3 +32,9 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps an
 - Notes editor is LAT/plain text only; Cyrillic editing is intentionally disabled.
 - Reader Cyrillic is custom/best-effort; French/Ukrainian polish is postponed.
 - Connections is useful for diagnostics/list/download/small files, not large media sync.
+
+## Architecture
+
+Architecture decisions are tracked in `docs/ARCHITECTURE_DECISIONS.md`.
+
+Key decisions: AI online-only, no standalone Agent for now, Browser prepared-first, Mac Companion handles heavy conversion/sync, and large Wi-Fi upload remains disabled.

@@ -2,6 +2,8 @@
 
 Product direction: offline pocket utility shell first, transfer second, browser and AI later.
 
+Architecture decisions: `docs/ARCHITECTURE_DECISIONS.md`.
+
 ## Phase 1: Stability baseline
 
 Status: mostly complete.
@@ -84,22 +86,20 @@ Goal: local Mac tool for preparing and moving files to Cardputer SD.
 - Sync time/config later.
 - Use BookOrbit as reference for library/import ideas, not as direct base. See `docs/MAC_COMPANION_REFERENCES.md`.
 
-## Phase 5: Agent / AI
+## Phase 5: AI / Command Surface
 
-Agent returns only when it adds value beyond launcher.
+AI is online-only. Agent remains hidden unless it becomes a real command/AI surface beyond launcher duplication.
 
-Offline Agent:
+Online AI MVP:
 
-- Deterministic command router.
-- Local memory cards.
-- App actions: open reader, new note, today habits, timer, play music, status.
-
-Online AI:
-
-- OpenAI API when connected.
-- Text question → text answer.
+- Preferred route through Mac Companion.
+- Direct OpenAI API later/fallback.
+- Text input in English, French, or translit.
+- Text answer displayed on Cardputer.
 - Save answer to Notes.
 - Voice input/output later.
+
+No offline nano-LLM.
 
 ## Out of scope
 
