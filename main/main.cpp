@@ -238,6 +238,7 @@ std::string active_note_name;
 std::string note_input;
 bool note_ru_mode = false;
 bool note_edit_existing = false;
+bool note_edit_cyrillic_source = false;
 std::string reader_text;
 std::vector<std::string> reader_lines;
 std::vector<std::string> reader_words;
@@ -1396,6 +1397,8 @@ std::string noteTextForSave()
     return note_ru_mode ? translitToRussian(note_input) : note_input;
 }
 
+bool containsCyrillic(const std::string& text);
+
 std::string utf8TailByChars(const std::string& text, int max_chars)
 {
     int chars = 0;
@@ -1470,9 +1473,17 @@ bool loadRawNoteForEdit(std::string* err = nullptr)
     }
     fclose(f);
     while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) body.pop_back();
-    note_input = body;
     active_note_name = notes[notes_cursor - 1];
-    note_ru_mode = false;
+    note_edit_cyrillic_source = containsCyrillic(body);
+    if (note_edit_cyrillic_source) {
+        // We intentionally do not reverse-transliterate saved Cyrillic yet.
+        // Edit mode accepts latin translit and rewrites the note on save.
+        note_input.clear();
+        note_ru_mode = true;
+    } else {
+        note_input = body;
+        note_ru_mode = false;
+    }
     note_edit_existing = true;
     return true;
 }
@@ -2679,7 +2690,11 @@ void drawNotesEdit()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 34);
-    canvas.printf("%s  1 toggle", note_ru_mode ? "RU translit" : "LAT text");
+    if (note_edit_cyrillic_source && note_input.empty()) {
+        canvas.print("RU source: type translit");
+    } else {
+        canvas.printf("%s  1 toggle", note_ru_mode ? "RU translit" : "LAT text");
+    }
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     std::string display_text = note_input;
@@ -4457,6 +4472,7 @@ void handleKey(KeyEvent ev)
             note_input.clear();
             note_ru_mode = false;
             note_edit_existing = false;
+            note_edit_cyrillic_source = false;
             screen = Screen::NotesEdit;
             blockInput(300);
         }
@@ -4465,6 +4481,7 @@ void handleKey(KeyEvent ev)
                 note_input.clear();
                 note_ru_mode = false;
                 note_edit_existing = false;
+                note_edit_cyrillic_source = false;
                 screen = Screen::NotesEdit;
                 blockInput(300);
             } else {
@@ -4527,6 +4544,7 @@ void handleKey(KeyEvent ev)
                     showMessage("Save failed", err.empty() ? "write" : err, MessageReturn::Notes);
                 }
                 note_edit_existing = false;
+                note_edit_cyrillic_source = false;
             }
             blockInput(400);
         } else if (ev.key == Key::Backspace) {
@@ -4534,6 +4552,7 @@ void handleKey(KeyEvent ev)
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             note_input.clear();
             note_edit_existing = false;
+            note_edit_cyrillic_source = false;
             screen = Screen::NotesList;
             blockInput(250);
         } else if (ev.key == Key::None && ev.name && ev.name[0] && !ev.name[1]) {
