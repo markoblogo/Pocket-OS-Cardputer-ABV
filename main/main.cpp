@@ -88,6 +88,8 @@ volatile int connection_upload_total = 0;
 bool connection_upload_session = false;
 std::string connection_upload_path;
 std::string connection_upload_original_name;
+FILE* connection_upload_file = nullptr;
+std::string connection_upload_full_path;
 
 LGFX_Sprite canvas(&M5.Display);
 
@@ -3684,6 +3686,25 @@ void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, h
     httpd_resp_send_err(req, code, reason);
 }
 
+void resetUploadSession(bool remove_partial)
+{
+    if (connection_upload_file) {
+        fflush(connection_upload_file);
+        fclose(connection_upload_file);
+        connection_upload_file = nullptr;
+    }
+    if (remove_partial && !connection_upload_full_path.empty()) {
+        unlink(connection_upload_full_path.c_str());
+    }
+    connection_upload_active = false;
+    connection_upload_done = 0;
+    connection_upload_total = 0;
+    connection_upload_session = false;
+    connection_upload_path.clear();
+    connection_upload_original_name.clear();
+    connection_upload_full_path.clear();
+}
+
 bool ensureConnectionWriteDir(char* err, size_t err_len)
 {
     if (!initSd()) {
@@ -4036,13 +4057,15 @@ esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
             return ESP_OK;
         }
     }
+    resetUploadSession(true);
     FILE* f = fopen(full_path.c_str(), "wb");
     if (!f) {
         snprintf(err, sizeof(err), "open %s", std::strerror(errno));
         sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
-    fclose(f);
+    connection_upload_file = f;
+    connection_upload_full_path = full_path;
     connection_upload_session = true;
     connection_upload_path = stored_api;
     connection_upload_original_name = original_name;
@@ -4074,24 +4097,16 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "no session");
         return ESP_OK;
     }
+    if (!connection_upload_file) {
+        resetUploadSession(true);
+        sendHttpError(req, endpoint, "file closed", HTTPD_500_INTERNAL_SERVER_ERROR);
+        return ESP_OK;
+    }
+    if (offset != static_cast<size_t>(connection_upload_done)) {
+        sendHttpError(req, endpoint, "offset mismatch", HTTPD_400_BAD_REQUEST);
+        return ESP_OK;
+    }
     char err[64] = {};
-    std::string parent_api, full_path;
-    if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
-        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
-        return ESP_OK;
-    }
-    FILE* f = fopen(full_path.c_str(), "r+b");
-    if (!f) {
-        snprintf(err, sizeof(err), "open %s", std::strerror(errno));
-        sendHttpError(req, endpoint, err, HTTPD_500_INTERNAL_SERVER_ERROR);
-        return ESP_OK;
-    }
-    if (fseek(f, static_cast<long>(offset), SEEK_SET) != 0) {
-        fclose(f);
-        sendHttpError(req, endpoint, "seek failed", HTTPD_500_INTERNAL_SERVER_ERROR);
-        return ESP_OK;
-    }
-
     char buf[512];
     int remaining = req->content_len;
     connection_upload_active = true;
@@ -4108,7 +4123,7 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
             snprintf(err, sizeof(err), "recv failed");
             break;
         }
-        if (fwrite(buf, 1, got, f) != static_cast<size_t>(got)) {
+        if (fwrite(buf, 1, got, connection_upload_file) != static_cast<size_t>(got)) {
             ok = false;
             snprintf(err, sizeof(err), "write %s", std::strerror(errno));
             break;
@@ -4118,10 +4133,12 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
         connection_dirty = true;
         vTaskDelay(2);
     }
-    if (fflush(f) != 0) ok = false;
-    if (fclose(f) != 0) ok = false;
+    if (connection_upload_done % (32 * 1024) == 0 && fflush(connection_upload_file) != 0) {
+        ok = false;
+        snprintf(err, sizeof(err), "flush %s", std::strerror(errno));
+    }
     if (!ok) {
-        connection_upload_active = false;
+        resetUploadSession(true);
         sendHttpError(req, endpoint, err[0] ? err : "chunk failed", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
@@ -4151,9 +4168,19 @@ esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, err[0] ? err : "bad path");
         return ESP_OK;
     }
+    if (connection_upload_file) {
+        bool close_ok = fflush(connection_upload_file) == 0;
+        if (fclose(connection_upload_file) != 0) close_ok = false;
+        connection_upload_file = nullptr;
+        if (!close_ok) {
+            resetUploadSession(true);
+            sendHttpError(req, endpoint, "close failed", HTTPD_500_INTERNAL_SERVER_ERROR);
+            return ESP_OK;
+        }
+    }
     struct stat st = {};
     if (stat(full_path.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != total) {
-        connection_upload_active = false;
+        resetUploadSession(true);
         sendHttpError(req, endpoint, "size mismatch", HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
@@ -4170,6 +4197,7 @@ esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
     }
     connection_upload_path.clear();
     connection_upload_original_name.clear();
+    connection_upload_full_path.clear();
     setConnectionStatus(endpoint, "none");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK FINISH\n");
@@ -4188,18 +4216,7 @@ esp_err_t connectionUploadAbortHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "no session");
         return ESP_OK;
     }
-    char err[64] = {};
-    std::string parent_api, full_path;
-    if (!prepareUploadPath(api_path, &full_path, &parent_api, err, sizeof(err))) {
-        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
-        return ESP_OK;
-    }
-    unlink(full_path.c_str());
-    connection_upload_active = false;
-    connection_upload_done = 0;
-    connection_upload_session = false;
-    connection_upload_path.clear();
-    connection_upload_original_name.clear();
+    resetUploadSession(true);
     setConnectionStatus(endpoint, "aborted");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK ABORT\n");
@@ -4336,10 +4353,7 @@ bool startConnections(char* err, size_t err_len)
 
 void stopConnections()
 {
-    connection_upload_active = false;
-    connection_upload_session = false;
-    connection_upload_path.clear();
-    connection_upload_original_name.clear();
+    resetUploadSession(true);
     if (connection_httpd) {
         httpd_stop(connection_httpd);
         connection_httpd = nullptr;
