@@ -45,6 +45,8 @@ constexpr const char* BOOKS_DIR = "/sdcard/books";
 constexpr const char* NOTES_DIR = "/sdcard/notes";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
 constexpr const char* RECORDINGS_FALLBACK_DIR = "/sdcard/RECS";
+constexpr const char* INBOX_DIR = "/sdcard/inbox";
+constexpr const char* INBOX_FILE = "/sdcard/inbox/INBOX.TXT";
 constexpr const char* HABITS_DIR = "/sdcard/habits";
 constexpr const char* HABITS_FILE = "/sdcard/habits/HABITS.TXT";
 constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
@@ -848,6 +850,22 @@ bool createUnsupportedTestFile(std::string* err = nullptr)
     return true;
 }
 
+void appendInboxEvent(const char* type, const std::string& detail)
+{
+    if (!type || !type[0]) return;
+    if (!ensureSdDir(INBOX_DIR, nullptr)) return;
+    FILE* f = fopen(INBOX_FILE, "ab");
+    if (!f) return;
+    char day[12];
+    snprintf(day, sizeof(day), "DAY%04d", habit_day);
+    fprintf(f, "%s %lu %s %s\n",
+            day,
+            static_cast<unsigned long>(M5.millis() / 1000),
+            type,
+            detail.c_str());
+    flushAndClose(f);
+}
+
 void scanFiles(const std::string& path)
 {
     file_entries.clear();
@@ -1440,6 +1458,7 @@ bool loadSelectedBook(std::string* err = nullptr)
     auto it = reader_bookmarks.find(active_book_name);
     if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
     saveReaderState();
+    appendInboxEvent("READ", active_book_name);
     return true;
 }
 
@@ -1498,6 +1517,7 @@ bool saveNewNote(std::string* out_name, std::string* err = nullptr)
         return false;
     }
     if (out_name) *out_name = name;
+    appendInboxEvent("NOTE", std::string(NOTES_DIR) + "/" + name);
     scanNotes();
     for (int i = 0; i < static_cast<int>(notes.size()); ++i) {
         if (notes[i] == name) {
@@ -1568,6 +1588,7 @@ bool saveExistingNote(std::string* err = nullptr)
         if (err) *err = "write failed";
         return false;
     }
+    appendInboxEvent("NOTE", selectedNotePath());
     scanNotes();
     return true;
 }
@@ -1803,6 +1824,7 @@ bool startPlayback(std::string* err = nullptr)
     M5.Speaker.begin();
     applyVolume();
     playing = true;
+    appendInboxEvent("LISTEN", path);
     playback_decode_after_ms = M5.millis() + 150;
     screen = Screen::MusicPlaying;
     dirty = true;
@@ -2096,6 +2118,7 @@ void stopRecording(bool save)
         if (it != recordings.end()) {
             recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
         }
+        appendInboxEvent("VOICE", recordings_dir + "/" + active_recording_name);
         const unsigned long sec = static_cast<unsigned long>((M5.millis() - rec_started_ms + 500) / 1000);
         showMessage("Record saved", active_recording_name + "\n" + std::to_string(sec) + " sec", MessageReturn::Recorder);
     }
@@ -5314,6 +5337,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok && !habits.empty()) {
             habits[habits_cursor].done = !habits[habits_cursor].done;
             saveHabitLogForDay();
+            appendInboxEvent(habits[habits_cursor].done ? "HABIT+" : "HABIT-", habits[habits_cursor].title);
             blockInput(220);
         } else if (ev.key == Key::One) {
             saveHabitLogForDay();
@@ -5321,6 +5345,7 @@ void handleKey(KeyEvent ev)
             for (auto& h : habits) h.done = false;
             saveHabitState();
             saveHabitLogForDay();
+            appendInboxEvent("DAY", "next");
             blockInput(300);
         } else if (ev.key == Key::Right) {
             saveHabitLogForDay();

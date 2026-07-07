@@ -45,7 +45,7 @@ Stable baseline:
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: Wi-Fi AP list/download/small-upload diagnostics.
 
-Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
+Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload. Universal Inbox logging is MVP append-only; Timeline UI is later.
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
 
