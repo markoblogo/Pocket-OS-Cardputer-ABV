@@ -1832,7 +1832,8 @@ void stopRecording(bool save)
         if (it != recordings.end()) {
             recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
         }
-        showMessage("Record saved", active_recording_name, MessageReturn::Recorder);
+        const unsigned long sec = static_cast<unsigned long>((M5.millis() - rec_started_ms + 500) / 1000);
+        showMessage("Record saved", active_recording_name + "\n" + std::to_string(sec) + " sec", MessageReturn::Recorder);
     }
     rec_write_error = false;
     rec_write_error_text.clear();
@@ -2647,8 +2648,15 @@ void drawRecorderRecording()
     canvas.printf("%.14s", active_recording_name.c_str());
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
-    if (rec_write_error) canvas.print("WRITE ERR");
-    else canvas.printf("RAM:%lus/%lus", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE), static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
+    if (rec_write_error) {
+        canvas.print("WRITE ERR");
+    } else {
+        canvas.printf("TIME:%lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000));
+        canvas.setTextSize(1);
+        canvas.setCursor(8, 82);
+        canvas.printf("BUF %lu/%lu sec", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE), static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
+        canvas.setTextSize(2);
+    }
     drawWaveform(pcm_chunk, 1);
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
