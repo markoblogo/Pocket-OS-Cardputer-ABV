@@ -87,3 +87,83 @@ Clean readable text prepared for Cardputer.
 Browser is prepared-first, device-light.
 
 Do not build a full browser engine on Cardputer. Treat Browser as a cached text reader with links and optional refresh.
+
+## Browser / Search / AI separation
+
+ABVx should keep three online concepts separate:
+
+```text
+Browser = curated web reader
+Search  = text-only search adapter
+AI Chat = ask/explain/summarize online
+```
+
+### Browser
+
+Browser is favorites-first. It opens a small curated set of user-approved resources, usually prepared by Mac Companion and stored on SD.
+
+Example favorite list:
+
+```text
+1|ABVx Monitor|SITE001|REFRESH
+2|Spike Spot Index|SITE002|REFRESH
+3|Project dashboard|SITE003|STATIC
+4|Google Text Search|SEARCH001|SEARCH
+5|Docs / reference|SITE004|STATIC
+```
+
+Favorite modes:
+
+- `STATIC`: use saved version only.
+- `REFRESH`: online refresh updates the saved text snapshot.
+- `SEARCH`: accepts a query and returns text-only results.
+- `DOWNLOAD`: page/resource intended for supported file downloads.
+
+Do not hardcode personal sites directly into the firmware binary. Firmware should provide the Browser app and default schema. Mac Companion should generate/update `/sdcard/browser/INDEX.TXT` and site packages.
+
+### Text Search
+
+Search should not be a full Google browser. It should be an adapter that returns clean text results:
+
+```text
+Results for: esp32 s3 mp3 decoder
+
+1. Minimp3 ESP32 example
+   https://...
+   Short snippet...
+
+2. ESP-IDF I2S audio output
+   https://...
+   Short snippet...
+```
+
+Cardputer UI:
+
+- Up/Down: select result.
+- OK: open result as prepared text page if available or fetch simplified page later.
+- GO: back.
+
+The adapter may live in Mac Companion or a future backend/proxy. Direct heavy search parsing on Cardputer is not a goal.
+
+### AI Chat
+
+If the user wants to ask a general question, explain something, summarize, or reason, that belongs to AI Chat, not Browser.
+
+AI Chat should later support:
+
+- online OpenAI API when connected;
+- text question to text answer;
+- save answer to Notes;
+- voice input/output later.
+
+Offline shell must continue working if AI is unavailable.
+
+## Firmware vs SD content
+
+Recommended split:
+
+- Firmware: Browser app, parser for prepared packages, simple UI, optional refresh hooks.
+- SD: favorites list, cached pages, links, metadata.
+- Mac Companion: fetch, clean, normalize, package, sync.
+
+This keeps favorite sites editable without reflashing firmware.

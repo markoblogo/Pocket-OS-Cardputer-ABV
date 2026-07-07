@@ -72,6 +72,7 @@ Goal: prepared-first text browser for a small set of favorite sites, not a graph
 - Link list navigation.
 - Offline cache for favorite pages.
 - Downloads to `/books`, `/notes`, `/music`, or `/cardputer`.
+- Keep Browser, Search, and AI Chat separate: curated pages, text-only search results, and general online Q&A.
 
 ## Phase 4.5: Mac Companion
 
