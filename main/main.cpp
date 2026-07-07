@@ -242,9 +242,10 @@ int music_underruns = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
-constexpr uint32_t REC_MAX_SECONDS = 15;
+constexpr uint32_t REC_MAX_SECONDS = 120;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
+constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
 std::vector<int16_t> rec_play_all;
@@ -1975,7 +1976,7 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    const uint32_t candidates[] = {15, 10, 5, 3, 2, 1};
+    const uint32_t candidates[] = {120, 90, 60, 45, 30, 15, 10, 5, 3, 2, 1};
     rec_capture_capacity = 0;
     for (uint32_t sec : candidates) {
         const size_t samples = REC_SAMPLE_RATE * sec;
@@ -2037,8 +2038,18 @@ bool saveCapturedRecording(std::string* err = nullptr)
         return false;
     }
     writeWavHeader(f, rec_samples_written);
-    const size_t wrote = fwrite(rec_capture, sizeof(int16_t), rec_samples_written, f);
-    bool ok = wrote == rec_samples_written;
+    bool ok = true;
+    size_t total_wrote = 0;
+    while (total_wrote < rec_samples_written) {
+        const size_t todo = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES, rec_samples_written - total_wrote);
+        const size_t wrote = fwrite(rec_capture + total_wrote, sizeof(int16_t), todo, f);
+        total_wrote += wrote;
+        if (wrote != todo) {
+            ok = false;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
         if (err) {

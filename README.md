@@ -12,7 +12,7 @@ Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
 - Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
-- Record: short WAV voice notes, save/play/delete, continuous playback, waveform.
+- Record: WAV voice notes, RAM-first longer capture, save/play/delete, continuous playback, waveform.
 - Reader: TXT books, English/Russian display, speed reading, persistent bookmarks.
 - Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer, alarm.

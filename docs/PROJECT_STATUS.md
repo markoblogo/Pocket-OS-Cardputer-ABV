@@ -6,7 +6,7 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps an
 
 - Launcher: large monochrome list UI, app navigation, battery indicator.
 - Music: MP3 files from `/sdcard/music`, double-buffered 16 kHz mono playback, waveform, volume, shuffle, prev/next.
-- Record: short WAV notes in `/sdcard/rec` or `/sdcard/RECS`, recording waveform, continuous playback, delete confirmation.
+- Record: WAV notes in `/sdcard/rec` or `/sdcard/RECS`, RAM-first longer capture, recording waveform, continuous playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
 - Files: SD browser, known file opening, unsupported file info, delete confirmation.
@@ -26,7 +26,7 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps an
 
 ## Known limitations
 
-- Recorder is short-note MVP, not long-form recorder.
+- Recorder is RAM-first MVP. It can use longer PSRAM buffers, but true SD streaming recorder is postponed.
 - Music playback is smooth after double buffering, but still uses conservative 16 kHz mono output.
 - Clock resets after full power-off until time sync exists.
 - Notes editor is LAT/plain text only; Cyrillic editing is intentionally disabled.
