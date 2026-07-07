@@ -1,10 +1,35 @@
 # CardputerABVx
 
-Minimal offline-first firmware for M5Stack Cardputer ADV.
+ABVx is a **Pocket OS** for M5Stack Cardputer ADV: a fast offline-first personal tool for capture, memory, reading/listening, routines, and transfer.
 
-ABVx is a monochrome pocket utility shell focused on real standalone use: MP3 playback, short voice notes, TXT reading, plain notes, time tools, SD files, habits, randomizer, settings, and Wi-Fi transfer diagnostics.
+It is not just a launcher or a set of apps. The product goal is to minimize friction for common actions:
 
-## Status
+```text
+Capture -> Remember -> Read -> Listen -> Act -> Reflect
+```
+
+The existing apps are implementation modules behind those actions.
+
+## Product direction
+
+Current firmware is the technical baseline for ABVx Pocket OS.
+
+Core ideas:
+
+- **One Button Capture**: start voice/text capture with one shortcut.
+- **Universal Inbox**: notes, voice, habits, bookmarks, and actions flow into one log.
+- **Timeline**: a simple life/activity journal built from captured events.
+- **Context Resume**: resume last book, track, note, timer, or habit state.
+- **Fast Dashboard**: boot into status + resume actions, not only an app list.
+- **Zero Cursor Philosophy**: use physical keys directly where possible.
+- **Progressive Apps**: simple first screen, advanced options later.
+- **Minimal / Art mode**: productive default UI, optional battery-gated visual mode.
+
+Architecture: [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md)
+Decisions: [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md)
+Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+## Current status
 
 Tested on real Cardputer ADV hardware.
 
@@ -12,7 +37,7 @@ Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
 - Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
-- Record: WAV voice notes, RAM-first longer capture, save/play/delete, continuous playback, waveform.
+- Record: WAV voice notes, RAM-first capture, save/play/delete, continuous playback, waveform.
 - Reader: TXT books, English/Russian display, speed reading, persistent bookmarks.
 - Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer, alarm.
@@ -22,10 +47,9 @@ Stable baseline:
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
 - Connections: Wi-Fi AP list/download/small-upload diagnostics.
 
-Postponed: Agent, browser, AI, Mac companion, long recording, large Wi-Fi upload.
+Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
-Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ## Controls
 
@@ -58,6 +82,7 @@ Use 8.3-safe filenames for now.
 /sdcard/notes/NOTE0001.TXT
 /sdcard/rec/REC0001.WAV
 /sdcard/RECS/REC0001.WAV
+/sdcard/inbox/INBOX.TXT
 /sdcard/habits/HABITS.TXT
 /sdcard/habits/LOG.TXT
 /sdcard/habits/STATE.TXT

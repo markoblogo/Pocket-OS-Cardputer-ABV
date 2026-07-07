@@ -17,6 +17,36 @@ Heavy work belongs outside the device:
 
 Cardputer should execute simple prepared formats reliably.
 
+
+## Pocket OS framing
+
+ABVx is positioned as a Pocket OS, not just firmware, a launcher, or a set of apps.
+
+Top-level product actions:
+
+- Capture;
+- Remember;
+- Read;
+- Listen;
+- Act;
+- Reflect.
+
+Existing apps remain implementation modules behind those actions.
+
+This enables product features that cut across apps:
+
+- One Button Capture;
+- Universal Inbox;
+- Timeline;
+- Context Resume;
+- Fast Dashboard;
+- Friction Counter;
+- Memory Cards;
+- Progressive Apps;
+- Zero Cursor Philosophy.
+
+Do not rewrite stable apps immediately. Add Pocket OS features as a layer over the working firmware baseline.
+
 ## AI
 
 AI is online-only.

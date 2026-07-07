@@ -1,8 +1,19 @@
 # ABVx Roadmap
 
-Product direction: offline pocket utility shell first, transfer second, browser and AI later.
+Product direction: **Pocket OS** first, individual apps second.
 
-Architecture decisions: `docs/ARCHITECTURE_DECISIONS.md`.
+ABVx should become a fast offline-first personal tool organized around actions:
+
+```text
+Capture / Remember / Read / Listen / Act / Reflect
+```
+
+Architecture:
+
+- Product architecture: `docs/PRODUCT_ARCHITECTURE.md`
+- Architecture decisions: `docs/ARCHITECTURE_DECISIONS.md`
+- Browser architecture: `docs/BROWSER_ARCHITECTURE.md`
+- Visual layer: `docs/VISUAL_LAYER_ARCHITECTURE.md`
 
 ## Phase 1: Stability baseline
 
@@ -10,24 +21,88 @@ Status: mostly complete.
 
 Remaining work:
 
-- Continue smoke testing Music → Record → Reader → Notes → Files after SD operations.
+- Continue smoke testing Music -> Record -> Reader -> Notes -> Files after SD operations.
 - Keep large Wi-Fi upload disabled until a separate transfer redesign is done.
 - Tag a first test release after one clean full hardware pass.
 
-## Phase 2: Offline app polish
+Acceptance:
 
-Most valuable near-term work:
+- Music plays smoothly.
+- Record creates, saves, plays, and deletes stable short voice notes.
+- Reader/Notes/Files keep seeing SD after Music/Record operations.
+- Settings SD reprobe works.
+
+## Phase 2: Pocket OS foundation
+
+Goal: turn the app set into a fast personal operating layer.
+
+### 2.1 One Button Capture
+
+- Direct key shortcuts from launcher/dashboard.
+- `R`: start/stop voice recording.
+- `N`: new note.
+- `M`: music play/stop.
+- `T`: timer shortcut later.
+- If Fn combos are reliable, use `Fn+R`, `Fn+N`, etc.
+
+Acceptance:
+
+- Voice capture can start without navigating into Record.
+- Text note creation can start without navigating into Notes.
+- Common actions take only a few key presses.
+
+### 2.2 Universal Inbox
+
+- Add `/sdcard/inbox/INBOX.TXT`.
+- Log voice saves, note saves, habit checks, reading opens, music plays, timer events.
+- Start as append-only text log.
+
+Acceptance:
+
+- Captured activity appears in a single file.
+- Inbox survives reboot.
+
+### 2.3 Context Resume
+
+- Store last useful state: book, track, note, recording, timer/habits summary.
+- Add Resume screen or Dashboard section.
+
+Acceptance:
+
+- User can return to last book/track/note quickly.
+
+### 2.4 Fast Dashboard
+
+- Boot/default screen with battery, resume state, habits count, current book/track, shortcuts.
+- Launcher remains accessible via OK/Menu.
+
+Acceptance:
+
+- Boot gives useful state, not only app list.
+
+### 2.5 Timeline
+
+- Build a simple view over Inbox.
+- Use manual day/session time until real sync exists.
+
+Acceptance:
+
+- User can review today's captured activity.
+
+## Phase 3: Offline app polish
+
+Apps stay as implementation modules under Pocket OS actions.
 
 1. Record v2
-   - Longer recording architecture.
+   - Stable duration policy based on hardware test.
    - Playback progress.
    - Better duration display.
-   - More robust storage failure messages.
+   - Robust storage failure messages.
 
 2. Reader v2
-   - Better speed-reading UI.
-   - More bookmark controls.
-   - Last-book startup shortcut.
+   - Real English/Russian book tests.
+   - Bookmark polish if test reveals gaps.
+   - Last-book startup shortcut feeds Context Resume.
 
 3. Notes v2
    - Rename notes.
@@ -44,9 +119,11 @@ Most valuable near-term work:
    - Cleaner habit summaries.
    - Future date/time sync hook.
 
-## Phase 3: Connections / Transfer
+## Phase 4: Connections / Transfer
 
-Goal: Cardputer as SD transfer device via Wi-Fi AP.
+Goal: Cardputer as SD transfer device via Wi-Fi AP and later Mac Companion.
+
+Current rule: large upload is disabled.
 
 Planned redesign:
 
@@ -62,48 +139,59 @@ Acceptance:
 - Failed upload must not corrupt SD state.
 - `/cardputer` works as generic transfer folder.
 
-## Phase 4: Text Browser MVP
+## Phase 5: Mac Companion
 
-Goal: prepared-first text browser for a small set of favorite sites, not a graphical browser. See `docs/BROWSER_ARCHITECTURE.md`.
-
-- Wi-Fi client mode.
-- URL input.
-- Favorites list.
-- Mac-prepared favorite packages first.
-- HTML-to-text extraction primarily in Mac Companion.
-- Link list navigation.
-- Offline cache for favorite pages.
-- Downloads to `/books`, `/notes`, `/music`, or `/cardputer`.
-- Keep Browser, Search, and AI Chat separate: curated pages, text-only search results, and general online Q&A.
-
-## Phase 4.5: Mac Companion
-
-Goal: local Mac tool for preparing and moving files to Cardputer SD.
+Goal: local Mac tool for preparing and moving content to Cardputer SD.
 
 - Import books and convert to clean TXT for `/books`.
 - Import music and convert/rename to Cardputer-friendly MP3 for `/music`.
+- Prepare browser favorite packages.
 - Pull notes and recordings from SD.
-- Sync time/config later.
+- Sync time/config.
+- Proxy AI requests.
+- Firmware update later.
 - Use BookOrbit as reference for library/import ideas, not as direct base. See `docs/MAC_COMPANION_REFERENCES.md`.
 
-## Phase 5: AI / Command Surface
+## Phase 6: Prepared-first Browser
 
-AI is online-only. Agent remains hidden unless it becomes a real command/AI surface beyond launcher duplication.
+Goal: text browser for a small set of favorite sites, not a graphical browser.
 
-Online AI MVP:
+- Mac-prepared favorite packages first.
+- Cardputer reads cached text + links.
+- Offline shows saved pages.
+- Online refresh updates known favorites later.
+- Text Search is an adapter, not a full Google browser.
+- AI Chat handles general questions.
 
-- Preferred route through Mac Companion.
-- Direct OpenAI API later/fallback.
+## Phase 7: AI / Command Surface
+
+AI is online-only.
+
+Preferred route:
+
+- Cardputer -> Mac Companion -> OpenAI -> Cardputer.
+
+Later/fallback:
+
+- Cardputer -> OpenAI API directly.
+
+MVP:
+
 - Text input in English, French, or translit.
 - Text answer displayed on Cardputer.
 - Save answer to Notes.
 - Voice input/output later.
 
-No offline nano-LLM.
+No offline nano-LLM. No standalone Agent unless it becomes a real command/AI surface beyond launcher duplication.
 
 ## Final polish: Visual Layer
 
-After core apps and companion workflows are stable, add a visual layer with Minimal and Art modes. Art mode may include boot/sleep screens, transitions, cyberpunk-style accents, and richer waveform/saver visuals. Current UI remains default; Art mode is optional, battery-gated, and auto-falls back to Minimal mode when battery is low. See `docs/VISUAL_LAYER_ARCHITECTURE.md`.
+After core apps and companion workflows are stable, add Minimal/Art visual modes.
+
+- Current UI remains default Minimal mode.
+- Art mode is optional.
+- Art mode is battery-gated and auto-falls back to Minimal when battery is low.
+- Includes boot/sleep screens, transitions, cyberpunk accents, richer waveform/saver visuals.
 
 ## Out of scope
 
@@ -111,3 +199,4 @@ After core apps and companion workflows are stable, add a visual layer with Mini
 - Subscriptions or paid API model inside this firmware.
 - Meshtastic integration.
 - Full graphical browser.
+- Offline fake AI / nano-LLM.
