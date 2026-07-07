@@ -750,6 +750,22 @@ std::string fileTypeLabel(const FileEntry& e)
     return "UNSUPPORTED";
 }
 
+std::string filesDisplayPath(const std::string& path)
+{
+    if (path == MOUNT_POINT) return "ROOT /";
+    if (path == CONFIG_DIR) return "/CARDPTR";
+    if (path.rfind(MOUNT_POINT, 0) == 0) {
+        std::string rel = path.substr(std::strlen(MOUNT_POINT));
+        return rel.empty() ? "ROOT /" : rel;
+    }
+    return path;
+}
+
+bool isSupportedOpenFile(const FileEntry& e)
+{
+    return !e.is_dir && (hasMp3Ext(e.name) || hasTextExt(e.name) || hasRecordingExt(e.name));
+}
+
 void scanFiles(const std::string& path)
 {
     file_entries.clear();
@@ -762,10 +778,16 @@ void scanFiles(const std::string& path)
     files_status = "EMPTY";
     if (files_path != MOUNT_POINT) {
         file_entries.push_back({"..", "", true, 0});
+    } else {
+        struct stat cfg_st = {};
+        if (stat(CONFIG_DIR, &cfg_st) == 0 && S_ISDIR(cfg_st.st_mode)) {
+            file_entries.push_back({"CARDPTR", CONFIG_DIR, true, 0});
+        }
     }
     while (dirent* entry = readdir(dir)) {
         std::string name = entry->d_name;
         if (isHidden(name)) continue;
+        if (files_path == MOUNT_POINT && name == "CARDPTR") continue;
         std::string full = files_path + "/" + name;
         struct stat st = {};
         if (stat(full.c_str(), &st) != 0) continue;
@@ -3056,7 +3078,8 @@ void drawFilesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 30);
-    canvas.printf("%.28s", files_path == MOUNT_POINT ? "ROOT /" : files_path.substr(std::strlen(MOUNT_POINT)).c_str());
+    std::string shown_path = filesDisplayPath(files_path);
+    canvas.printf("%.28s", shown_path.c_str());
     uint64_t total = 0, free_b = 0;
     canvas.setCursor(8, 40);
     if (sdUsage(&total, &free_b) && total >= free_b) {
@@ -3069,6 +3092,10 @@ void drawFilesList()
         canvas.setTextColor(uiFg(), uiBg());
         canvas.setCursor(8, 62);
         canvas.print(files_status.c_str());
+        canvas.setTextSize(1);
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 90);
+        canvas.print("1 ROOT  GO BACK");
     } else {
         int rows = 3;
         int start = std::max(0, files_cursor - 1);
@@ -3085,7 +3112,7 @@ void drawFilesList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK OPEN  BKSP DEL  GO BACK");
+    canvas.print("OK OPEN  BKSP DEL  1 ROOT");
     canvas.pushSprite(0, 0);
 }
 
@@ -3102,8 +3129,16 @@ void drawFilesDeleteConfirm()
     canvas.printf("%.14s", pending_delete_name.c_str());
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
-    canvas.setCursor(8, 78);
-    canvas.print("file only, no folders");
+    struct stat st = {};
+    canvas.setCursor(8, 70);
+    if (!pending_delete_path.empty() && stat(pending_delete_path.c_str(), &st) == 0) {
+        canvas.printf("SIZE %s", formatBytes(static_cast<uint64_t>(st.st_size)).c_str());
+    } else {
+        canvas.print("SIZE ?");
+    }
+    canvas.setCursor(8, 84);
+    std::string rel = filesDisplayPath(pending_delete_path);
+    canvas.printf("PATH %.26s", rel.c_str());
     canvas.setCursor(8, 122);
     canvas.print("OK DELETE       GO KEEP");
     canvas.pushSprite(0, 0);
@@ -3116,7 +3151,7 @@ void drawFilesInfo()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.print("FILE INFO");
+    canvas.print(isSupportedOpenFile(file_info_entry) ? "FILE INFO" : "UNSUPPORTED");
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 32);
@@ -3126,15 +3161,15 @@ void drawFilesInfo()
     canvas.setCursor(8, 60);
     canvas.printf("SIZE %s", file_info_entry.is_dir ? "-" : formatBytes(file_info_entry.size).c_str());
     canvas.setCursor(8, 74);
-    std::string rel = file_info_entry.path.rfind(MOUNT_POINT, 0) == 0
-        ? file_info_entry.path.substr(std::strlen(MOUNT_POINT))
-        : file_info_entry.path;
+    std::string rel = filesDisplayPath(file_info_entry.path);
     canvas.printf("PATH %.26s", rel.c_str());
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 102);
-    canvas.print(file_info_entry.is_dir ? "OK opens folder" : "Unsupported files stay here");
+    if (file_info_entry.is_dir) canvas.print("OK opens folder");
+    else if (isSupportedOpenFile(file_info_entry)) canvas.print("Known file type");
+    else canvas.print("Stored only, not opened");
     canvas.setCursor(8, 122);
-    canvas.print("OK/BACK FILES    GO FILES");
+    canvas.print("OK/BACK FILES   GO FILES");
     canvas.pushSprite(0, 0);
 }
 
