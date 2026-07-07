@@ -918,6 +918,32 @@ void writeWavHeader(FILE* f, uint32_t samples)
     writeLe32(f, data_bytes);
 }
 
+bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate, std::string* err = nullptr)
+{
+    uint8_t h[44] = {};
+    fseek(f, 0, SEEK_SET);
+    if (fread(h, 1, sizeof(h), f) != sizeof(h)) {
+        if (err) *err = "bad wav header";
+        return false;
+    }
+    if (std::memcmp(h, "RIFF", 4) != 0 || std::memcmp(h + 8, "WAVE", 4) != 0 ||
+        std::memcmp(h + 12, "fmt ", 4) != 0 || std::memcmp(h + 36, "data", 4) != 0) {
+        if (err) *err = "unsupported wav";
+        return false;
+    }
+    const uint16_t audio_format = h[20] | (h[21] << 8);
+    const uint16_t channels = h[22] | (h[23] << 8);
+    const uint32_t rate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
+    const uint16_t bits = h[34] | (h[35] << 8);
+    if (audio_format != 1 || channels != 1 || bits != 16 || rate == 0) {
+        if (err) *err = "wav must be pcm mono 16";
+        return false;
+    }
+    if (data_offset) *data_offset = 44;
+    if (sample_rate) *sample_rate = rate;
+    return true;
+}
+
 bool ensureRecordingsDir(std::string* err = nullptr)
 {
     std::string primary_err;
@@ -2107,7 +2133,13 @@ bool startRecordingPlayback(std::string* err = nullptr)
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
     const bool wav = lowerExt(path) == ".wav";
-    const long data_offset = wav ? 44 : 0;
+    uint32_t wav_offset = 0;
+    uint32_t wav_rate = REC_SAMPLE_RATE;
+    if (wav && !readWavHeader(f, &wav_offset, &wav_rate, err)) {
+        fclose(f);
+        return false;
+    }
+    const long data_offset = wav ? static_cast<long>(wav_offset) : 0;
     if (file_size <= data_offset) {
         fclose(f);
         if (err) *err = "empty";
@@ -2132,8 +2164,8 @@ bool startRecordingPlayback(std::string* err = nullptr)
     applyVolume();
     pcm_chunk.assign(rec_play_all.begin(), rec_play_all.begin() + std::min<size_t>(rec_play_all.size(), REC_SAMPLE_RATE));
     pcm_channels = 1;
-    pcm_rate = REC_SAMPLE_RATE;
-    M5.Speaker.playRaw(rec_play_all.data(), rec_play_all.size(), REC_SAMPLE_RATE, false);
+    pcm_rate = wav ? static_cast<int>(wav_rate) : REC_SAMPLE_RATE;
+    M5.Speaker.playRaw(rec_play_all.data(), rec_play_all.size(), pcm_rate, false);
     screen = Screen::RecorderPlaying;
     dirty = true;
     blockInput(500);
@@ -4989,8 +5021,9 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::RecorderDeleteConfirm) {
         if (ev.key == Key::Ok) {
             if (!pending_delete_path.empty() && unlink(pending_delete_path.c_str()) == 0) {
-                showMessage("Rec deleted", pending_delete_name, MessageReturn::Recorder);
+                manualSdReprobe();
                 scanRecordings();
+                showMessage("Rec deleted", pending_delete_name, MessageReturn::Recorder);
             } else {
                 showMessage("Delete failed", pending_delete_name + "\n" + std::strerror(errno), MessageReturn::Recorder);
             }
