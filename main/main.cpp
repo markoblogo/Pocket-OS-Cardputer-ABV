@@ -55,9 +55,10 @@ constexpr const char* READER_STATE_FILE = "/sdcard/CARDPTR/READER.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 constexpr int INPUT_BUF_SIZE = 16 * 1024;
-constexpr int CHUNK_MS = 240;
+constexpr int CHUNK_MS = 320;
+constexpr int AUDIO_OUTPUT_RATE = 16000;
 constexpr bool AUDIO_SAFE_MONO = true;
-constexpr int AUDIO_SAFE_SHIFT = 1;
+constexpr int AUDIO_SAFE_SHIFT = 2;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
 constexpr size_t MAX_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
@@ -237,7 +238,7 @@ int pcm_channels = 2;
 int decoded_chunks = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
-constexpr size_t REC_BUFFER_SAMPLES = 512;
+constexpr size_t REC_BUFFER_SAMPLES = 1024;
 constexpr uint32_t REC_MAX_SECONDS = 15;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
@@ -1805,6 +1806,14 @@ void drawWaveform(const std::vector<int16_t>& pcm, int channels)
     }
 }
 
+int16_t safeAudioSample(int32_t v)
+{
+    v >>= AUDIO_SAFE_SHIFT;
+    if (v > 32767) return 32767;
+    if (v < -32768) return -32768;
+    return static_cast<int16_t>(v);
+}
+
 bool decodeChunk(std::string* err = nullptr)
 {
     if (!playing || !mp3_file) {
@@ -1812,7 +1821,7 @@ bool decodeChunk(std::string* err = nullptr)
         return false;
     }
     pcm_chunk.clear();
-    int target_values = 44100 * CHUNK_MS / 1000;
+    int target_values = AUDIO_OUTPUT_RATE * CHUNK_MS / 1000;
     if (mp3_frame_pcm.size() < MINIMP3_MAX_SAMPLES_PER_FRAME) {
         mp3_frame_pcm.assign(MINIMP3_MAX_SAMPLES_PER_FRAME, 0);
     }
@@ -1832,24 +1841,25 @@ bool decodeChunk(std::string* err = nullptr)
         int samples = mp3dec_decode_frame(&mp3_dec, mp3_buf.data() + mp3_pos, static_cast<int>(mp3_len - mp3_pos), mp3_frame_pcm.data(), &info);
         ++attempts;
         if (samples > 0 && info.frame_bytes > 0 && info.channels > 0) {
-            pcm_rate = info.hz;
-            pcm_channels = AUDIO_SAFE_MONO ? 1 : info.channels;
-            const size_t values = static_cast<size_t>(samples) * info.channels;
-            if (AUDIO_SAFE_MONO && info.channels == 2) {
-                pcm_chunk.reserve(pcm_chunk.size() + samples);
-                for (int i = 0; i < samples; ++i) {
-                    const int32_t left = mp3_frame_pcm[i * 2];
-                    const int32_t right = mp3_frame_pcm[i * 2 + 1];
-                    pcm_chunk.push_back(static_cast<int16_t>(((left + right) / 2) >> AUDIO_SAFE_SHIFT));
+            pcm_rate = AUDIO_OUTPUT_RATE;
+            pcm_channels = 1;
+            const int src_rate = info.hz > 0 ? info.hz : AUDIO_OUTPUT_RATE;
+            const int out_samples = std::max(1, samples * AUDIO_OUTPUT_RATE / src_rate);
+            pcm_chunk.reserve(pcm_chunk.size() + out_samples);
+            for (int out_i = 0; out_i < out_samples; ++out_i) {
+                int src_i = out_i * src_rate / AUDIO_OUTPUT_RATE;
+                if (src_i >= samples) src_i = samples - 1;
+                int32_t sample = 0;
+                if (info.channels == 2) {
+                    sample = (static_cast<int32_t>(mp3_frame_pcm[src_i * 2]) +
+                              static_cast<int32_t>(mp3_frame_pcm[src_i * 2 + 1])) / 2;
+                } else {
+                    sample = mp3_frame_pcm[src_i * info.channels];
                 }
-            } else {
-                pcm_chunk.reserve(pcm_chunk.size() + values);
-                for (size_t i = 0; i < values; ++i) {
-                    pcm_chunk.push_back(static_cast<int16_t>(mp3_frame_pcm[i] >> AUDIO_SAFE_SHIFT));
-                }
+                pcm_chunk.push_back(safeAudioSample(sample));
             }
             mp3_pos += info.frame_bytes;
-            target_values = std::max(1024, info.hz * pcm_channels * CHUNK_MS / 1000);
+            target_values = std::max(1024, AUDIO_OUTPUT_RATE * CHUNK_MS / 1000);
         } else {
             ++mp3_pos;
         }
@@ -1889,7 +1899,7 @@ void updateAudio()
     }
     ++decoded_chunks;
     if (!display_off) dirty = true;
-    M5.Speaker.playRaw(pcm_chunk.data(), pcm_chunk.size(), pcm_rate, pcm_channels == 2, 1, -1, true);
+    M5.Speaker.playRaw(pcm_chunk.data(), pcm_chunk.size(), pcm_rate, false);
 }
 
 
@@ -2131,7 +2141,7 @@ void updateRecordingPlayback()
     pcm_rate = REC_SAMPLE_RATE;
     ++rec_play_chunks;
     if (!display_off) dirty = true;
-    M5.Speaker.playRaw(rec_buffer.data(), n, REC_SAMPLE_RATE, false, 1, -1, true);
+    M5.Speaker.playRaw(rec_buffer.data(), n, REC_SAMPLE_RATE, false);
 }
 
 
