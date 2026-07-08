@@ -247,6 +247,8 @@ constexpr int REC_SAMPLE_RATE = 16000;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
 constexpr uint32_t REC_SAFE_SECONDS = 30;
 constexpr uint32_t REC_MAX_SECONDS = REC_SAFE_SECONDS;
+constexpr uint32_t REC_PRESET_SHORT_SECONDS = 5;
+constexpr uint32_t REC_PRESET_LONG_SECONDS = 20;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
@@ -260,6 +262,8 @@ uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
 bool rec_play_next_ready = false;
+uint32_t rec_target_seconds = REC_PRESET_SHORT_SECONDS;
+uint32_t rec_requested_seconds = REC_PRESET_SHORT_SECONDS;
 uint32_t rec_mic_chunks = 0;
 size_t rec_last_take = 0;
 int recorder_cursor = 0;
@@ -1989,7 +1993,7 @@ void updateAudio()
 }
 
 
-bool startRecording(std::string* err = nullptr)
+bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::string* err = nullptr)
 {
     stopPlayback();
     if (rec_capture) {
@@ -2007,11 +2011,31 @@ bool startRecording(std::string* err = nullptr)
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    // Voice v0.x targets quick memory notes, not meetings. Try 30s first,
-    // then fall back honestly if RAM is lower on the current boot.
-    const uint32_t candidates[] = {REC_SAFE_SECONDS, 20, 10, 5, 3, 2, 1};
-    rec_capture_capacity = 0;
+    // Voice v0.x targets quick memory notes, with short/long presets.
+    // Allocate requested first, then fallback safely on low RAM.
+    target_seconds = std::max(REC_MIN_SECONDS, std::min<uint32_t>(target_seconds, REC_MAX_SECONDS));
+    rec_requested_seconds = target_seconds;
+    rec_target_seconds = target_seconds;
+    std::vector<uint32_t> candidates;
+    candidates.push_back(target_seconds);
+    candidates.push_back(REC_SAFE_SECONDS);
+    candidates.push_back(20);
+    candidates.push_back(10);
+    candidates.push_back(5);
+    candidates.push_back(3);
+    candidates.push_back(2);
+    candidates.push_back(1);
+    // Deduplicate and keep order.
+    std::vector<uint32_t> dedup;
     for (uint32_t sec : candidates) {
+        bool exists = false;
+        for (uint32_t s : dedup) {
+            if (s == sec) exists = true;
+        }
+        if (!exists) dedup.push_back(sec);
+    }
+    rec_capture_capacity = 0;
+    for (uint32_t sec : dedup) {
         const size_t samples = REC_SAMPLE_RATE * sec;
         rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (!rec_capture) {
@@ -2027,6 +2051,7 @@ bool startRecording(std::string* err = nullptr)
         if (err) *err = "ram alloc <1s";
         return false;
     }
+    rec_target_seconds = rec_capture_capacity / REC_SAMPLE_RATE;
 
     M5.Speaker.end();
     auto cfg = M5.Mic.config();
@@ -3155,7 +3180,7 @@ void drawRecorderList()
             canvas.setTextSize(1);
             canvas.setTextColor(uiDim(), uiBg());
             canvas.setCursor(28, row_y + 18);
-            canvas.print("OK start voice note");
+            canvas.print("OK start short / 2 long");
         } else {
             std::string label = recordings[i - 1];
             if (i == recorder_cursor) label = marqueeText(label, 11);
@@ -3175,7 +3200,7 @@ void drawRecorderList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK PLAY  1 NEW  BKSP DEL");
+    canvas.print("OK PLAY  1 NEW  2 NEW LONG BKSP DEL");
     canvas.pushSprite(0, 0);
 }
 
@@ -3214,7 +3239,7 @@ void drawRecorderRecording()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(158, 38);
-    canvas.printf("MAX %lus", static_cast<unsigned long>(rec_capture_capacity / REC_SAMPLE_RATE));
+    canvas.printf("REQ %lus CAP %lus", static_cast<unsigned long>(rec_requested_seconds), static_cast<unsigned long>(rec_target_seconds));
     canvas.setTextSize(2);
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
@@ -4976,7 +5001,7 @@ bool handleOneButtonCapture(KeyEvent ev)
     if (c == 'r') {
         last_resume_target = ResumeTarget::Recorder;
         std::string err;
-        if (!startRecording(&err)) {
+        if (!startRecording(REC_PRESET_SHORT_SECONDS, &err)) {
             showMessage("Record failed", err.empty() ? "start" : err);
         }
         blockInput(350);
@@ -5305,7 +5330,14 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Right) recorder_cursor = std::min(total - 1, recorder_cursor + 3);
         else if (ev.key == Key::One) {
             std::string err;
-            if (!startRecording(&err)) {
+            if (!startRecording(REC_PRESET_SHORT_SECONDS, &err)) {
+                showMessage("Record failed", err.empty() ? "start" : err);
+            }
+            blockInput(300);
+        }
+        else if (ev.key == Key::Two) {
+            std::string err;
+            if (!startRecording(REC_PRESET_LONG_SECONDS, &err)) {
                 showMessage("Record failed", err.empty() ? "start" : err);
             }
             blockInput(300);
@@ -5313,7 +5345,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok) {
             std::string err;
             if (recorder_cursor == 0) {
-                if (!startRecording(&err)) {
+                if (!startRecording(REC_PRESET_SHORT_SECONDS, &err)) {
                     showMessage("Record failed", err.empty() ? "start" : err);
                 }
             } else {
