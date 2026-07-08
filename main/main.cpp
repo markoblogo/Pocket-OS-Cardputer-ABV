@@ -249,6 +249,7 @@ constexpr uint32_t REC_SAFE_SECONDS = 30;
 constexpr uint32_t REC_MAX_SECONDS = REC_SAFE_SECONDS;
 constexpr uint32_t REC_PRESET_SHORT_SECONDS = 5;
 constexpr uint32_t REC_PRESET_LONG_SECONDS = 20;
+constexpr bool REC_STREAM_RECORDING_ENABLED = false;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
@@ -2031,7 +2032,7 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
     target_seconds = std::max(REC_MIN_SECONDS, std::min<uint32_t>(target_seconds, REC_MAX_SECONDS));
     rec_requested_seconds = target_seconds;
     rec_target_seconds = target_seconds;
-    rec_streaming_record = (target_seconds >= REC_PRESET_LONG_SECONDS);
+    rec_streaming_record = REC_STREAM_RECORDING_ENABLED && (target_seconds >= REC_PRESET_LONG_SECONDS);
     if (rec_streaming_record) {
         if (!ensureRecordingsDir(err)) {
             if (err) *err = "sd mount";
@@ -2290,18 +2291,7 @@ void updateRecording()
         }
 
         if (take > 0) {
-            if (rec_streaming_record) {
-                if (rec_record_file) {
-                    const size_t wrote = fwrite(rec_buffer.data(), sizeof(int16_t), take, rec_record_file);
-                    if (wrote != take) {
-                        rec_write_error = true;
-                        rec_write_error_text = std::string("stream write: ") + (errno ? std::strerror(errno) : "short write");
-                        stopRecording(true);
-                        return;
-                    }
-                    if ((rec_mic_chunks & 0x0F) == 0) fflush(rec_record_file);
-                }
-            } else if (rec_capture) {
+            if (rec_capture) {
                 std::memcpy(rec_capture + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
             }
         }
