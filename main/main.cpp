@@ -253,6 +253,7 @@ constexpr bool REC_STREAM_RECORDING_ENABLED = false;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
+constexpr size_t REC_CAPTURE_CHUNK_SAMPLES = 1024;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
 std::vector<int16_t> rec_play_all;
@@ -262,7 +263,12 @@ bool rec_play_next_last = false;
 FILE* rec_record_file = nullptr;
 bool rec_streaming_record = false;
 std::string rec_stream_path;
-int16_t* rec_capture = nullptr;
+struct RecCaptureChunk {
+    int16_t* data = nullptr;
+    size_t used = 0;
+    size_t capacity = 0;
+};
+std::vector<RecCaptureChunk> rec_capture_chunks;
 size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
@@ -317,6 +323,8 @@ std::vector<std::string> random_history;
 bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
 void cleanupStreamingRecordingTemp(bool remove_file);
+void clearCaptureChunks();
+bool appendCaptureChunk(const int16_t* samples, size_t count);
 
 bool flushAndClose(FILE* f)
 {
@@ -335,6 +343,53 @@ bool manualSdReprobe()
     sd_card = nullptr;
     sd_ready = false;
     return initSd();
+}
+
+void clearCaptureChunks()
+{
+    for (auto& chunk : rec_capture_chunks) {
+        if (chunk.data) {
+            heap_caps_free(chunk.data);
+            chunk.data = nullptr;
+        }
+        chunk.used = 0;
+        chunk.capacity = 0;
+    }
+    rec_capture_chunks.clear();
+    rec_capture_capacity = 0;
+}
+
+bool appendCaptureChunk(const int16_t* samples, size_t count)
+{
+    size_t offset = 0;
+    while (count > 0) {
+        if (!rec_capture_chunks.empty() && rec_capture_chunks.back().used < rec_capture_chunks.back().capacity) {
+            RecCaptureChunk& chunk = rec_capture_chunks.back();
+            const size_t room = chunk.capacity - chunk.used;
+            const size_t n = std::min<size_t>(room, count);
+            std::memcpy(chunk.data + chunk.used, samples + offset, n * sizeof(int16_t));
+            chunk.used += n;
+            offset += n;
+            count -= n;
+            continue;
+        }
+
+        const size_t room = rec_capture_capacity > rec_samples_written ? rec_capture_capacity - rec_samples_written : 0;
+        if (room == 0) return false;
+        const size_t wanted = std::min<size_t>(REC_CAPTURE_CHUNK_SAMPLES, room);
+        if (wanted == 0) return false;
+        int16_t* block = static_cast<int16_t*>(heap_caps_malloc(wanted * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (!block) {
+            block = static_cast<int16_t*>(heap_caps_malloc(wanted * sizeof(int16_t), MALLOC_CAP_8BIT));
+            if (!block) return false;
+        }
+        RecCaptureChunk chunk;
+        chunk.data = block;
+        chunk.used = 0;
+        chunk.capacity = wanted;
+        rec_capture_chunks.push_back(chunk);
+    }
+    return true;
 }
 
 void showMessage(const std::string& title, const std::string& body, MessageReturn ret = MessageReturn::Launcher)
@@ -2013,11 +2068,7 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
 {
     stopPlayback();
     cleanupStreamingRecordingTemp(true);
-    if (rec_capture) {
-        heap_caps_free(rec_capture);
-        rec_capture = nullptr;
-        rec_capture_capacity = 0;
-    }
+    clearCaptureChunks();
     active_recording_name = newRecordingNameFromMillis();
     rec_samples_written = 0;
     rec_write_error = false;
@@ -2061,38 +2112,9 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
             return false;
         }
     } else {
-        std::vector<uint32_t> candidates;
-        candidates.push_back(target_seconds);
-        candidates.push_back(REC_SAFE_SECONDS);
-        candidates.push_back(5);
-        candidates.push_back(3);
-        candidates.push_back(2);
-        candidates.push_back(1);
-        // Deduplicate and keep order.
-        std::vector<uint32_t> dedup;
-        for (uint32_t sec : candidates) {
-            bool exists = false;
-            for (uint32_t s : dedup) {
-                if (s == sec) exists = true;
-            }
-            if (!exists) dedup.push_back(sec);
-        }
-        rec_capture_capacity = 0;
-        for (uint32_t sec : dedup) {
-            const size_t samples = REC_SAMPLE_RATE * sec;
-            rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-            if (!rec_capture) {
-                rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_8BIT));
-            }
-            if (rec_capture) {
-                rec_capture_capacity = samples;
-                break;
-            }
-        }
-        if (!rec_capture) {
-            rec_capture_capacity = 0;
-            rec_streaming_record = false;
-            if (err) *err = "ram alloc <1s";
+        rec_capture_capacity = static_cast<size_t>(target_seconds) * REC_SAMPLE_RATE;
+        if (rec_capture_capacity == 0) {
+            if (err) *err = "ram alloc 0";
             return false;
         }
         rec_target_seconds = rec_capture_capacity / REC_SAMPLE_RATE;
@@ -2113,7 +2135,7 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
 
 bool saveCapturedRecording(std::string* err = nullptr)
 {
-    if (rec_samples_written == 0 || !rec_capture) {
+    if (rec_samples_written == 0 || rec_capture_chunks.empty()) {
         if (err) *err = "empty";
         return false;
     }
@@ -2142,23 +2164,27 @@ bool saveCapturedRecording(std::string* err = nullptr)
     }
     writeWavHeader(f, rec_samples_written);
     bool ok = true;
-    if (rec_samples_written <= REC_SAMPLE_RATE * 15) {
-        // Proven short-note path: one contiguous write was stable in hardware tests.
-        const size_t wrote = fwrite(rec_capture, sizeof(int16_t), rec_samples_written, f);
-        ok = wrote == rec_samples_written;
-    } else {
-        size_t total_wrote = 0;
-        while (total_wrote < rec_samples_written) {
-            const size_t todo = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES, rec_samples_written - total_wrote);
-            const size_t wrote = fwrite(rec_capture + total_wrote, sizeof(int16_t), todo, f);
-            total_wrote += wrote;
-            if (wrote != todo) {
+    size_t samples_left = rec_samples_written;
+    for (const auto& chunk : rec_capture_chunks) {
+        if (!chunk.data || chunk.used == 0) continue;
+        const size_t todo = std::min<size_t>(samples_left, chunk.used);
+        size_t wrote_total = 0;
+        const int16_t* base = chunk.data;
+        while (wrote_total < todo) {
+            const size_t todo_now = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES, todo - wrote_total);
+            const size_t wrote = fwrite(base + wrote_total, sizeof(int16_t), todo_now, f);
+            wrote_total += wrote;
+            if (wrote != todo_now) {
                 ok = false;
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(1));
         }
+        samples_left -= todo;
+        if (!ok) break;
+        if (samples_left == 0) break;
     }
+    if (samples_left != 0) ok = false;
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
         if (err) {
@@ -2266,10 +2292,7 @@ void stopRecording(bool save)
     rec_last_take = 0;
     rec_auto_stopped = false;
     rec_stopped_ms = 0;
-    if (rec_capture) {
-        heap_caps_free(rec_capture);
-        rec_capture = nullptr;
-    }
+    clearCaptureChunks();
     if (rec_record_file) {
         cleanupStreamingRecordingTemp(!save || failed);
     }
@@ -2291,8 +2314,11 @@ void updateRecording()
         }
 
         if (take > 0) {
-            if (rec_capture) {
-                std::memcpy(rec_capture + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
+            if (!appendCaptureChunk(rec_buffer.data(), take)) {
+                rec_write_error = true;
+                rec_write_error_text = "ram alloc";
+                stopRecording(true);
+                return;
             }
         }
         rec_samples_written += static_cast<uint32_t>(take);
