@@ -256,6 +256,8 @@ FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
 std::vector<int16_t> rec_play_all;
 std::vector<int16_t> rec_play_next_chunk;
+bool rec_play_current_last = false;
+bool rec_play_next_last = false;
 int16_t* rec_capture = nullptr;
 size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
@@ -265,6 +267,7 @@ bool rec_play_next_ready = false;
 uint32_t rec_target_seconds = REC_PRESET_SHORT_SECONDS;
 uint32_t rec_requested_seconds = REC_PRESET_SHORT_SECONDS;
 bool rec_auto_stopped = false;
+uint32_t rec_stopped_ms = 0;
 uint32_t rec_mic_chunks = 0;
 size_t rec_last_take = 0;
 int recorder_cursor = 0;
@@ -1738,7 +1741,7 @@ uint32_t recSecondsMsFromSamples(uint32_t samples)
 
 int32_t recClockDeltaMs()
 {
-    const uint32_t clk_ms = (M5.millis() >= rec_started_ms) ? (M5.millis() - rec_started_ms) : 0;
+    const uint32_t clk_ms = (rec_stopped_ms >= rec_started_ms) ? (rec_stopped_ms - rec_started_ms) : ((M5.millis() >= rec_started_ms) ? (M5.millis() - rec_started_ms) : 0);
     const uint32_t pcm_ms = recSecondsMsFromSamples(rec_samples_written);
     return static_cast<int32_t>(clk_ms) - static_cast<int32_t>(pcm_ms);
 }
@@ -2137,6 +2140,7 @@ bool saveCapturedRecording(std::string* err = nullptr)
 
 void stopRecording(bool save)
 {
+    rec_stopped_ms = M5.millis();
     while (M5.Mic.isRecording()) {
         M5.delay(1);
     }
@@ -2179,6 +2183,7 @@ void stopRecording(bool save)
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_auto_stopped = false;
+    rec_stopped_ms = 0;
     if (rec_capture) {
         heap_caps_free(rec_capture);
         rec_capture = nullptr;
@@ -2205,7 +2210,7 @@ void updateRecording()
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
         if (!display_off) dirty = true;
-    if (take < rec_buffer.size() || rec_samples_written >= rec_capture_capacity) {
+        if (take < rec_buffer.size() || rec_samples_written >= rec_capture_capacity) {
             rec_auto_stopped = true;
             stopRecording(true);
         }
@@ -2289,12 +2294,14 @@ bool startRecordingPlayback(std::string* err = nullptr)
     rec_play_file = f;
     rec_play_chunks = 0;
     rec_play_next_ready = false;
-    rec_play_next_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
+    rec_play_next_chunk.clear();
+    rec_play_next_last = false;
+    rec_play_current_last = false;
     active_recording_name = recordings[recorder_cursor - 1];
     M5.Mic.end();
     M5.Speaker.begin();
     applyVolume();
-    pcm_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
+    pcm_chunk.clear();
     pcm_channels = 1;
     pcm_rate = wav ? static_cast<int>(wav_rate) : REC_SAMPLE_RATE;
     screen = Screen::RecorderPlaying;
@@ -2313,17 +2320,20 @@ void stopRecordingPlayback()
     rec_play_all.clear();
     rec_play_next_chunk.clear();
     rec_play_next_ready = false;
+    rec_play_next_last = false;
+    rec_play_current_last = false;
     screen = Screen::RecorderList;
     dirty = true;
     blockInput(350);
 }
 
-bool readNextRecPlayChunk(std::vector<int16_t>& out)
+bool readNextRecPlayChunk(std::vector<int16_t>& out, bool* out_partial = nullptr)
 {
     if (!rec_play_file) return false;
     if (out.size() != REC_BUFFER_SAMPLES * 4) out.assign(REC_BUFFER_SAMPLES * 4, 0);
     const size_t n = fread(out.data(), sizeof(int16_t), out.size(), rec_play_file);
     if (n == 0) return false;
+    if (out_partial) *out_partial = (n < REC_BUFFER_SAMPLES * 4);
     out.resize(n);
     return true;
 }
@@ -2333,7 +2343,13 @@ void updateRecordingPlayback()
     if (screen != Screen::RecorderPlaying) return;
     if (M5.Speaker.isPlaying()) {
         if (!rec_play_next_ready) {
-            rec_play_next_ready = readNextRecPlayChunk(rec_play_next_chunk);
+            bool partial = false;
+            const bool got_next = readNextRecPlayChunk(rec_play_next_chunk, &partial);
+            rec_play_next_ready = got_next;
+            rec_play_next_last = partial;
+            if (!got_next) {
+                rec_play_current_last = true;
+            }
         }
         return;
     }
@@ -2341,14 +2357,25 @@ void updateRecordingPlayback()
         stopRecordingPlayback();
         return;
     }
+    if (rec_play_current_last) {
+        stopRecordingPlayback();
+        return;
+    }
     if (rec_play_next_ready) {
         pcm_chunk.swap(rec_play_next_chunk);
         rec_play_next_ready = false;
         rec_play_next_chunk.clear();
-    } else if (pcm_chunk.size() != REC_BUFFER_SAMPLES * 4) {
-        pcm_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
+        rec_play_current_last = rec_play_next_last;
     }
-    if (pcm_chunk.empty() && !readNextRecPlayChunk(pcm_chunk)) {
+    if (pcm_chunk.empty()) {
+        bool partial = false;
+        if (!readNextRecPlayChunk(pcm_chunk, &partial)) {
+            stopRecordingPlayback();
+            return;
+        }
+        rec_play_current_last = partial;
+    }
+    if (pcm_chunk.empty()) {
         stopRecordingPlayback();
         return;
     }
