@@ -264,6 +264,7 @@ uint32_t rec_play_chunks = 0;
 bool rec_play_next_ready = false;
 uint32_t rec_target_seconds = REC_PRESET_SHORT_SECONDS;
 uint32_t rec_requested_seconds = REC_PRESET_SHORT_SECONDS;
+bool rec_auto_stopped = false;
 uint32_t rec_mic_chunks = 0;
 size_t rec_last_take = 0;
 int recorder_cursor = 0;
@@ -1735,6 +1736,13 @@ uint32_t recSecondsMsFromSamples(uint32_t samples)
     return (samples * 1000ULL) / REC_SAMPLE_RATE;
 }
 
+int32_t recClockDeltaMs()
+{
+    const uint32_t clk_ms = (M5.millis() >= rec_started_ms) ? (M5.millis() - rec_started_ms) : 0;
+    const uint32_t pcm_ms = recSecondsMsFromSamples(rec_samples_written);
+    return static_cast<int32_t>(clk_ms) - static_cast<int32_t>(pcm_ms);
+}
+
 void formatTenthsSeconds(uint32_t ms, char* out, size_t out_len)
 {
     const uint32_t sec = ms / 1000;
@@ -2008,6 +2016,7 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
     rec_write_error = false;
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
+    rec_auto_stopped = false;
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
@@ -2154,14 +2163,22 @@ void stopRecording(bool save)
         }
         char rec_dur[12];
         const uint32_t rec_ms = recSecondsMsFromSamples(rec_samples_written);
+        const int32_t delta_ms = recClockDeltaMs();
         formatTenthsSeconds(rec_ms, rec_dur, sizeof(rec_dur));
-        std::string dur_line = std::string(rec_dur) + " sec";
+        char stop_line[24] = "";
+        if (delta_ms >= 0) {
+            snprintf(stop_line, sizeof(stop_line), "%s +%ldms", rec_auto_stopped ? "AUTO" : "MAN", static_cast<long>(delta_ms));
+        } else {
+            snprintf(stop_line, sizeof(stop_line), "%s %ldms", rec_auto_stopped ? "AUTO" : "MAN", static_cast<long>(delta_ms));
+        }
+        std::string dur_line = std::string(rec_dur) + " sec\n" + std::string(stop_line);
         showMessage("Record saved", active_recording_name + "\n" + dur_line, MessageReturn::Recorder);
     }
     rec_write_error = false;
     rec_write_error_text.clear();
     rec_mic_chunks = 0;
     rec_last_take = 0;
+    rec_auto_stopped = false;
     if (rec_capture) {
         heap_caps_free(rec_capture);
         rec_capture = nullptr;
@@ -2188,7 +2205,8 @@ void updateRecording()
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
         if (!display_off) dirty = true;
-        if (take < rec_buffer.size() || rec_samples_written >= rec_capture_capacity) {
+    if (take < rec_buffer.size() || rec_samples_written >= rec_capture_capacity) {
+            rec_auto_stopped = true;
             stopRecording(true);
         }
     }
@@ -3248,15 +3266,26 @@ void drawRecorderRecording()
     } else {
         char pcm_dur[12];
         char clk_dur[12];
+        char delta_dur[12];
         const uint32_t pcm_ms = recSecondsMsFromSamples(rec_samples_written);
         const uint32_t clk_ms = (M5.millis() - rec_started_ms);
+        const int32_t delta_ms = recClockDeltaMs();
         formatTenthsSeconds(pcm_ms, pcm_dur, sizeof(pcm_dur));
         formatTenthsSeconds(clk_ms, clk_dur, sizeof(clk_dur));
+        formatTenthsSeconds((delta_ms < 0) ? -delta_ms : delta_ms, delta_dur, sizeof(delta_dur));
         canvas.printf("PCM:%s", pcm_dur);
         canvas.setTextSize(1);
         canvas.setCursor(8, 82);
         canvas.printf("CLK %s  MAX %lus", clk_dur, static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
         canvas.setCursor(8, 94);
+        if (delta_ms >= 0) {
+            canvas.printf("DIFF +%s", delta_dur);
+        } else {
+            canvas.printf("DIFF -%s", delta_dur);
+        }
+        canvas.setCursor(130, 94);
+        canvas.printf(" %s", rec_auto_stopped ? "AUTO" : "MAN");
+        canvas.setCursor(8, 106);
         canvas.printf("CH %lu  TAKE %lu", static_cast<unsigned long>(rec_mic_chunks), static_cast<unsigned long>(rec_last_take));
     }
     drawWaveform(pcm_chunk, 1);
