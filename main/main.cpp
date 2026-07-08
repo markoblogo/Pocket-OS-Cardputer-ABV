@@ -253,11 +253,13 @@ constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
 std::vector<int16_t> rec_play_all;
+std::vector<int16_t> rec_play_next_chunk;
 int16_t* rec_capture = nullptr;
 size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
+bool rec_play_next_ready = false;
 uint32_t rec_mic_chunks = 0;
 size_t rec_last_take = 0;
 int recorder_cursor = 0;
@@ -1724,6 +1726,18 @@ std::string selectedPath()
     return std::string(MUSIC_DIR) + "/" + tracks[selected_track];
 }
 
+uint32_t recSecondsMsFromSamples(uint32_t samples)
+{
+    return (samples * 1000ULL) / REC_SAMPLE_RATE;
+}
+
+void formatTenthsSeconds(uint32_t ms, char* out, size_t out_len)
+{
+    const uint32_t sec = ms / 1000;
+    const uint32_t tenth = (ms % 1000) / 100;
+    snprintf(out, out_len, "%lu.%lu", static_cast<unsigned long>(sec), static_cast<unsigned long>(tenth));
+}
+
 void applyVolume()
 {
     int vol = 80;
@@ -2113,8 +2127,11 @@ void stopRecording(bool save)
         if (it != recordings.end()) {
             recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
         }
-        const unsigned long sec = static_cast<unsigned long>((rec_samples_written + REC_SAMPLE_RATE / 2) / REC_SAMPLE_RATE);
-        showMessage("Record saved", active_recording_name + "\n" + std::to_string(sec) + " sec", MessageReturn::Recorder);
+        char rec_dur[12];
+        const uint32_t rec_ms = recSecondsMsFromSamples(rec_samples_written);
+        formatTenthsSeconds(rec_ms, rec_dur, sizeof(rec_dur));
+        std::string dur_line = std::string(rec_dur) + " sec";
+        showMessage("Record saved", active_recording_name + "\n" + dur_line, MessageReturn::Recorder);
     }
     rec_write_error = false;
     rec_write_error_text.clear();
@@ -2228,6 +2245,8 @@ bool startRecordingPlayback(std::string* err = nullptr)
     fseek(f, data_offset, SEEK_SET);
     rec_play_file = f;
     rec_play_chunks = 0;
+    rec_play_next_ready = false;
+    rec_play_next_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
     active_recording_name = recordings[recorder_cursor - 1];
     M5.Mic.end();
     M5.Speaker.begin();
@@ -2249,26 +2268,47 @@ void stopRecordingPlayback()
         rec_play_file = nullptr;
     }
     rec_play_all.clear();
+    rec_play_next_chunk.clear();
+    rec_play_next_ready = false;
     screen = Screen::RecorderList;
     dirty = true;
     blockInput(350);
 }
 
+bool readNextRecPlayChunk(std::vector<int16_t>& out)
+{
+    if (!rec_play_file) return false;
+    if (out.size() != REC_BUFFER_SAMPLES * 4) out.assign(REC_BUFFER_SAMPLES * 4, 0);
+    const size_t n = fread(out.data(), sizeof(int16_t), out.size(), rec_play_file);
+    if (n == 0) return false;
+    out.resize(n);
+    return true;
+}
+
 void updateRecordingPlayback()
 {
     if (screen != Screen::RecorderPlaying) return;
-    if (M5.Speaker.isPlaying()) return;
+    if (M5.Speaker.isPlaying()) {
+        if (!rec_play_next_ready) {
+            rec_play_next_ready = readNextRecPlayChunk(rec_play_next_chunk);
+        }
+        return;
+    }
     if (!rec_play_file) {
         stopRecordingPlayback();
         return;
     }
-    if (pcm_chunk.size() != REC_BUFFER_SAMPLES * 4) pcm_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
-    const size_t n = fread(pcm_chunk.data(), sizeof(int16_t), pcm_chunk.size(), rec_play_file);
-    if (n == 0) {
+    if (rec_play_next_ready) {
+        pcm_chunk.swap(rec_play_next_chunk);
+        rec_play_next_ready = false;
+        rec_play_next_chunk.clear();
+    } else if (pcm_chunk.size() != REC_BUFFER_SAMPLES * 4) {
+        pcm_chunk.assign(REC_BUFFER_SAMPLES * 4, 0);
+    }
+    if (pcm_chunk.empty() && !readNextRecPlayChunk(pcm_chunk)) {
         stopRecordingPlayback();
         return;
     }
-    pcm_chunk.resize(n);
     ++rec_play_chunks;
     if (!display_off) dirty = true;
     M5.Speaker.playRaw(pcm_chunk.data(), pcm_chunk.size(), pcm_rate, false);
@@ -3181,10 +3221,16 @@ void drawRecorderRecording()
     if (rec_write_error) {
         canvas.print("WRITE ERR");
     } else {
-        canvas.printf("PCM:%lus", static_cast<unsigned long>(rec_samples_written / REC_SAMPLE_RATE));
+        char pcm_dur[12];
+        char clk_dur[12];
+        const uint32_t pcm_ms = recSecondsMsFromSamples(rec_samples_written);
+        const uint32_t clk_ms = (M5.millis() - rec_started_ms);
+        formatTenthsSeconds(pcm_ms, pcm_dur, sizeof(pcm_dur));
+        formatTenthsSeconds(clk_ms, clk_dur, sizeof(clk_dur));
+        canvas.printf("PCM:%s", pcm_dur);
         canvas.setTextSize(1);
         canvas.setCursor(8, 82);
-        canvas.printf("CLK %lus  MAX %lus", static_cast<unsigned long>((M5.millis() - rec_started_ms) / 1000), static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
+        canvas.printf("CLK %s  MAX %lus", clk_dur, static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
         canvas.setCursor(8, 94);
         canvas.printf("CH %lu  TAKE %lu", static_cast<unsigned long>(rec_mic_chunks), static_cast<unsigned long>(rec_last_take));
     }
