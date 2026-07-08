@@ -258,6 +258,9 @@ std::vector<int16_t> rec_play_all;
 std::vector<int16_t> rec_play_next_chunk;
 bool rec_play_current_last = false;
 bool rec_play_next_last = false;
+FILE* rec_record_file = nullptr;
+bool rec_streaming_record = false;
+std::string rec_stream_path;
 int16_t* rec_capture = nullptr;
 size_t rec_capture_capacity = 0;
 uint32_t rec_samples_written = 0;
@@ -312,6 +315,7 @@ std::vector<std::string> random_history;
 
 bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
+void cleanupStreamingRecordingTemp(bool remove_file);
 
 bool flushAndClose(FILE* f)
 {
@@ -2007,13 +2011,12 @@ void updateAudio()
 bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::string* err = nullptr)
 {
     stopPlayback();
+    cleanupStreamingRecordingTemp(true);
     if (rec_capture) {
         heap_caps_free(rec_capture);
         rec_capture = nullptr;
         rec_capture_capacity = 0;
     }
-    // Do not touch SD here. On Cardputer ADV, SD mkdir/write during live mic
-    // setup can destabilize the card. Capture to RAM first, save after stop.
     active_recording_name = newRecordingNameFromMillis();
     rec_samples_written = 0;
     rec_write_error = false;
@@ -2024,46 +2027,75 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
     rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
     // Voice v0.x targets quick memory notes, with short/long presets.
-    // Allocate requested first, then fallback safely on low RAM.
+    // Long preset streams directly to SD to avoid RAM truncation.
     target_seconds = std::max(REC_MIN_SECONDS, std::min<uint32_t>(target_seconds, REC_MAX_SECONDS));
     rec_requested_seconds = target_seconds;
     rec_target_seconds = target_seconds;
-    std::vector<uint32_t> candidates;
-    candidates.push_back(target_seconds);
-    candidates.push_back(REC_SAFE_SECONDS);
-    candidates.push_back(20);
-    candidates.push_back(10);
-    candidates.push_back(5);
-    candidates.push_back(3);
-    candidates.push_back(2);
-    candidates.push_back(1);
-    // Deduplicate and keep order.
-    std::vector<uint32_t> dedup;
-    for (uint32_t sec : candidates) {
-        bool exists = false;
-        for (uint32_t s : dedup) {
-            if (s == sec) exists = true;
+    rec_streaming_record = (target_seconds >= REC_PRESET_LONG_SECONDS);
+    if (rec_streaming_record) {
+        if (!ensureRecordingsDir(err)) {
+            if (err) *err = "sd mount";
+            rec_streaming_record = false;
+            return false;
         }
-        if (!exists) dedup.push_back(sec);
-    }
-    rec_capture_capacity = 0;
-    for (uint32_t sec : dedup) {
-        const size_t samples = REC_SAMPLE_RATE * sec;
-        rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        if (!rec_capture) {
-            rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_8BIT));
+        rec_capture_capacity = static_cast<size_t>(target_seconds) * REC_SAMPLE_RATE;
+        std::string path = recordings_dir + "/" + active_recording_name;
+        for (int i = 0; i < 20; ++i) {
+            struct stat st = {};
+            if (stat(path.c_str(), &st) != 0) break;
+            active_recording_name = newRecordingNameFromMillis();
+            path = recordings_dir + "/" + active_recording_name;
         }
-        if (rec_capture) {
-            rec_capture_capacity = samples;
-            break;
+        rec_record_file = fopen(path.c_str(), "wb");
+        if (!rec_record_file) {
+            if (err) *err = std::string("open: ") + std::strerror(errno);
+            rec_streaming_record = false;
+            return false;
         }
-    }
-    if (!rec_capture) {
+        rec_stream_path = path;
+        writeWavHeader(rec_record_file, 0);
+        if (fflush(rec_record_file) != 0) {
+            if (err) *err = "header";
+            cleanupStreamingRecordingTemp(true);
+            return false;
+        }
+    } else {
+        std::vector<uint32_t> candidates;
+        candidates.push_back(target_seconds);
+        candidates.push_back(REC_SAFE_SECONDS);
+        candidates.push_back(5);
+        candidates.push_back(3);
+        candidates.push_back(2);
+        candidates.push_back(1);
+        // Deduplicate and keep order.
+        std::vector<uint32_t> dedup;
+        for (uint32_t sec : candidates) {
+            bool exists = false;
+            for (uint32_t s : dedup) {
+                if (s == sec) exists = true;
+            }
+            if (!exists) dedup.push_back(sec);
+        }
         rec_capture_capacity = 0;
-        if (err) *err = "ram alloc <1s";
-        return false;
+        for (uint32_t sec : dedup) {
+            const size_t samples = REC_SAMPLE_RATE * sec;
+            rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+            if (!rec_capture) {
+                rec_capture = static_cast<int16_t*>(heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_8BIT));
+            }
+            if (rec_capture) {
+                rec_capture_capacity = samples;
+                break;
+            }
+        }
+        if (!rec_capture) {
+            rec_capture_capacity = 0;
+            rec_streaming_record = false;
+            if (err) *err = "ram alloc <1s";
+            return false;
+        }
+        rec_target_seconds = rec_capture_capacity / REC_SAMPLE_RATE;
     }
-    rec_target_seconds = rec_capture_capacity / REC_SAMPLE_RATE;
 
     M5.Speaker.end();
     auto cfg = M5.Mic.config();
@@ -2138,6 +2170,45 @@ bool saveCapturedRecording(std::string* err = nullptr)
     return true;
 }
 
+void cleanupStreamingRecordingTemp(bool remove_file)
+{
+    if (rec_record_file) {
+        fclose(rec_record_file);
+        rec_record_file = nullptr;
+    }
+    if (remove_file && !rec_stream_path.empty()) {
+        unlink(rec_stream_path.c_str());
+    }
+    rec_stream_path.clear();
+    rec_streaming_record = false;
+}
+
+bool finalizeStreamingRecording(std::string* err = nullptr)
+{
+    if (!rec_record_file) {
+        if (err) *err = "open stream";
+        return false;
+    }
+    if (rec_samples_written == 0) {
+        if (err) *err = "empty";
+        cleanupStreamingRecordingTemp(true);
+        return false;
+    }
+    if (fseek(rec_record_file, 0, SEEK_SET) != 0) {
+        if (err) *err = "seek failed";
+        cleanupStreamingRecordingTemp(false);
+        return false;
+    }
+    writeWavHeader(rec_record_file, rec_samples_written);
+    if (fflush(rec_record_file) != 0) {
+        if (err) *err = "flush";
+        cleanupStreamingRecordingTemp(false);
+        return false;
+    }
+    cleanupStreamingRecordingTemp(false);
+    return true;
+}
+
 void stopRecording(bool save)
 {
     rec_stopped_ms = M5.millis();
@@ -2150,9 +2221,19 @@ void stopRecording(bool save)
     std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
     if (save && !failed) {
         std::string err;
-        if (!saveCapturedRecording(&err)) {
+        bool ok = true;
+        if (rec_streaming_record) {
+            ok = finalizeStreamingRecording(&err);
+        } else {
+            ok = saveCapturedRecording(&err);
+        }
+        if (!ok) {
             failed = true;
             failed_text = err.empty() ? "save failed" : err;
+        }
+    } else if (!save || failed) {
+        if (rec_streaming_record) {
+            cleanupStreamingRecordingTemp(!save || failed);
         }
     }
     M5.Speaker.begin();
@@ -2188,6 +2269,9 @@ void stopRecording(bool save)
         heap_caps_free(rec_capture);
         rec_capture = nullptr;
     }
+    if (rec_record_file) {
+        cleanupStreamingRecordingTemp(!save || failed);
+    }
     rec_capture_capacity = 0;
     dirty = true;
     blockInput(400);
@@ -2199,9 +2283,27 @@ void updateRecording()
     if (rec_write_error) return;
     if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), REC_SAMPLE_RATE)) {
         const size_t room = rec_capture_capacity > rec_samples_written ? rec_capture_capacity - rec_samples_written : 0;
-        const size_t take = std::min(room, rec_buffer.size());
-        if (take > 0 && rec_capture) {
-            std::memcpy(rec_capture + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
+        size_t take = std::min(room, rec_buffer.size());
+
+        if (take == 0) {
+            return;
+        }
+
+        if (take > 0) {
+            if (rec_streaming_record) {
+                if (rec_record_file) {
+                    const size_t wrote = fwrite(rec_buffer.data(), sizeof(int16_t), take, rec_record_file);
+                    if (wrote != take) {
+                        rec_write_error = true;
+                        rec_write_error_text = std::string("stream write: ") + (errno ? std::strerror(errno) : "short write");
+                        stopRecording(true);
+                        return;
+                    }
+                    if ((rec_mic_chunks & 0x0F) == 0) fflush(rec_record_file);
+                }
+            } else if (rec_capture) {
+                std::memcpy(rec_capture + rec_samples_written, rec_buffer.data(), take * sizeof(int16_t));
+            }
         }
         rec_samples_written += static_cast<uint32_t>(take);
         ++rec_mic_chunks;
@@ -2210,7 +2312,8 @@ void updateRecording()
         pcm_channels = 1;
         pcm_rate = REC_SAMPLE_RATE;
         if (!display_off) dirty = true;
-        if (take < rec_buffer.size() || rec_samples_written >= rec_capture_capacity) {
+
+        if (rec_capture_capacity > 0 && rec_samples_written >= rec_capture_capacity) {
             rec_auto_stopped = true;
             stopRecording(true);
         }
