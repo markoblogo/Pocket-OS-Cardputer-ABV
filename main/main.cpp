@@ -318,6 +318,8 @@ uint32_t clock_base_ms = 0;
 bool stopwatch_running = false;
 uint32_t stopwatch_started_ms = 0;
 uint32_t stopwatch_elapsed_ms = 0;
+constexpr int TIMER_PRESETS[] = {60, 5 * 60, 10 * 60, 20 * 60};
+int timer_preset_index = 1;
 int timer_seconds = 300;
 uint32_t timer_remaining_ms = 300000;
 uint32_t timer_started_ms = 0;
@@ -4212,6 +4214,23 @@ int timeFieldStepSeconds()
     return 60;
 }
 
+void applyTimerPreset()
+{
+    timer_seconds = TIMER_PRESETS[timer_preset_index];
+    timer_remaining_ms = timer_seconds * 1000UL;
+    timer_running = false;
+    timer_done = false;
+    alert_until_ms = 0;
+}
+
+int timerPresetMinutes()
+{
+    for (size_t i = 0; i < sizeof(TIMER_PRESETS) / sizeof(TIMER_PRESETS[0]); ++i) {
+        if (timer_seconds == TIMER_PRESETS[i]) return TIMER_PRESETS[i] / 60;
+    }
+    return 0;
+}
+
 void startAlert(uint32_t ms)
 {
     alert_until_ms = M5.millis() + ms;
@@ -4271,7 +4290,9 @@ void drawTimeApp()
         canvas.setTextSize(1);
         canvas.setTextColor((timer_done || timer_running) ? uiAccent() : uiDim(), uiBg());
         canvas.setCursor(8, 96);
-        canvas.printf("%s SET:%s", timer_done ? "DONE" : (timer_running ? "RUN" : "SET"), timeFieldName());
+        int preset_min = timerPresetMinutes();
+        if (preset_min > 0) canvas.printf("%s PRESET:%dm", timer_done ? "DONE" : (timer_running ? "RUN" : "SET"), preset_min);
+        else canvas.printf("%s CUSTOM", timer_done ? "DONE" : (timer_running ? "RUN" : "SET"));
     } else {
         formatHMS(alarm_seconds, buf, sizeof(buf));
         drawBigTime(buf, 48);
@@ -4283,7 +4304,7 @@ void drawTimeApp()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK ON/START  1 FIELD/RST  L/R MODE");
+    canvas.print(time_mode == TimeMode::Timer ? "OK START  1 PRESET  L/R MODE" : "OK ON/START  1 FIELD/RST  L/R MODE");
     canvas.pushSprite(0, 0);
 }
 
@@ -6301,7 +6322,8 @@ void handleKey(KeyEvent ev)
                     timer_remaining_ms = timer_seconds * 1000UL;
                     alert_until_ms = 0;
                 } else {
-                    time_set_field = static_cast<TimeSetField>((static_cast<int>(time_set_field) + 1) % 3);
+                    timer_preset_index = (timer_preset_index + 1) % (sizeof(TIMER_PRESETS) / sizeof(TIMER_PRESETS[0]));
+                    applyTimerPreset();
                 }
             } else if (time_mode == TimeMode::Alarm) {
                 time_set_field = static_cast<TimeSetField>((static_cast<int>(time_set_field) + 1) % 3);
@@ -6311,12 +6333,12 @@ void handleKey(KeyEvent ev)
         } else if (ev.key == Key::Up) {
             int step = timeFieldStepSeconds();
             if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + step) % 86400; clock_base_ms = M5.millis(); }
-            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::min(23 * 3600 + 59 * 60 + 59, timer_seconds + step); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::min(23 * 3600 + 59 * 60 + 59, timer_seconds + 60); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
             else if (time_mode == TimeMode::Alarm) { alarm_seconds = (alarm_seconds + step) % 86400; alarm_ringing = false; }
         } else if (ev.key == Key::Down) {
             int step = timeFieldStepSeconds();
             if (time_mode == TimeMode::Clock) { clock_seconds = (elapsedClockSeconds() + 86400 - step) % 86400; clock_base_ms = M5.millis(); }
-            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::max(1, timer_seconds - step); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
+            else if (time_mode == TimeMode::Timer && !timer_running) { timer_seconds = std::max(1, timer_seconds - 60); timer_remaining_ms = timer_seconds * 1000UL; timer_done = false; }
             else if (time_mode == TimeMode::Alarm) { alarm_seconds = (alarm_seconds + 86400 - step) % 86400; alarm_ringing = false; }
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
