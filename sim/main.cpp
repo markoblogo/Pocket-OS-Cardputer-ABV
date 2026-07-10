@@ -28,6 +28,14 @@ std::string lowerExt(const fs::path& p) {
     return e;
 }
 
+std::string terminalSafe(std::string value) {
+    for (char& c : value) {
+        unsigned char u = static_cast<unsigned char>(c);
+        if (u < 32 || u == 127) c = '?';
+    }
+    return value;
+}
+
 void scan(const char* folder, std::vector<std::string>& out, const std::vector<std::string>& exts) {
     out.clear();
     fs::path dir = fs::path("sim_sd") / folder;
@@ -60,17 +68,17 @@ void draw() {
     } else if (screen == Screen::MusicList) {
         std::cout << "MUSIC " << (music.empty()?0:music_sel+1) << "/" << music.size() << "\n";
         if (music.empty()) std::cout << "No MP3 files in sim/sim_sd/music\n";
-        for (int i = 0; i < (int)music.size(); ++i) std::cout << (i == music_sel ? "> " : "  ") << music[i] << "\n";
+        for (int i = 0; i < (int)music.size(); ++i) std::cout << (i == music_sel ? "> " : "  ") << terminalSafe(music[i]) << "\n";
         std::cout << "\ne/g play  1 shuffle:" << (shuffle_on?"ON":"OFF") << "  q back\n";
     } else if (screen == Screen::MusicPlaying) {
-        std::cout << "PLAYING\n" << (music.empty()?"":music[music_sel]) << "\n\n";
+        std::cout << "PLAYING\n" << (music.empty()?"":terminalSafe(music[music_sel])) << "\n\n";
         std::cout << "VOL:" << volName() << " SHUF:" << (shuffle_on?"ON":"OFF") << "\n";
         std::cout << "~~~~__/-\\__/\\___/--\\_~~~~\n";
         std::cout << "\ne/g stop  a/d track  w/s vol  1 shuffle\n";
     } else if (screen == Screen::RecorderList) {
         std::cout << "RECORDER " << (recordings.empty()?0:rec_sel+1) << "/" << recordings.size() << "\n/sdcard/recordings\n";
         if (recordings.empty()) std::cout << "No WAV/PCM files; record/play in v0.2\n";
-        for (int i = 0; i < (int)recordings.size(); ++i) std::cout << (i == rec_sel ? "> " : "  ") << recordings[i] << "\n";
+        for (int i = 0; i < (int)recordings.size(); ++i) std::cout << (i == rec_sel ? "> " : "  ") << terminalSafe(recordings[i]) << "\n";
         std::cout << "\nq/g back\n";
     } else {
         std::cout << title << "\n" << body << "\n\ne/q/g back\n";

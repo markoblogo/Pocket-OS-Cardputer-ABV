@@ -35,7 +35,7 @@ Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
 - Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
-- Voice/Record: WAV voice notes, RAM-first capture, save/play/delete, continuous playback, waveform.
+- Voice/Record: one RAM-first 20-second WAV voice-note mode, save/play/delete, continuous playback, waveform.
 - Read/Reader: TXT books, English/Russian display, speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer, alarm.
@@ -65,7 +65,7 @@ App highlights:
 - Listen: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle.
 - Read: Up/Down line, Left/Right page, `1` speed mode, OK pause/resume in speed mode.
 - Write: `1` new/edit, Backspace delete from list.
-- Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays saved recording. Target max is 30s with RAM fallback shown on screen.
+- Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.
 - Routines: OK toggles, `1` next day, Right stats, Left manage.
 - Transfer: OK starts AP, GO stops it.
 
@@ -101,7 +101,7 @@ Use 8.3-safe filenames for now.
 Wi-Fi AP:
 
 - SSID: `ABVX-Cardputer`
-- Password: `cardputer`
+- Password: generated for each Transfer session and shown on Cardputer.
 - URL: `http://192.168.4.1`
 
 Useful endpoints:

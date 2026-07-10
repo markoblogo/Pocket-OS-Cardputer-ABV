@@ -6,7 +6,7 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps. P
 
 - Launcher: large monochrome list UI, app navigation, battery indicator.
 - Music: MP3 files from `/sdcard/music`, double-buffered 16 kHz mono playback, waveform, volume, shuffle, prev/next.
-- Record: WAV notes in `/sdcard/rec` or `/sdcard/RECS`, RAM-first capture, recording waveform, continuous playback, delete confirmation.
+- Record: one hardware-verified 20-second 8 kHz/8-bit WAV mode, RAM-first capture, waveform, playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
 - Files: SD browser, known file opening, unsupported file info, delete confirmation.
@@ -14,7 +14,7 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps. P
 - Habits: routines list, daily checks, manual next-day rollover, 7D/30D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Transfer/Connections: Wi-Fi AP, ping/status/list/download/write-test, small upload limit.
+- Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, 64 KB small upload limit.
 
 ## Product reframing
 
@@ -37,7 +37,7 @@ The apps are no longer the top-level product idea. They are implementation modul
 
 ## Known limitations
 
-- Recorder is RAM-first MVP. It can use longer PSRAM buffers, but true SD streaming recorder is postponed.
+- Recorder is RAM-first because Cardputer ADV has no PSRAM and live SD writes during microphone capture are unsafe.
 - Clock resets after full power-off until time sync exists.
 - Notes editor is LAT/plain text only; Cyrillic files are view-only.
 - Reader Cyrillic is custom/best-effort; French/Ukrainian polish is postponed.

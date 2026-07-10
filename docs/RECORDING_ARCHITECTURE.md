@@ -1,79 +1,30 @@
 # Recording Architecture
 
-Goal: reliable quick voice notes first, long-form recording later.
+Voice is optimized for quick memory capture, not meetings.
 
-## Current implementation
+## Current hardware-verified design
 
-Recorder uses a RAM-first design:
+- One recording mode: up to 20 seconds.
+- Format: mono PCM WAV, 8 kHz, 8-bit.
+- Memory: about 160 KB for the full recording.
+- Capture is RAM-first.
+- SD is written only after `M5.Mic.end()`.
+- OK/GO stops and saves; reaching 20 seconds auto-saves.
+- Playback streams WAV/PCM from SD in bounded chunks.
 
-1. Stop speaker.
-2. Start microphone at 16 kHz, mono, signed 16-bit PCM.
-3. Capture into PSRAM/RAM buffer.
-4. On OK/GO or buffer full, stop mic.
-5. Save WAV to SD after recording has ended.
-6. Restart speaker for playback/UI sounds.
+This is required by Cardputer ADV hardware: it has no PSRAM, and live SD writes while microphone capture is active produced `EIO` and SD-state loss. The removed live-streaming path must not be restored without a separate hardware design and stress test.
 
-This avoids simultaneous microphone capture and SD writes, which has been unstable on Cardputer ADV during hardware testing.
+## Compatibility
 
-## Current duration policy
+Playback accepts mono PCM WAV at 8 or 16 bits and validates sample rates to 8-48 kHz. Existing 16 kHz/16-bit recordings remain playable.
 
-Voice is for quick memory notes, not meetings.
+## Failure policy
 
-Target: 30 seconds.
+- RAM allocation failure stops capture without touching SD.
+- Save errors are visible and partial output is removed when possible.
+- Filename exhaustion fails closed instead of overwriting an existing recording.
+- Malformed or unsupported WAV files show an error instead of reaching the speaker with unchecked parameters.
 
-Fallback allocation order:
+## Later, only if needed
 
-```text
-30s, 20s, 10s, 5s, 3s, 2s, 1s
-```
-
-The UI shows the actual allocated `MAX`, so the device does not promise a longer recording than RAM can hold on that boot.
-
-At 16 kHz mono 16-bit PCM:
-
-```text
-10s ~= 320 KB
-20s ~= 640 KB
-30s ~= 960 KB
-```
-
-## Timing diagnostics
-
-The recording screen currently shows both factual PCM time and wall-clock time:
-
-```text
-PCM:<seconds from samples>
-CLK:<wall clock seconds>
-CH:<mic chunks> TAKE:<last copied samples>
-```
-
-This is intentional while diagnosing why hardware captures about 5 seconds of PCM while the visible wall-clock may show about 2 seconds. If PCM and playback duration match, the recorder is saving valid audio and only the UI clock/sample pacing needs calibration.
-
-## Save strategy
-
-After recording stops, the WAV file is written to SD. Short notes use a simple contiguous write; longer notes use small chunks with short yields.
-
-If save fails, the app shows a visible error and removes the partial file when possible.
-
-## Playback strategy
-
-Playback streams WAV/PCM from SD in chunks. It does not load the whole recording into RAM.
-
-Before playback, Recorder rejects obviously invalid files:
-
-- bad WAV header;
-- empty file;
-- extremely short/broken recording.
-
-Broken files show `BAD REC` instead of crashing/rebooting.
-
-## Why not stream recording directly to SD yet
-
-Direct live SD writes while recording previously caused I/O errors and SD state loss. A future long recorder should use a dedicated ring buffer and isolated writer task, then be tested separately.
-
-## Future Record v2/v3
-
-- Prove 20-30 second saves on hardware.
-- Playback progress.
-- Optional lower sample rate mode for longer notes.
-- Ring-buffer writer task for multi-minute recordings after SD stability work.
+Multi-minute recording requires a separate architecture. It is not part of the current product roadmap.

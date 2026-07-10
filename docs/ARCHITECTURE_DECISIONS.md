@@ -148,15 +148,16 @@ Future transfer should be redesigned as a staged/chunked state machine and teste
 
 Current safe design:
 
-- RAM/PSRAM-first recording;
+- one 20-second 8 kHz/8-bit mode;
+- RAM-first recording;
 - save to SD only after recording stops;
-- continuous playback from RAM buffer.
+- chunked playback from SD.
 
 Reason:
 
 - Live SD writes during microphone capture caused I/O errors and SD state loss.
 
-If longer recording remains unstable, limit firmware to the proven duration and move long recording to a dedicated R&D task.
+Multi-minute recording is outside the current roadmap.
 
 ## Reader
 

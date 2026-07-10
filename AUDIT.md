@@ -1,179 +1,54 @@
-# ABVx Firmware Audit
+# ABVx Release Audit
 
-This document records the current engineering audit state for the minimal ABVx Cardputer firmware.
+Scope: first-party firmware, build/configuration, simulator, upload tool, and project documentation. Vendored M5Unified, M5GFX, minimp3, and ESP-IDF are treated as privileged dependency boundaries.
 
-## Current baseline
+## Baseline
 
-Project: `/Volumes/Work/Work/cardputer-abvx-minimal`
+- Target: M5Stack Cardputer ADV / ESP32-S3FN8.
+- ESP-IDF: 5.4.2.
+- Baseline and hardened firmware builds succeeded.
+- Simulator builds with `-Wall -Wextra`.
+- Python uploader passes bytecode compilation.
+- Hardware verified: Music playback and one 20-second Voice recording with SD files remaining available.
 
-Target hardware: M5Stack Cardputer ADV / ESP32-S3.
+## Hardening completed
 
-Build baseline:
+- Removed hidden Agent runtime paths.
+- Voice now has one RAM-first 20-second mode; live SD recording is disabled and removed from the release surface.
+- Message return routing uses one typed state instead of four stale flags.
+- AP password is random for each Transfer session and displayed only while active.
+- AP accepts one station at a time.
+- Large upload remains disabled; small upload is limited to 64 KB.
+- Removed staged upload routes from the release surface; small upload has bounded receive timeouts.
+- Upload client bounds and sanitizes HTTP responses.
+- Simulator sanitizes SD-derived filenames before terminal output.
+- Notes and recordings fail closed on filename exhaustion instead of overwriting existing files.
+- WAV playback accepts only mono PCM, 8/16-bit, 8-48 kHz.
+- SD-derived app lists and state collections have explicit entry caps.
+- Download filenames are sanitized before use in HTTP headers.
 
-```sh
-. ~/esp/esp-idf-v5.4.2/export.sh
-idf.py build
-```
+## Current security model
 
-Latest verified firmware artifact:
+Transfer is manually enabled and creates a WPA2 AP. The random password shown on Cardputer is the admission credential. HTTP is intentionally local and unencrypted inside that temporary AP. Stopping Transfer shuts down HTTP and Wi-Fi.
 
-```text
-build/cardputer-abvx-minimal.bin
-```
+Physical possession, removable-SD confidentiality, secure boot, flash encryption, and trusted build workstation integrity remain deployment assumptions rather than application guarantees.
 
-The firmware has been repeatedly tested on real Cardputer ADV hardware. Core apps currently work at MVP level: Music, Record, Reader, Notes, Files, Time, Habits, Randomizer, Settings, and Connections. Agent quick actions are intentionally hidden from the launcher until Agent becomes a real command/AI layer.
+## Residual risks
 
-## Hardware assumptions verified
+- `main/main.cpp` remains monolithic. Split input, storage, audio, transfer, and UI only through hardware-tested incremental refactors.
+- SD hot removal and electrical faults still require manual Settings -> SD Reprobe.
+- Text files and directory lists are bounded, but malicious media safety still depends partly on FatFs, minimp3, and M5 libraries.
+- Small upload writes from the HTTP task; this is acceptable only for the 64 KB release limit. Large transfer needs a new architecture.
+- No automated hardware test harness exists.
+- Clock resets after full power-off until Companion/network time sync exists.
 
-- Display: 240 x 135 ST7789V2 class display.
-- MCU: ESP32-S3, 8 MB flash target.
-- Keyboard: Cardputer matrix keyboard through TCA8418-style raw events.
-- Storage: microSD through SPI/SDSPI, CS on GPIO 12.
-- Audio: M5Unified speaker/mic paths work on device.
-- Speaker output: `M5.Speaker.playRaw(...)` is proven by Audio Lab history and current Music/Record playback.
-- Mic input: current Record app writes 16-bit mono 16 kHz WAV.
-- USB runtime serial is not relied on for transfer. Connections Wi-Fi AP is the current transfer path.
+## Release smoke test
 
-## Audit fixes already applied
-
-### Upload/session safety
-
-- Chunk upload now uses smaller chunks and retries in `tools/cardputer_upload.py`.
-- Firmware enforces a chunk size cap.
-- `/api/upload-abort` is restricted to an active upload session and matching path.
-- `upload-chunk` and `upload-finish` also require an active matching session.
-- Stopping Connections clears upload session state.
-
-### Audio/heap stability
-
-- MP3 frame decode buffer is reused instead of allocated per audio chunk.
-- PCM chunk reserves capacity before decode.
-- Dead MP3 sync helper code was removed.
-
-### SD/write reliability
-
-- `flushAndClose()` centralizes flush/close checks for important writes.
-- Config writes report RAM fallback if flush/close fails.
-- Notes remove a newly-created note if write/close fails.
-- Habits state/log/config writes now check close paths more consistently.
-- Recorder detects short/failed writes, shows `WRITE ERR`, and removes a failed WAV on stop.
-- FATFS open-file limit was raised from 5 to 8.
-
-### UI/lifecycle consistency
-
-- Message routing is centralized through `showMessage(...)`.
-- Message return targets no longer rely on stale per-screen flag state.
-
-## Current risk register
-
-### P0: Wi-Fi upload architecture
-
-Current upload still writes SD data inside HTTP handlers. This works for small files and may work with conservative chunk upload, but it is the highest remaining runtime-risk area.
-
-Safer future design:
-
-- HTTP handler receives small metadata/chunk request.
-- Main loop performs SD write outside the HTTP server context.
-- `/api/status` reports queued/running/done/error.
-- Upload tool polls status.
-
-Do this if large MP3 upload still drops AP or returns connection reset.
-
-### P1: Monolithic `main.cpp`
-
-`main/main.cpp` is now a large single file. This was acceptable for rapid MVP development but slows safe changes.
-
-Recommended extraction order:
-
-1. `input.*` for key normalization.
-2. `storage.*` for SD paths, safe writes, list helpers.
-3. `audio.*` for MP3/PCM/recorder helpers.
-4. `ui.*` for theme/drawing primitives.
-5. App modules only after the helpers are stable.
-
-Do not do a broad rewrite before the next hardware-tested release.
-
-### P1: SD lifecycle and hot-remove/remount
-
-`sd_ready` is cached after first successful mount. If SD is removed or electrically glitches, apps may keep assuming SD is available.
-
-Current mitigation:
-
-- Settings exposes a manual SD reprobe action.
-- Automatic destructive remount on scan miss is avoided because it caused global `No SD` behavior on hardware.
-
-Future fix:
-
-- Add a lightweight SD health probe before writes.
-- On repeated write/read failure, mark SD unavailable and show a clear error.
-- Keep remount user-initiated or guarded by clear repeated failure criteria.
-
-### P2: Time persistence
-
-Clock, timer, and alarm are runtime only. Full power-off resets time. This is acceptable for now because reliable sync is postponed.
-
-Future fix:
-
-- Set time once through Connections/Mac sync.
-- Consider storing last manually-set time only as a hint, not as reliable wall clock.
-
-### P2: Text/font layer
-
-English and Russian are usable. French accents and Ukrainian-specific glyph coverage are not finalized.
-
-Future fix:
-
-- Define a formal supported glyph set.
-- Add a compact font/glyph table for Cyrillic plus selected Latin accents.
-- Keep input separate from display: translit input can remain for RU notes.
-
-### P2: File manager delete policy
-
-Files supports delete confirmation for files. There is no trash/recycle and no folder delete.
-
-Future fix:
-
-- Keep folder delete disabled.
-- Add a safer delete screen with file size/path and maybe a second confirmation for `/music` and `/rec`.
-
-### P3: Automated verification
-
-There are no host tests for critical pure logic.
-
-Good first tests:
-
-- path whitelist / 8.3 validation;
-- hidden/macOS file filtering;
-- transliteration cases;
-- message return routing;
-- habit log parsing;
-- upload session state machine.
-
-## Release-readiness checklist
-
-Before tagging a public firmware release:
-
-- Build succeeds from a clean clone.
-- README smoke test passes on real hardware.
-- Music plays at least one real MP3 from SD.
-- Record can save and play a WAV.
-- Reader opens English and Russian TXT.
-- Notes can create/open LAT and RU translit notes.
-- Files can browse and open known file types.
-- Connections ping/list/download/write-test pass.
-- Upload either passes for a real MP3 or is clearly marked experimental.
-- Firmware About screen exists.
-- GitHub Release includes `.bin`, flash command, known limitations, and SD layout.
-
-## Current recommendation
-
-Do not add Browser or AI until the offline shell and transfer layer are stable. Smaller offline-app v2 work can continue after SD stability is hardware-verified.
-
-Best next engineering steps:
-
-1. Hardware-test SD across Music -> Reader -> Notes -> Record -> Files after app switching.
-2. If stable, tag the first test release.
-3. Finish offline apps v2: Record, Reader, Notes, Files, Time, Habits.
-4. Rework Connections upload as queued SD writes outside HTTP handlers.
-5. Then start Text Browser MVP.
-6. Agent/AI remains postponed until app actions and network are reliable.
+1. Boot and launcher navigation.
+2. Music play/stop, waveform, volume, shuffle.
+3. Voice record for 20 seconds, auto-save, playback, delete.
+4. Verify Music, Read, Write, Voice, and Files still see SD.
+5. Reader EN/RU book, speed mode, bookmark reopen.
+6. Notes create/edit/delete and Cyrillic view-only behavior.
+7. Time, Files, Routines, Decide, Settings.
+8. Transfer: random password, ping, list, download, write-test, one small upload, GO shutdown.

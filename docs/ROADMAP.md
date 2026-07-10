@@ -94,7 +94,7 @@ Acceptance:
 Apps stay as implementation modules under Pocket OS actions.
 
 1. Record v2
-   - Stable duration policy based on hardware test.
+   - One hardware-verified 20-second Voice mode.
    - Playback progress.
    - Better duration display.
    - Robust storage failure messages.
@@ -184,33 +184,11 @@ MVP:
 
 No offline nano-LLM. No standalone Agent unless it becomes a real command/AI surface beyond launcher duplication.
 
-## Phase 8: Adventure / GPS / LoRa
+## Parked hardware-dependent work
 
-Goal: use the planned LoRa/GNSS Cardputer ADV module for offline-first outdoor sessions.
+GPS/LoRa work is excluded from the active roadmap until the hardware module is physically available. The existing architecture note is retained only as future reference.
 
 Architecture: `docs/ADVENTURE_LORA_ARCHITECTURE.md`
-
-Implementation order:
-
-- GNSS Lab: read NMEA, show fix/lat/lon/speed/altitude.
-- Journey/Breadcrumb MVP: local GPS track in `/sdcard/journeys`.
-- Running Mode: large distance/pace/time screen.
-- Voice Marks: short recording attached to GPS/time.
-- Mac Companion GPX export.
-- LoRa Lab: PING/RSSI/SNR and duty-cycle-safe packets.
-- Direct Computer Relay MVP: STATUS, GPS_POINT, WORKOUT_SUMMARY, ACK, TIME_SYNC with a computer-connected LoRa module.
-
-Rules:
-
-- GPS/Journey works fully offline.
-- LoRa is sparse direct exchange with a computer/home station, not file transfer.
-- Relay failure never blocks local capture.
-- No Meshtastic, no mesh, no generic LoRa chat/networking in this product track.
-
-Acceptance:
-
-- A walk/run can produce a local journey folder with track data.
-- Later, a computer-connected LoRa station can receive small status/checkpoint packets without SD/file sync.
 
 ## Final polish: Visual Layer
 

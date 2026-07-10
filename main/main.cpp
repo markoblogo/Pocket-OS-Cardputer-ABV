@@ -63,6 +63,9 @@ constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
 constexpr size_t MAX_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 2 * 1024;
+constexpr size_t MAX_LIST_ENTRIES = 256;
+constexpr size_t MAX_STATE_RECORDS = 256;
+constexpr size_t MAX_HABITS = 64;
 constexpr int READER_LINES_PER_PAGE = 4;
 constexpr int SPEED_WPM_MIN = 350;
 constexpr int SPEED_WPM_MAX = 1000;
@@ -83,29 +86,14 @@ volatile bool connection_dirty = false;
 int connection_req_count = 0;
 char connection_last_endpoint[32] = "-";
 char connection_last_error[64] = "none";
+char connection_ap_password[16] = "--------";
 volatile bool connection_upload_active = false;
 volatile int connection_upload_done = 0;
 volatile int connection_upload_total = 0;
-bool connection_upload_session = false;
-std::string connection_upload_path;
-std::string connection_upload_original_name;
-FILE* connection_upload_file = nullptr;
-std::string connection_upload_full_path;
-enum class ConnectionUploadOp { None = 0, Begin = 1, Chunk = 2, Finish = 3, Abort = 4 };
-volatile ConnectionUploadOp connection_pending_op = ConnectionUploadOp::None;
-volatile bool connection_pending_done = false;
-volatile bool connection_pending_ok = false;
-std::string connection_pending_api_path;
-std::string connection_pending_full_path;
-std::string connection_pending_original_name;
-std::string connection_pending_error;
-std::vector<uint8_t> connection_pending_chunk;
-size_t connection_pending_total = 0;
-size_t connection_pending_offset = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Dashboard, Agent, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Dashboard, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -177,13 +165,9 @@ uint32_t marquee_last_frame_ms = 0;
 
 Screen screen = Screen::Launcher;
 int launcher_index = 0;
-int agent_cursor = 0;
 std::string message_title;
 std::string message_body;
-bool message_returns_music = false;
-bool message_returns_notes = false;
-bool message_returns_files = false;
-bool message_returns_recorder = false;
+MessageReturn message_return = MessageReturn::Launcher;
 uint32_t message_hold_until_ms = 0;
 ResumeTarget last_resume_target = ResumeTarget::Music;
 
@@ -244,16 +228,10 @@ int decoded_chunks = 0;
 int music_underruns = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
-constexpr int REC_LONG_SAMPLE_RATE = 8000;
+constexpr int REC_RECORD_SAMPLE_RATE = 8000;
+constexpr uint16_t REC_RECORD_BITS = 8;
+constexpr uint32_t REC_RECORD_SECONDS = 20;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
-constexpr uint32_t REC_SAFE_SECONDS = 30;
-constexpr uint32_t REC_MAX_SECONDS = REC_SAFE_SECONDS;
-constexpr uint32_t REC_PRESET_SHORT_SECONDS = 5;
-constexpr uint32_t REC_PRESET_LONG_SECONDS = 20;
-// Cardputer ADV has no PSRAM. Direct SD writes while the microphone is active
-// return EIO on hardware, so both presets capture to RAM and save after Mic.end().
-constexpr bool REC_STREAM_RECORDING_ENABLED = false;
-constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 constexpr uint32_t REC_STOP_GRACE_MS = 120;
 constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
@@ -264,9 +242,6 @@ std::vector<int16_t> rec_play_all;
 std::vector<int16_t> rec_play_next_chunk;
 bool rec_play_current_last = false;
 bool rec_play_next_last = false;
-FILE* rec_record_file = nullptr;
-bool rec_streaming_record = false;
-std::string rec_stream_path;
 struct RecCaptureChunk {
     uint8_t* data = nullptr;
     size_t used = 0;
@@ -280,11 +255,11 @@ uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
 bool rec_play_next_ready = false;
-uint32_t rec_target_seconds = REC_PRESET_SHORT_SECONDS;
-uint32_t rec_requested_seconds = REC_PRESET_SHORT_SECONDS;
-uint32_t rec_target_ms = REC_PRESET_SHORT_SECONDS * 1000u;
-uint32_t rec_record_sample_rate = REC_SAMPLE_RATE;
-uint16_t rec_record_bits = 16;
+uint32_t rec_target_seconds = REC_RECORD_SECONDS;
+uint32_t rec_requested_seconds = REC_RECORD_SECONDS;
+uint32_t rec_target_ms = REC_RECORD_SECONDS * 1000u;
+uint32_t rec_record_sample_rate = REC_RECORD_SAMPLE_RATE;
+uint16_t rec_record_bits = REC_RECORD_BITS;
 uint16_t rec_play_bits = 16;
 std::vector<uint8_t> rec_u8_buffer;
 std::vector<uint8_t> rec_play_u8_buffer;
@@ -334,15 +309,8 @@ std::vector<std::string> random_history;
 
 bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
-void cleanupStreamingRecordingTemp(bool remove_file);
 void clearCaptureChunks();
 bool appendCaptureChunk(const void* data, size_t byte_count);
-static std::string recStreamWriteErrorText(int err_no)
-{
-    if (err_no == 0) return "stream write";
-    return std::string("stream write: ") + std::to_string(err_no) + " " + std::strerror(err_no);
-}
-
 bool flushAndClose(FILE* f)
 {
     if (!f) return false;
@@ -419,10 +387,7 @@ void showMessage(const std::string& title, const std::string& body, MessageRetur
 {
     message_title = title;
     message_body = body;
-    message_returns_music = ret == MessageReturn::Music;
-    message_returns_notes = ret == MessageReturn::Notes;
-    message_returns_files = ret == MessageReturn::Files;
-    message_returns_recorder = ret == MessageReturn::Recorder;
+    message_return = ret;
     screen = Screen::Message;
 }
 
@@ -614,7 +579,7 @@ void loadReaderState()
             if (p != std::string::npos && p > 4) {
                 std::string name = s.substr(4, p - 4);
                 int line_no = std::max(0, std::atoi(s.substr(p + 1).c_str()));
-                if (!name.empty()) reader_bookmarks[name] = line_no;
+                if (!name.empty() && reader_bookmarks.size() < MAX_STATE_RECORDS) reader_bookmarks[name] = line_no;
             }
         }
     }
@@ -980,6 +945,7 @@ void scanFiles(const std::string& path)
         if (stat(full.c_str(), &st) != 0) continue;
         bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
         file_entries.push_back({name, full, dir_flag, static_cast<size_t>(st.st_size)});
+        if (file_entries.size() >= MAX_LIST_ENTRIES) break;
     }
     closedir(dir);
     std::sort(file_entries.begin() + (files_path == MOUNT_POINT ? 0 : 1), file_entries.end(), [](const FileEntry& a, const FileEntry& b) {
@@ -1047,7 +1013,7 @@ bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate,
     const uint16_t channels = h[22] | (h[23] << 8);
     const uint32_t rate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
     const uint16_t bits = h[34] | (h[35] << 8);
-    if (audio_format != 1 || channels != 1 || (bits != 8 && bits != 16) || rate == 0) {
+    if (audio_format != 1 || channels != 1 || (bits != 8 && bits != 16) || rate < 8000 || rate > 48000) {
         if (err) *err = "wav must be pcm mono 8/16";
         return false;
     }
@@ -1091,6 +1057,7 @@ void scanBooks()
         if (isHidden(name) || !hasTextExt(name)) continue;
         if (sdPathIsDir(std::string(BOOKS_DIR) + "/" + name)) continue;
         books.push_back(name);
+        if (books.size() >= MAX_LIST_ENTRIES) break;
     }
     closedir(dir);
     std::sort(books.begin(), books.end());
@@ -1124,6 +1091,7 @@ void scanNotes()
         if (isHidden(name) || !hasTextExt(name)) continue;
         if (sdPathIsDir(std::string(NOTES_DIR) + "/" + name)) continue;
         notes.push_back(name);
+        if (notes.size() >= MAX_LIST_ENTRIES) break;
     }
     closedir(dir);
     std::sort(notes.begin(), notes.end());
@@ -1153,7 +1121,7 @@ std::string nextNoteName()
             return buf;
         }
     }
-    return "NOTE9999.TXT";
+    return "";
 }
 
 std::string habitDayId()
@@ -1240,7 +1208,7 @@ void saveHabitLogForDay()
             std::string s = line;
             size_t p = s.find('|');
             if (p != std::string::npos && s.substr(0, p) == day) continue;
-            old_lines.push_back(s);
+            if (old_lines.size() < MAX_STATE_RECORDS) old_lines.push_back(s);
         }
         fclose(in);
     }
@@ -1274,7 +1242,7 @@ void scanHabits()
         h.title = s.substr(p1 + 1, p2 - p1 - 1);
         h.active = s.substr(p2 + 1) != "0";
         h.done = false;
-        if (h.active && !h.id.empty() && !h.title.empty()) habits.push_back(h);
+        if (h.active && !h.id.empty() && !h.title.empty() && habits.size() < MAX_HABITS) habits.push_back(h);
     }
     fclose(f);
     loadHabitLogForDay();
@@ -1587,6 +1555,10 @@ bool saveNewNote(std::string* out_name, std::string* err = nullptr)
     if (!ensureNotesDir(err)) return false;
     scanNotes();
     std::string name = nextNoteName();
+    if (name.empty()) {
+        if (err) *err = "note namespace full";
+        return false;
+    }
     std::string path = std::string(NOTES_DIR) + "/" + name;
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) {
@@ -1768,6 +1740,7 @@ void loadMusicIndex()
         size_t sep = s.find('|');
         if (sep == std::string::npos || sep == 0 || sep + 1 >= s.size()) continue;
         music_titles[s.substr(0, sep)] = s.substr(sep + 1);
+        if (music_titles.size() >= MAX_STATE_RECORDS) break;
     }
     fclose(f);
 }
@@ -1790,6 +1763,7 @@ void scanMusic()
         if (isHidden(name) || !hasMp3Ext(name)) continue;
         if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
         tracks.push_back(name);
+        if (tracks.size() >= MAX_LIST_ENTRIES) break;
     }
     closedir(dir);
     std::sort(tracks.begin(), tracks.end());
@@ -1807,6 +1781,7 @@ void scanRecordings()
         if (isHidden(name) || !hasRecordingExt(name)) continue;
         if (sdPathIsDir(recordings_dir + "/" + name)) continue;
         recordings.push_back(name);
+        if (recordings.size() >= MAX_LIST_ENTRIES) break;
     }
     closedir(dir);
     std::sort(recordings.begin(), recordings.end());
@@ -2100,10 +2075,9 @@ void updateAudio()
 }
 
 
-bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::string* err = nullptr)
+bool startRecording(std::string* err = nullptr)
 {
     stopPlayback();
-    cleanupStreamingRecordingTemp(true);
     clearCaptureChunks();
     active_recording_name = newRecordingNameFromMillis();
     rec_samples_written = 0;
@@ -2114,52 +2088,18 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    // Short preset keeps 16 kHz/16-bit quality. Long preset uses telephone-grade
-    // 8 kHz/8-bit PCM so 20 seconds fit in the same RAM budget (~160 KB).
-    target_seconds = std::max(REC_MIN_SECONDS, std::min<uint32_t>(target_seconds, REC_MAX_SECONDS));
-    rec_requested_seconds = target_seconds;
-    rec_target_seconds = target_seconds;
-    rec_target_ms = target_seconds * 1000u;
-    const bool long_preset = target_seconds >= REC_PRESET_LONG_SECONDS;
-    rec_record_sample_rate = long_preset ? REC_LONG_SAMPLE_RATE : REC_SAMPLE_RATE;
-    rec_record_bits = long_preset ? 8 : 16;
-    rec_streaming_record = REC_STREAM_RECORDING_ENABLED && (target_seconds >= REC_PRESET_LONG_SECONDS);
-    if (rec_streaming_record) {
-        if (!ensureRecordingsDir(err)) {
-            if (err) *err = "sd mount";
-            rec_streaming_record = false;
-            return false;
-        }
-        rec_capture_capacity = static_cast<size_t>(target_seconds) * rec_record_sample_rate;
-        rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
-        std::string path = recordings_dir + "/" + active_recording_name;
-        for (int i = 0; i < 20; ++i) {
-            struct stat st = {};
-            if (stat(path.c_str(), &st) != 0) break;
-            active_recording_name = newRecordingNameFromMillis();
-            path = recordings_dir + "/" + active_recording_name;
-        }
-        rec_record_file = fopen(path.c_str(), "wb");
-        if (!rec_record_file) {
-            if (err) *err = std::string("open: ") + std::strerror(errno);
-            rec_streaming_record = false;
-            return false;
-        }
-        rec_stream_path = path;
-        writeWavHeader(rec_record_file, 0, rec_record_sample_rate, rec_record_bits);
-        if (fflush(rec_record_file) != 0) {
-            if (err) *err = "header";
-            cleanupStreamingRecordingTemp(true);
-            return false;
-        }
-    } else {
-        rec_capture_capacity = static_cast<size_t>(target_seconds) * rec_record_sample_rate;
-        rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
-        if (rec_capture_capacity == 0) {
-            if (err) *err = "ram alloc 0";
-            return false;
-        }
-        rec_target_seconds = rec_capture_capacity / rec_record_sample_rate;
+    // Cardputer ADV has no PSRAM. A single telephone-grade 8 kHz/8-bit mode
+    // keeps 20 seconds in ~160 KB RAM, then writes only after Mic.end().
+    rec_requested_seconds = REC_RECORD_SECONDS;
+    rec_target_seconds = REC_RECORD_SECONDS;
+    rec_target_ms = REC_RECORD_SECONDS * 1000u;
+    rec_record_sample_rate = REC_RECORD_SAMPLE_RATE;
+    rec_record_bits = REC_RECORD_BITS;
+    rec_capture_capacity = static_cast<size_t>(REC_RECORD_SECONDS) * rec_record_sample_rate;
+    rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
+    if (rec_capture_capacity == 0) {
+        if (err) *err = "ram alloc 0";
+        return false;
     }
 
     M5.Speaker.end();
@@ -2183,19 +2123,27 @@ bool saveCapturedRecording(std::string* err = nullptr)
     }
     if (!ensureRecordingsDir(err)) return false;
     std::string path = recordings_dir + "/" + active_recording_name;
-    for (int i = 0; i < 20; ++i) {
+    bool unique_path = false;
+    for (int i = 0; i < 1000; ++i) {
+        if (i > 0) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "REC%05lu.WAV", static_cast<unsigned long>(((M5.millis() / 100) + i) % 100000));
+            active_recording_name = buf;
+            path = recordings_dir + "/" + active_recording_name;
+        }
         struct stat st = {};
-        if (stat(path.c_str(), &st) != 0) break;
-        char buf[16];
-        snprintf(buf, sizeof(buf), "REC%05lu.WAV", static_cast<unsigned long>(((M5.millis() / 100) + i + 1) % 100000));
-        active_recording_name = buf;
-        path = recordings_dir + "/" + active_recording_name;
+        if (stat(path.c_str(), &st) != 0) { unique_path = true; break; }
+    }
+    if (!unique_path) {
+        if (err) *err = "record namespace full";
+        return false;
     }
     FILE* f = fopen(path.c_str(), "wb");
     if (!f && recordings_dir != RECORDINGS_FALLBACK_DIR && ensureSdDir(RECORDINGS_FALLBACK_DIR, nullptr)) {
         recordings_dir = RECORDINGS_FALLBACK_DIR;
         path = recordings_dir + "/" + active_recording_name;
-        f = fopen(path.c_str(), "wb");
+        struct stat fallback_st = {};
+        if (stat(path.c_str(), &fallback_st) != 0) f = fopen(path.c_str(), "wb");
     }
     if (!f) {
         if (err) {
@@ -2239,45 +2187,6 @@ bool saveCapturedRecording(std::string* err = nullptr)
     return true;
 }
 
-void cleanupStreamingRecordingTemp(bool remove_file)
-{
-    if (rec_record_file) {
-        fclose(rec_record_file);
-        rec_record_file = nullptr;
-    }
-    if (remove_file && !rec_stream_path.empty()) {
-        unlink(rec_stream_path.c_str());
-    }
-    rec_stream_path.clear();
-    rec_streaming_record = false;
-}
-
-bool finalizeStreamingRecording(std::string* err = nullptr)
-{
-    if (!rec_record_file) {
-        if (err) *err = "open stream";
-        return false;
-    }
-    if (rec_samples_written == 0) {
-        if (err) *err = "empty";
-        cleanupStreamingRecordingTemp(true);
-        return false;
-    }
-    if (fseek(rec_record_file, 0, SEEK_SET) != 0) {
-        if (err) *err = "seek failed";
-        cleanupStreamingRecordingTemp(false);
-        return false;
-    }
-    writeWavHeader(rec_record_file, rec_samples_written, rec_record_sample_rate, rec_record_bits);
-    if (fflush(rec_record_file) != 0) {
-        if (err) *err = "flush";
-        cleanupStreamingRecordingTemp(false);
-        return false;
-    }
-    cleanupStreamingRecordingTemp(false);
-    return true;
-}
-
 void stopRecording(bool save)
 {
     rec_stopped_ms = M5.millis();
@@ -2290,19 +2199,10 @@ void stopRecording(bool save)
     std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
     if (save && !failed) {
         std::string err;
-        bool ok = true;
-        if (rec_streaming_record) {
-            ok = finalizeStreamingRecording(&err);
-        } else {
-            ok = saveCapturedRecording(&err);
-        }
+        bool ok = saveCapturedRecording(&err);
         if (!ok) {
             failed = true;
             failed_text = err.empty() ? "save failed" : err;
-        }
-    } else if (!save || failed) {
-        if (rec_streaming_record) {
-            cleanupStreamingRecordingTemp(!save || failed);
         }
     }
     M5.Speaker.begin();
@@ -2335,13 +2235,10 @@ void stopRecording(bool save)
     rec_auto_stopped = false;
     rec_stopped_ms = 0;
     clearCaptureChunks();
-    if (rec_record_file) {
-        cleanupStreamingRecordingTemp(!save || failed);
-    }
     rec_capture_capacity = 0;
-    rec_target_ms = REC_PRESET_SHORT_SECONDS * 1000u;
-    rec_record_sample_rate = REC_SAMPLE_RATE;
-    rec_record_bits = 16;
+    rec_target_ms = REC_RECORD_SECONDS * 1000u;
+    rec_record_sample_rate = REC_RECORD_SAMPLE_RATE;
+    rec_record_bits = REC_RECORD_BITS;
     dirty = true;
     blockInput(400);
 }
@@ -2363,39 +2260,22 @@ void updateRecording()
 
         size_t take = std::min(room, rec_buffer.size());
 
-        if (rec_streaming_record) {
-            if (!rec_record_file) {
-                rec_write_error = true;
-                rec_write_error_text = "stream not ready";
-                stopRecording(true);
-                return;
+        bool captured = false;
+        if (rec_record_bits == 8) {
+            rec_u8_buffer.resize(take);
+            for (size_t i = 0; i < take; ++i) {
+                const int32_t unsigned_sample = (static_cast<int32_t>(rec_buffer[i]) + 32768) >> 8;
+                rec_u8_buffer[i] = static_cast<uint8_t>(std::max<int32_t>(0, std::min<int32_t>(255, unsigned_sample)));
             }
-
-            const size_t wrote = fwrite(rec_buffer.data(), sizeof(int16_t), take, rec_record_file);
-            if (wrote != take) {
-                rec_write_error = true;
-                rec_write_error_text = recStreamWriteErrorText(errno);
-                stopRecording(true);
-                return;
-            }
+            captured = appendCaptureChunk(rec_u8_buffer.data(), take);
         } else {
-            bool captured = false;
-            if (rec_record_bits == 8) {
-                rec_u8_buffer.resize(take);
-                for (size_t i = 0; i < take; ++i) {
-                    const int32_t unsigned_sample = (static_cast<int32_t>(rec_buffer[i]) + 32768) >> 8;
-                    rec_u8_buffer[i] = static_cast<uint8_t>(std::max<int32_t>(0, std::min<int32_t>(255, unsigned_sample)));
-                }
-                captured = appendCaptureChunk(rec_u8_buffer.data(), take);
-            } else {
-                captured = appendCaptureChunk(rec_buffer.data(), take * sizeof(int16_t));
-            }
-            if (!captured) {
-                rec_write_error = true;
-                rec_write_error_text = "ram alloc";
-                stopRecording(true);
-                return;
-            }
+            captured = appendCaptureChunk(rec_buffer.data(), take * sizeof(int16_t));
+        }
+        if (!captured) {
+            rec_write_error = true;
+            rec_write_error_text = "ram alloc";
+            stopRecording(true);
+            return;
         }
         rec_samples_written += static_cast<uint32_t>(take);
         ++rec_mic_chunks;
@@ -2404,15 +2284,6 @@ void updateRecording()
         pcm_channels = 1;
         pcm_rate = rec_record_sample_rate;
         if (!display_off) dirty = true;
-
-        if (rec_streaming_record && (rec_mic_chunks % 8u) == 0u) {
-            if (fflush(rec_record_file) != 0) {
-                rec_write_error = true;
-                rec_write_error_text = recStreamWriteErrorText(errno);
-                stopRecording(true);
-                return;
-            }
-        }
 
         if (rec_capture_capacity > 0 && rec_samples_written >= rec_capture_capacity) {
             rec_auto_stopped = true;
@@ -2670,22 +2541,6 @@ bool sdUsage(uint64_t* total, uint64_t* free_bytes)
     return true;
 }
 
-static const char* AGENT_ACTIONS[] = {
-    "OPEN MUSIC",
-    "OPEN READER",
-    "OPEN NOTES",
-    "OPEN RECORD",
-    "OPEN FILES",
-    "OPEN TIME",
-    "OPEN HABITS",
-    "OPEN RANDOM",
-    "OPEN SETTINGS",
-    "OPEN CONNECT",
-    "HELP",
-    "SYSTEM STATUS"
-};
-constexpr int AGENT_ACTION_COUNT = sizeof(AGENT_ACTIONS) / sizeof(AGENT_ACTIONS[0]);
-
 void openLauncherApp(int index)
 {
     if (index >= 0 && index <= 9) last_resume_target = static_cast<ResumeTarget>(index);
@@ -2776,45 +2631,6 @@ void resumeContext()
     dirty = true;
 }
 
-void runAgentAction()
-{
-    if (agent_cursor == 0) { scanMusic(); screen = Screen::MusicList; }
-    else if (agent_cursor == 1) { scanBooks(); screen = Screen::ReaderList; }
-    else if (agent_cursor == 2) { scanNotes(); screen = Screen::NotesList; }
-    else if (agent_cursor == 3) { scanRecordings(); screen = Screen::RecorderList; }
-    else if (agent_cursor == 4) { scanFiles(MOUNT_POINT); screen = Screen::FilesList; }
-    else if (agent_cursor == 5) { time_mode = TimeMode::Clock; clock_base_ms = M5.millis(); screen = Screen::TimeApp; }
-    else if (agent_cursor == 6) { scanHabits(); screen = Screen::HabitsList; }
-    else if (agent_cursor == 7) { random_result = "READY"; screen = Screen::Randomizer; }
-    else if (agent_cursor == 8) { screen = Screen::Settings; }
-    else if (agent_cursor == 9) { screen = Screen::Connections; }
-    else if (agent_cursor == 10) {
-        showMessage("AGENT HELP", "open apps\nstatus/settings\nGO back");
-    }
-    else {
-        int bat = batteryPercent();
-        uint64_t total = 0;
-        uint64_t free_b = 0;
-        char buf[128];
-        if (sdUsage(&total, &free_b) && total >= free_b) {
-            snprintf(buf, sizeof(buf), "BAT %s%% %s\nSD %s free\nSND %s WIFI %s",
-                     bat >= 0 ? std::to_string(bat).c_str() : "--",
-                     themeName(),
-                     formatBytes(free_b).c_str(),
-                     soundName(),
-                     connection_wifi_on ? "ON" : "OFF");
-        } else {
-            snprintf(buf, sizeof(buf), "BAT %s%% %s\nSD --\nSND %s WIFI %s",
-                     bat >= 0 ? std::to_string(bat).c_str() : "--",
-                     themeName(),
-                     soundName(),
-                     connection_wifi_on ? "ON" : "OFF");
-        }
-        showMessage("ABVX STATUS", buf);
-    }
-    blockInput(250);
-}
-
 void pulseUi()
 {
     // Visual glitch effects are disabled for now. They were visually ambiguous
@@ -2896,36 +2712,6 @@ void drawDashboard()
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK RESUME      GO BACK");
-    canvas.pushSprite(0, 0);
-}
-
-void drawAgent()
-{
-    canvas.fillScreen(uiBg());
-    drawCyberAccent();
-    canvas.setTextSize(2);
-    canvas.setTextColor(uiFg(), uiBg());
-    canvas.setCursor(8, 8);
-    canvas.print("AGENT");
-    canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
-    canvas.setCursor(8, 28);
-    canvas.print("offline quick actions");
-    canvas.setTextColor(uiAccent(), uiBg());
-    canvas.setCursor(174, 28);
-    canvas.printf("%d/%d", agent_cursor + 1, AGENT_ACTION_COUNT);
-    canvas.setTextSize(2);
-    int start = std::max(0, agent_cursor - 1);
-    start = std::min(start, std::max(0, AGENT_ACTION_COUNT - 4));
-    for (int i = start; i < std::min(AGENT_ACTION_COUNT, start + 4); ++i) {
-        canvas.setCursor(8, 42 + (i - start) * 20);
-        canvas.setTextColor(i == agent_cursor ? uiBg() : uiFg(), i == agent_cursor ? uiFg() : uiBg());
-        canvas.printf("%c %s", i == agent_cursor ? '>' : ' ', AGENT_ACTIONS[i]);
-    }
-    canvas.setTextSize(1);
-    canvas.setTextColor(uiDim(), uiBg());
-    canvas.setCursor(8, 122);
-    canvas.print("OK RUN   GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -3440,7 +3226,7 @@ void drawRecorderList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(158, 14);
-    canvas.printf("MAX%lus", static_cast<unsigned long>(REC_SAFE_SECONDS));
+    canvas.printf("MAX%lus", static_cast<unsigned long>(REC_RECORD_SECONDS));
 
     const int total = static_cast<int>(recordings.size()) + 1;
     int start = std::max(0, recorder_cursor - 1);
@@ -3476,7 +3262,7 @@ void drawRecorderList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK PLAY  1 NEW  2 NEW LONG BKSP DEL");
+    canvas.print("OK PLAY/NEW     BKSP DEL");
     canvas.pushSprite(0, 0);
 }
 
@@ -4125,6 +3911,7 @@ bool getRequestPath(httpd_req_t* req, std::string* api_path, const char* fallbac
     return true;
 }
 
+#if 0  // Staged uploader query helpers retained only with its disabled code.
 bool getQueryValue(httpd_req_t* req, const char* key, char* out, size_t out_len)
 {
     char query[224] = {};
@@ -4142,6 +3929,7 @@ bool getQueryUint(httpd_req_t* req, const char* key, size_t* out)
     *out = static_cast<size_t>(parsed);
     return true;
 }
+#endif
 
 bool isAllowedApiPath(const std::string& path)
 {
@@ -4336,6 +4124,7 @@ void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, h
     httpd_resp_send_err(req, code, reason);
 }
 
+#if 0  // Removed staged uploader: cross-task shared state was not race-safe.
 void cleanupUploadSession(bool remove_partial)
 {
     if (connection_upload_file) {
@@ -4491,6 +4280,7 @@ void processConnectionUploadOps()
     connection_dirty = true;
     dirty = true;
 }
+#endif
 
 bool ensureConnectionWriteDir(char* err, size_t err_len)
 {
@@ -4657,7 +4447,11 @@ esp_err_t connectionDownloadHandler(httpd_req_t* req)
     setConnectionStatus("/api/download", "none");
     httpd_resp_set_type(req, "application/octet-stream");
     char disp[144];
-    snprintf(disp, sizeof(disp), "attachment; filename=\"%.96s\"", baseName(api_path).c_str());
+    std::string download_name = baseName(api_path);
+    for (char& c : download_name) {
+        if (c == '"' || c == '\\' || static_cast<unsigned char>(c) < 32) c = '_';
+    }
+    snprintf(disp, sizeof(disp), "attachment; filename=\"%.96s\"", download_name.c_str());
     httpd_resp_set_hdr(req, "Content-Disposition", disp);
     uint8_t buf[1024];
     bool ok = true;
@@ -4766,10 +4560,18 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
     connection_upload_total = req->content_len;
     setConnectionStatus(endpoint, "uploading");
     bool ok = true;
+    int timeout_count = 0;
+    const uint32_t receive_started_ms = M5.millis();
     while (remaining > 0) {
         int want = std::min<int>(remaining, sizeof(buf));
         int got = httpd_req_recv(req, buf, want);
-        if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (got == HTTPD_SOCK_ERR_TIMEOUT) {
+            ++timeout_count;
+            if (timeout_count <= 3 && M5.millis() - receive_started_ms < 15000) continue;
+            ok = false;
+            snprintf(err, sizeof(err), "recv timeout");
+            break;
+        }
         if (got <= 0) {
             ok = false;
             snprintf(err, sizeof(err), "recv failed");
@@ -4781,6 +4583,7 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
             break;
         }
         remaining -= got;
+        timeout_count = 0;
         connection_upload_done = req->content_len - remaining;
         connection_dirty = true;
         vTaskDelay(1);
@@ -4809,6 +4612,7 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
     return httpd_resp_sendstr(req, reply);
 }
 
+#if 0  // Kept out of the release surface; small uploads use /api/upload.
 esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
 {
     ++connection_req_count;
@@ -4964,6 +4768,7 @@ esp_err_t connectionUploadAbortHandler(httpd_req_t* req)
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK ABORT\n");
 }
+#endif
 
 bool ensureConnectionStack(char* err, size_t err_len)
 {
@@ -5046,11 +4851,6 @@ bool startConnectionHttp(char* err, size_t err_len)
     if (!reg("/api/write-test", HTTP_GET, connectionWriteTestHandler)) return false;
     if (!reg("/api/write-test", HTTP_POST, connectionWriteTestHandler)) return false;
     if (!reg("/api/upload", HTTP_POST, connectionUploadHandler)) return false;
-    if (!reg("/api/upload-begin", HTTP_POST, connectionUploadBeginHandler)) return false;
-    if (!reg("/api/upload-chunk", HTTP_POST, connectionUploadChunkHandler)) return false;
-    if (!reg("/api/upload-finish", HTTP_POST, connectionUploadFinishHandler)) return false;
-    if (!reg("/api/upload-abort", HTTP_POST, connectionUploadAbortHandler)) return false;
-
     connection_http_on = true;
     return true;
 }
@@ -5065,12 +4865,14 @@ bool startConnections(char* err, size_t err_len)
 
     wifi_config_t ap_config = {};
     const char* ssid = "ABVX-Cardputer";
-    const char* pass = "cardputer";
+    snprintf(connection_ap_password, sizeof(connection_ap_password), "%08lX",
+             static_cast<unsigned long>(esp_random()));
+    const char* pass = connection_ap_password;
     snprintf(reinterpret_cast<char*>(ap_config.ap.ssid), sizeof(ap_config.ap.ssid), "%s", ssid);
     snprintf(reinterpret_cast<char*>(ap_config.ap.password), sizeof(ap_config.ap.password), "%s", pass);
     ap_config.ap.ssid_len = std::strlen(ssid);
     ap_config.ap.channel = 1;
-    ap_config.ap.max_connection = 2;
+    ap_config.ap.max_connection = 1;
     ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
     esp_err_t rc = esp_wifi_set_mode(WIFI_MODE_AP);
@@ -5096,7 +4898,9 @@ bool startConnections(char* err, size_t err_len)
 
 void stopConnections()
 {
-    resetUploadSession(true);
+    connection_upload_active = false;
+    connection_upload_done = 0;
+    connection_upload_total = 0;
     if (connection_httpd) {
         httpd_stop(connection_httpd);
         connection_httpd = nullptr;
@@ -5128,7 +4932,7 @@ void drawConnections()
         canvas.setCursor(8, 58);
         canvas.print("SSID ABVX-Cardputer");
         canvas.setCursor(8, 70);
-        canvas.print("PASS cardputer");
+        canvas.printf("PASS %s", connection_ap_password);
         canvas.setCursor(8, 82);
         canvas.print("URL  192.168.4.1");
         canvas.setTextColor(uiDim(), uiBg());
@@ -5198,7 +5002,6 @@ void drawIfDirty()
     if (!dirty || display_off) return;
     if (screen == Screen::Launcher) drawLauncher();
     else if (screen == Screen::Dashboard) drawDashboard();
-    else if (screen == Screen::Agent) drawAgent();
     else if (screen == Screen::MusicList) drawMusicList();
     else if (screen == Screen::MusicPlaying) drawMusicPlaying();
     else if (screen == Screen::ReaderList) drawReaderList();
@@ -5301,7 +5104,7 @@ bool handleOneButtonCapture(KeyEvent ev)
     if (c == 'r') {
         last_resume_target = ResumeTarget::Recorder;
         std::string err;
-        if (!startRecording(REC_PRESET_SHORT_SECONDS, &err)) {
+        if (!startRecording(&err)) {
             showMessage("Record failed", err.empty() ? "start" : err);
         }
         blockInput(350);
@@ -5374,20 +5177,6 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Dashboard) {
         if (ev.key == Key::Ok) resumeContext();
-        else if (ev.key == Key::Home || ev.key == Key::Back) {
-            screen = Screen::Launcher;
-            blockInput(250);
-        }
-        dirty = true;
-        return;
-    }
-
-    if (screen == Screen::Agent) {
-        if (ev.key == Key::Up) { agent_cursor = std::max(0, agent_cursor - 1); pulseUi(); }
-        else if (ev.key == Key::Down) { agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 1); pulseUi(); }
-        else if (ev.key == Key::Left) { agent_cursor = std::max(0, agent_cursor - 4); pulseUi(); }
-        else if (ev.key == Key::Right) { agent_cursor = std::min(AGENT_ACTION_COUNT - 1, agent_cursor + 4); pulseUi(); }
-        else if (ev.key == Key::Ok) runAgentAction();
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
@@ -5628,24 +5417,10 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Down) recorder_cursor = std::min(total - 1, recorder_cursor + 1);
         else if (ev.key == Key::Left) recorder_cursor = std::max(0, recorder_cursor - 3);
         else if (ev.key == Key::Right) recorder_cursor = std::min(total - 1, recorder_cursor + 3);
-        else if (ev.key == Key::One) {
-            std::string err;
-            if (!startRecording(REC_PRESET_SHORT_SECONDS, &err)) {
-                showMessage("Record failed", err.empty() ? "start" : err);
-            }
-            blockInput(300);
-        }
-        else if (ev.key == Key::Two) {
-            std::string err;
-            if (!startRecording(REC_PRESET_LONG_SECONDS, &err)) {
-                showMessage("Record failed", err.empty() ? "start" : err);
-            }
-            blockInput(300);
-        }
         else if (ev.key == Key::Ok) {
             std::string err;
             if (recorder_cursor == 0) {
-                if (!startRecording(REC_PRESET_SHORT_SECONDS, &err)) {
+                if (!startRecording(&err)) {
                     showMessage("Record failed", err.empty() ? "start" : err);
                 }
             } else {
@@ -6029,22 +5804,14 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Message) {
         if (M5.millis() < message_hold_until_ms) return;
-        if (message_returns_music && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
-            message_returns_music = false;
-            screen = Screen::MusicList;
-        } else if (message_returns_notes && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
-            message_returns_notes = false;
-            scanNotes();
-            screen = Screen::NotesList;
-        } else if (message_returns_files && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
-            message_returns_files = false;
-            screen = Screen::FilesList;
-        } else if (message_returns_recorder && (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok)) {
-            message_returns_recorder = false;
-            scanRecordings();
-            screen = Screen::RecorderList;
-        } else if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
-            screen = Screen::Launcher;
+        if (ev.key == Key::Home || ev.key == Key::Back || ev.key == Key::Ok) {
+            const MessageReturn target = message_return;
+            message_return = MessageReturn::Launcher;
+            if (target == MessageReturn::Music) screen = Screen::MusicList;
+            else if (target == MessageReturn::Notes) { scanNotes(); screen = Screen::NotesList; }
+            else if (target == MessageReturn::Files) screen = Screen::FilesList;
+            else if (target == MessageReturn::Recorder) { scanRecordings(); screen = Screen::RecorderList; }
+            else screen = Screen::Launcher;
         }
         dirty = true;
     }
@@ -6077,7 +5844,7 @@ extern "C" void app_main(void)
             dirty = true;
         }
         uint32_t now = M5.millis();
-        if ((screen == Screen::Launcher || screen == Screen::Agent) && now < ui_anim_until_ms && now - ui_anim_last_frame_ms >= 33) {
+        if (screen == Screen::Launcher && now < ui_anim_until_ms && now - ui_anim_last_frame_ms >= 33) {
             ui_anim_last_frame_ms = now;
             dirty = true;
         }
@@ -6097,7 +5864,6 @@ extern "C" void app_main(void)
         drawIfDirty();
         processMusicAutostart();
         updateAudio();
-        processConnectionUploadOps();
         updateRecording();
         updateRecordingPlayback();
         updateSpeedReader();
