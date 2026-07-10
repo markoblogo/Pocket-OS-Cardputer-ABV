@@ -43,6 +43,8 @@ constexpr const char* MUSIC_DIR = "/sdcard/music";
 constexpr const char* MUSIC_INDEX_FILE = "/sdcard/music/INDEX.TXT";
 constexpr const char* BOOKS_DIR = "/sdcard/books";
 constexpr const char* NOTES_DIR = "/sdcard/notes";
+constexpr const char* INBOX_DIR = "/sdcard/inbox";
+constexpr const char* INBOX_FILE = "/sdcard/inbox/INBOX.TXT";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
 constexpr const char* RECORDINGS_FALLBACK_DIR = "/sdcard/RECS";
 constexpr const char* HABITS_DIR = "/sdcard/habits";
@@ -54,8 +56,11 @@ constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
 constexpr const char* READER_STATE_FILE = "/sdcard/CARDPTR/READER.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
-constexpr int INPUT_BUF_SIZE = 32 * 1024;
-constexpr int CHUNK_MS = 900;
+// Keep the two queued PCM buffers small enough for a large music library.
+// 59 long filenames plus two 900 ms buffers pushed the no-PSRAM Cardputer
+// over its practical heap limit while preparing the second audio chunk.
+constexpr int INPUT_BUF_SIZE = 16 * 1024;
+constexpr int CHUNK_MS = 400;
 constexpr int AUDIO_OUTPUT_RATE = 16000;
 constexpr bool AUDIO_SAFE_MONO = true;
 constexpr int AUDIO_SAFE_SHIFT = 2;
@@ -95,7 +100,7 @@ volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Dashboard, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, Message };
+enum class Screen { Launcher, Dashboard, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, InboxList, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -178,6 +183,8 @@ std::map<std::string, std::string> music_titles;
 std::vector<std::string> books;
 std::vector<std::string> notes;
 std::vector<std::string> recordings;
+std::vector<std::string> inbox_entries;
+std::vector<std::string> inbox_pending_events;
 std::vector<FileEntry> file_entries;
 FileEntry file_info_entry;
 std::vector<Habit> habits;
@@ -200,9 +207,13 @@ std::string config_status = "RAM";
 std::string recordings_dir = RECORDINGS_DIR;
 int selected_track = 0;
 std::string override_music_path;
+std::string music_scan_status = "NOT SCANNED";
+size_t music_raw_entries = 0;
+size_t music_mp3_entries = 0;
 int selected_book = 0;
 std::string last_reader_book;
 int notes_cursor = 0;
+int inbox_cursor = 0;
 int selected_recording = 0;
 bool shuffle_on = false;
 VolumeMode volume_mode = VolumeMode::Mid;
@@ -749,7 +760,9 @@ bool initSd()
     host.max_freq_khz = 400;
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 8,
+        // Keep enough VFS descriptors for a music stream plus directory and
+        // metadata operations from the other offline apps.
+        .max_files = 16,
         .allocation_unit_size = 16 * 1024,
         .disk_status_check_enable = false,
         .use_one_fat = false,
@@ -793,14 +806,9 @@ bool ensureSdDir(const char* path, std::string* err = nullptr)
         if (mkdir(path, 0775) == 0 || errno == EEXIST) return true;
         const int saved_errno = errno;
         if (attempt == 0) {
-            if (saved_errno == EIO) {
-                manualSdReprobe();
-                DIR* after_reprobe = opendir(path);
-                if (after_reprobe) {
-                    closedir(after_reprobe);
-                    return true;
-                }
-            }
+            // A generic mkdir helper must not unmount/remount the shared SD
+            // filesystem. Reprobe is an explicit Settings action only; doing
+            // it here can invalidate handles owned by Music/Reader/Record.
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
@@ -1104,6 +1112,67 @@ std::string selectedBookPath()
 bool ensureNotesDir(std::string* err = nullptr)
 {
     return ensureSdDir(NOTES_DIR, err);
+}
+
+std::string inboxSafeText(std::string text)
+{
+    for (char& c : text) {
+        if (static_cast<unsigned char>(c) < 32 || c == '|') c = ' ';
+    }
+    if (text.size() > 40) text.resize(40);
+    return text;
+}
+
+void appendInboxEvent(const char* type, const std::string& detail)
+{
+    if (!type || !type[0]) return;
+    inbox_pending_events.push_back("S" + std::to_string(M5.millis() / 1000) + "|" + type + "|" + inboxSafeText(detail));
+    if (inbox_pending_events.size() > 16) inbox_pending_events.erase(inbox_pending_events.begin());
+}
+
+void flushInboxEvents()
+{
+    // Inbox persistence is explicit, not a background SD write. This prevents
+    // a queued event from touching the shared filesystem during normal Music,
+    // Reader, or Recorder operation.
+    if (inbox_pending_events.empty() || !sd_ready || mp3_file || reader_stream_file || screen == Screen::RecorderRecording) return;
+    std::string ignored;
+    if (!ensureSdDir(INBOX_DIR, &ignored)) return;
+    FILE* f = fopen(INBOX_FILE, "ab");
+    if (!f) return;
+    size_t written = 0;
+    for (const std::string& event : inbox_pending_events) {
+        if (fprintf(f, "%s\n", event.c_str()) < 0) break;
+        ++written;
+    }
+    if (!flushAndClose(f)) return;
+    if (written) inbox_pending_events.erase(inbox_pending_events.begin(), inbox_pending_events.begin() + written);
+}
+
+void scanInbox()
+{
+    inbox_entries.clear();
+    if (!initSd()) {
+        inbox_cursor = 0;
+        return;
+    }
+    FILE* f = fopen(INBOX_FILE, "rb");
+    if (!f) {
+        inbox_cursor = 0;
+        return;
+    }
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+        std::string entry(line);
+        while (!entry.empty() && (entry.back() == '\n' || entry.back() == '\r')) entry.pop_back();
+        if (entry.empty()) continue;
+        inbox_entries.push_back(entry);
+        if (inbox_entries.size() > 48) inbox_entries.erase(inbox_entries.begin());
+    }
+    fclose(f);
+    std::reverse(inbox_entries.begin(), inbox_entries.end());
+    if (inbox_entries.empty()) inbox_cursor = 0;
+    else inbox_cursor = std::max(0, std::min(inbox_cursor, static_cast<int>(inbox_entries.size()) - 1));
 }
 
 void scanNotes()
@@ -1824,6 +1893,7 @@ bool loadSelectedBook(std::string* err = nullptr)
         if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
     }
     saveReaderState();
+    appendInboxEvent("READ", active_book_name);
     return true;
 }
 
@@ -2061,19 +2131,94 @@ std::string musicDisplayName(const std::string& file)
 
 void scanMusic()
 {
-    tracks.clear();
-    loadMusicIndex();
+    music_scan_status = "MOUNT";
+    music_raw_entries = 0;
+    music_mp3_entries = 0;
+    bool used_fatfs_fallback = false;
+    FRESULT fatfs_result = FR_OK;
     DIR* dir = openSdDirWithRetry(MUSIC_DIR);
-    if (!dir) return;
-    while (dirent* entry = readdir(dir)) {
-        std::string name = entry->d_name;
-        if (isHidden(name) || !hasMp3Ext(name)) continue;
-        if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
-        tracks.push_back(name);
-        if (tracks.size() >= MAX_LIST_ENTRIES) break;
+    if (!dir) {
+        // Music is entered from an idle launcher, so a single controlled
+        // reprobe here is safe. Never do this from a shared background helper.
+        music_scan_status = "REPROBE";
+        if (!manualSdReprobe()) {
+            music_scan_status = "MOUNT FAIL";
+            return;
+        }
+        dir = openSdDirWithRetry(MUSIC_DIR);
+        if (!dir) {
+            music_scan_status = "DIR FAIL";
+            return;
+        }
     }
-    closedir(dir);
-    std::sort(tracks.begin(), tracks.end());
+    std::vector<std::string> next_tracks;
+    next_tracks.reserve(32);
+    auto collectMusicDir = [&](DIR* current) {
+        errno = 0;
+        while (dirent* entry = readdir(current)) {
+            ++music_raw_entries;
+            std::string name = entry->d_name;
+            if (isHidden(name) || !hasMp3Ext(name)) continue;
+            ++music_mp3_entries;
+            if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
+            next_tracks.push_back(name);
+            if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
+        }
+        const int read_errno = errno;
+        closedir(current);
+        return read_errno;
+    };
+
+    int read_errno = collectMusicDir(dir);
+    if (music_raw_entries == 0) {
+        // A successful opendir followed by an empty readdir has occurred
+        // after transient Cardputer SD failures. Retry once while still in
+        // Music entry, before exposing a false 0/0 list to the user.
+        music_scan_status = "RETRY";
+        if (manualSdReprobe()) {
+            next_tracks.clear();
+            music_raw_entries = 0;
+            music_mp3_entries = 0;
+            DIR* retry_dir = openSdDirWithRetry(MUSIC_DIR);
+            if (retry_dir) read_errno = collectMusicDir(retry_dir);
+        }
+    }
+    if (music_raw_entries == 0) {
+        // FATFS fallback bypasses the POSIX VFS directory adapter. On the
+        // Cardputer SD stack the VFS layer can report end-of-directory while
+        // the mounted FAT volume still contains valid short-name entries.
+        FF_DIR fat_dir = {};
+        FILINFO info = {};
+        fatfs_result = f_opendir(&fat_dir, "0:/music");
+        if (fatfs_result == FR_OK) {
+            used_fatfs_fallback = true;
+            next_tracks.clear();
+            music_raw_entries = 0;
+            music_mp3_entries = 0;
+            while ((fatfs_result = f_readdir(&fat_dir, &info)) == FR_OK && info.fname[0]) {
+                ++music_raw_entries;
+                std::string name = info.fname;
+                if (isHidden(name) || !hasMp3Ext(name)) continue;
+                ++music_mp3_entries;
+                if (info.fattrib & AM_DIR) continue;
+                next_tracks.push_back(name);
+                if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
+            }
+            f_closedir(&fat_dir);
+        }
+    }
+    std::sort(next_tracks.begin(), next_tracks.end());
+    loadMusicIndex();
+    tracks.swap(next_tracks);
+    if (tracks.empty() && used_fatfs_fallback && fatfs_result != FR_OK) {
+        music_scan_status = "FAT " + std::to_string(static_cast<int>(fatfs_result));
+    } else if (tracks.empty() && read_errno != 0 && !used_fatfs_fallback) {
+        music_scan_status = "READ " + std::to_string(read_errno);
+    } else if (used_fatfs_fallback) {
+        music_scan_status = "FAT OK";
+    } else {
+        music_scan_status = "OK";
+    }
     if (selected_track >= static_cast<int>(tracks.size())) selected_track = std::max(0, static_cast<int>(tracks.size()) - 1);
 }
 
@@ -2184,13 +2329,63 @@ bool refillInput()
     return mp3_len > mp3_pos;
 }
 
+bool isValidMp3FrameHeader(const uint8_t* p)
+{
+    if (!p || p[0] != 0xFF || (p[1] & 0xE0) != 0xE0) return false;
+    const int version = (p[1] >> 3) & 0x03;
+    const int layer = (p[1] >> 1) & 0x03;
+    const int bitrate = (p[2] >> 4) & 0x0F;
+    const int sample_rate = (p[2] >> 2) & 0x03;
+    return version != 1 && layer == 1 && bitrate != 0 && bitrate != 15 && sample_rate != 3;
+}
+
 size_t findSync(size_t start)
 {
-    for (size_t i = start; i + 1 < mp3_len; ++i) {
-        if (mp3_buf[i] == 0xFF && (mp3_buf[i + 1] & 0xE0) == 0xE0) return i;
+    for (size_t i = start; i + 3 < mp3_len; ++i) {
+        if (isValidMp3FrameHeader(mp3_buf.data() + i)) return i;
     }
     return std::string::npos;
 }
+
+bool seekPastId3(FILE* f, std::string* err = nullptr)
+{
+    uint8_t header[10] = {};
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        if (err) *err = "seek failed";
+        return false;
+    }
+    const size_t n = fread(header, 1, sizeof(header), f);
+    if (n < sizeof(header) || std::memcmp(header, "ID3", 3) != 0) {
+        if (fseek(f, 0, SEEK_SET) != 0) {
+            if (err) *err = "seek failed";
+            return false;
+        }
+        return true;
+    }
+    for (int i = 6; i < 10; ++i) {
+        if (header[i] & 0x80) {
+            if (err) *err = "bad ID3 size";
+            return false;
+        }
+    }
+    const uint32_t tag_size = (static_cast<uint32_t>(header[6]) << 21) |
+                              (static_cast<uint32_t>(header[7]) << 14) |
+                              (static_cast<uint32_t>(header[8]) << 7) |
+                              static_cast<uint32_t>(header[9]);
+    const long audio_offset = 10L + static_cast<long>(tag_size) + ((header[5] & 0x10) ? 10L : 0L);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        if (err) *err = "size failed";
+        return false;
+    }
+    const long file_size = ftell(f);
+    if (file_size <= audio_offset || fseek(f, audio_offset, SEEK_SET) != 0) {
+        if (err) *err = "bad ID3 offset";
+        return false;
+    }
+    return true;
+}
+
+bool decodeChunk(std::string* err);
 
 bool startPlayback(std::string* err = nullptr)
 {
@@ -2208,6 +2403,11 @@ bool startPlayback(std::string* err = nullptr)
         }
         return false;
     }
+    if (!seekPastId3(mp3_file, err)) {
+        fclose(mp3_file);
+        mp3_file = nullptr;
+        return false;
+    }
     mp3dec_init(&mp3_dec);
     mp3_buf.assign(INPUT_BUF_SIZE, 0);
     mp3_frame_pcm.assign(MINIMP3_MAX_SAMPLES_PER_FRAME, 0);
@@ -2219,14 +2419,21 @@ bool startPlayback(std::string* err = nullptr)
     pcm_next_ready = false;
     decoded_chunks = 0;
     music_underruns = 0;
+    playing = true;
+    if (!decodeChunk(err)) {
+        stopPlayback();
+        return false;
+    }
     M5.Mic.end();
     M5.Speaker.begin();
     applyVolume();
-    playing = true;
-    playback_decode_after_ms = M5.millis() + 150;
+    decoded_chunks = 1;
+    M5.Speaker.playRaw(pcm_chunk.data(), pcm_chunk.size(), pcm_rate, false);
+    playback_decode_after_ms = M5.millis() + 100;
     screen = Screen::MusicPlaying;
     dirty = true;
     blockInput(400);
+    appendInboxEvent("LISTEN", override_music_path.empty() ? tracks[selected_track] : override_music_path.substr(override_music_path.find_last_of('/') + 1));
     return true;
 }
 
@@ -2533,6 +2740,7 @@ void stopRecording(bool save)
             snprintf(stop_line, sizeof(stop_line), "%s %ldms", rec_auto_stopped ? "AUTO" : "MAN", static_cast<long>(delta_ms));
         }
         std::string dur_line = std::string(rec_dur) + " sec\n" + std::string(stop_line);
+        appendInboxEvent("VOICE", active_recording_name);
         showMessage("Record saved", active_recording_name + "\n" + dur_line, MessageReturn::Recorder);
     }
     rec_write_error = false;
@@ -2861,6 +3069,12 @@ void openLauncherApp(int index)
     else if (index == 7) { scanHabits(); screen = Screen::HabitsList; blockInput(250); }
     else if (index == 8) { screen = Screen::Settings; blockInput(250); }
     else if (index == 9) { screen = Screen::Connections; blockInput(250); }
+    else if (index == 10) {
+        flushInboxEvents();
+        scanInbox();
+        screen = Screen::InboxList;
+        blockInput(250);
+    }
 }
 
 const char* resumeName()
@@ -2952,7 +3166,7 @@ void drawCyberAccent()
 
 void drawLauncher()
 {
-    static const char* labels[] = {"[#] LISTEN", "[=] READ", "[+] WRITE", "[o] VOICE", "[~] TIME", "[*] FILES", "[?] DECIDE", "[x] ROUTINES", "[%] SETTINGS", "[~] TRANSFER"};
+    static const char* labels[] = {"[#] LISTEN", "[=] READ", "[+] WRITE", "[o] VOICE", "[~] TIME", "[*] FILES", "[?] DECIDE", "[x] ROUTINES", "[%] SETTINGS", "[~] TRANSFER", "[>] INBOX"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
     drawCyberAccent();
@@ -3045,6 +3259,46 @@ void drawRandomizer()
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
     canvas.print("OK ROLL   GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawInboxList()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("INBOX");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(168, 14);
+    canvas.printf("%d", static_cast<int>(inbox_entries.size()));
+    if (inbox_entries.empty()) {
+        canvas.setTextSize(2);
+        canvas.setTextColor(uiFg(), uiBg());
+        canvas.setCursor(8, 48);
+        canvas.print("NO EVENTS");
+        canvas.setTextSize(1);
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 78);
+        canvas.print("capture something first");
+    } else {
+        const int rows = 4;
+        int start = std::max(0, inbox_cursor - 1);
+        start = std::min(start, std::max(0, static_cast<int>(inbox_entries.size()) - rows));
+        const int end = std::min(static_cast<int>(inbox_entries.size()), start + rows);
+        canvas.setTextSize(1);
+        for (int i = start; i < end; ++i) {
+            canvas.setCursor(8, 36 + (i - start) * 20);
+            canvas.setTextColor(i == inbox_cursor ? uiBg() : uiFg(), i == inbox_cursor ? uiFg() : uiBg());
+            canvas.printf("%c %.29s", i == inbox_cursor ? '>' : ' ', inbox_entries[i].c_str());
+        }
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 122);
+    canvas.print("UP/DN SCROLL       GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -3195,7 +3449,9 @@ void drawMusicList()
         canvas.println(sd_ready ? "No MP3" : "No SD");
         canvas.setTextSize(1);
         canvas.setCursor(8, 76);
-        canvas.println("/sdcard/music/A.MP3");
+        canvas.printf("%s R%lu M%lu", music_scan_status.c_str(),
+                      static_cast<unsigned long>(music_raw_entries),
+                      static_cast<unsigned long>(music_mp3_entries));
     } else {
         int start = std::max(0, selected_track - 1);
         start = std::min(start, std::max(0, static_cast<int>(tracks.size()) - 3));
@@ -3959,6 +4215,7 @@ void updateTimeApp()
         timer_remaining_ms = 0;
         timer_done = true;
         startAlert(6000);
+        appendInboxEvent("TIMER", "done");
         dirty = true;
     }
     updateAlert();
@@ -5361,6 +5618,7 @@ void drawIfDirty()
     else if (screen == Screen::HabitsEdit) drawHabitsEdit();
     else if (screen == Screen::Settings) drawSettings();
     else if (screen == Screen::Connections) drawConnections();
+    else if (screen == Screen::InboxList) drawInboxList();
     else drawMessage();
     dirty = false;
 }
@@ -5519,7 +5777,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Launcher) {
         if (ev.key == Key::Up) { launcher_index = std::max(0, launcher_index - 1); pulseUi(); }
-        else if (ev.key == Key::Down) { launcher_index = std::min(9, launcher_index + 1); pulseUi(); }
+        else if (ev.key == Key::Down) { launcher_index = std::min(10, launcher_index + 1); pulseUi(); }
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
         else if (ev.key == Key::Two) resumeContext();
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
@@ -5529,6 +5787,18 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Dashboard) {
         if (ev.key == Key::Ok) resumeContext();
+        else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::InboxList) {
+        if (ev.key == Key::Up && !inbox_entries.empty()) inbox_cursor = std::max(0, inbox_cursor - 1);
+        else if (ev.key == Key::Down && !inbox_entries.empty()) inbox_cursor = std::min(static_cast<int>(inbox_entries.size()) - 1, inbox_cursor + 1);
+        else if (ev.key == Key::Ok) scanInbox();
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
@@ -5759,7 +6029,7 @@ void handleKey(KeyEvent ev)
             }
         }
         else if (ev.key == Key::Home || ev.key == Key::Back) {
-            screen = Screen::NotesList;
+            screen = Screen::MusicList;
             blockInput(250);
         }
         dirty = true;
@@ -5775,6 +6045,7 @@ void handleKey(KeyEvent ev)
                 std::string err;
                 bool ok = note_edit_existing ? saveExistingNote(&err) : saveNewNote(&name, &err);
                 if (ok) {
+                    appendInboxEvent(note_edit_existing ? "NOTE EDIT" : "NOTE", note_edit_existing ? active_note_name : name);
                     showMessage("Note saved", note_edit_existing ? active_note_name : name, MessageReturn::Notes);
                 } else {
                     showMessage("Save failed", err.empty() ? "write" : err, MessageReturn::Notes);
@@ -6053,6 +6324,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Ok && !habits.empty()) {
             habits[habits_cursor].done = !habits[habits_cursor].done;
             saveHabitLogForDay();
+            if (habits[habits_cursor].done) appendInboxEvent("HABIT", habits[habits_cursor].title);
             blockInput(220);
         } else if (ev.key == Key::One) {
             saveHabitLogForDay();
