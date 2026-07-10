@@ -60,6 +60,7 @@ constexpr int AUDIO_OUTPUT_RATE = 16000;
 constexpr bool AUDIO_SAFE_MONO = true;
 constexpr int AUDIO_SAFE_SHIFT = 2;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
+constexpr size_t READER_STREAM_READ_BYTES = 2048;
 constexpr size_t MAX_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 2 * 1024;
@@ -67,6 +68,7 @@ constexpr size_t MAX_LIST_ENTRIES = 256;
 constexpr size_t MAX_STATE_RECORDS = 256;
 constexpr size_t MAX_HABITS = 64;
 constexpr int READER_LINES_PER_PAGE = 4;
+constexpr int READER_STREAM_LOOKAHEAD_LINES = READER_LINES_PER_PAGE + 1;
 constexpr int SPEED_WPM_MIN = 350;
 constexpr int SPEED_WPM_MAX = 1000;
 constexpr int SPEED_WPM_STEP = 50;
@@ -280,7 +282,17 @@ std::string reader_text;
 std::vector<std::string> reader_lines;
 std::vector<std::string> reader_words;
 std::map<std::string, int> reader_bookmarks;
+std::map<std::string, size_t> reader_stream_bookmarks;
 int reader_scroll = 0;
+bool reader_streaming = false;
+std::string reader_stream_path;
+FILE* reader_stream_file = nullptr;
+size_t reader_stream_file_size = 0;
+size_t reader_stream_offset = 0;
+std::vector<std::string> reader_stream_lines;
+std::vector<size_t> reader_stream_line_offsets;
+std::vector<size_t> reader_stream_history;
+std::string reader_stream_status;
 int speed_index = 0;
 int speed_wpm = SPEED_WPM_MIN;
 SpeedMode speed_mode = SpeedMode::OneWord;
@@ -558,12 +570,16 @@ void saveReaderState()
     for (const auto& item : reader_bookmarks) {
         fprintf(f, "BMK|%s|%d\n", item.first.c_str(), item.second);
     }
+    for (const auto& item : reader_stream_bookmarks) {
+        fprintf(f, "SBK2|%s|%lu\n", item.first.c_str(), static_cast<unsigned long>(item.second));
+    }
     flushAndClose(f);
 }
 
 void loadReaderState()
 {
     reader_bookmarks.clear();
+    reader_stream_bookmarks.clear();
     last_reader_book.clear();
     if (!ensureConfigDir()) return;
     FILE* f = fopen(READER_STATE_FILE, "rb");
@@ -580,6 +596,13 @@ void loadReaderState()
                 std::string name = s.substr(4, p - 4);
                 int line_no = std::max(0, std::atoi(s.substr(p + 1).c_str()));
                 if (!name.empty() && reader_bookmarks.size() < MAX_STATE_RECORDS) reader_bookmarks[name] = line_no;
+            }
+        } else if (s.rfind("SBK2|", 0) == 0) {
+            size_t p = s.rfind('|');
+            if (p != std::string::npos && p > 5) {
+                std::string name = s.substr(5, p - 5);
+                size_t offset = static_cast<size_t>(std::strtoul(s.substr(p + 1).c_str(), nullptr, 10));
+                if (!name.empty() && reader_stream_bookmarks.size() < MAX_STATE_RECORDS) reader_stream_bookmarks[name] = offset;
             }
         }
     }
@@ -1441,8 +1464,172 @@ void wrapReaderText()
     if (reader_lines.empty()) reader_lines.push_back(" ");
 }
 
+void closeReaderStream()
+{
+    if (reader_stream_file) {
+        fclose(reader_stream_file);
+        reader_stream_file = nullptr;
+    }
+}
+
+// Large books are rendered as a small moving window.  Keeping only five wrapped
+// lines avoids the text/word vectors that make a normal book exceed Cardputer RAM.
+bool loadReaderStreamPage(std::string* err = nullptr)
+{
+    reader_stream_lines.clear();
+    reader_stream_line_offsets.clear();
+    if (reader_stream_path.empty() || reader_stream_offset >= reader_stream_file_size) {
+        if (err) *err = "end of book";
+        return false;
+    }
+    if (!reader_stream_file) reader_stream_file = fopen(reader_stream_path.c_str(), "rb");
+    if (!reader_stream_file) {
+        if (err) { *err = "open: "; *err += std::strerror(errno); }
+        return false;
+    }
+    if (fseek(reader_stream_file, static_cast<long>(reader_stream_offset), SEEK_SET) != 0) {
+        if (err) *err = "seek failed";
+        return false;
+    }
+    std::vector<uint8_t> bytes(READER_STREAM_READ_BYTES);
+    size_t n = fread(bytes.data(), 1, bytes.size(), reader_stream_file);
+    if (n == 0) {
+        if (err) *err = "read failed";
+        return false;
+    }
+
+    constexpr int max_cols = 17;
+    std::string line;
+    std::string word;
+    int line_cols = 0;
+    int word_cols = 0;
+    size_t line_start = reader_stream_offset;
+    size_t word_start = reader_stream_offset;
+    auto append_line = [&]() {
+        while (!line.empty() && (line.back() == ' ' || line.back() == '\t' || line.back() == '\r')) line.pop_back();
+        reader_stream_line_offsets.push_back(line_start);
+        reader_stream_lines.push_back(line.empty() ? " " : line);
+        line.clear();
+        line_cols = 0;
+    };
+    auto flush_word = [&]() {
+        if (word.empty()) return;
+        if (line_cols == 0) line_start = word_start;
+        if (line_cols > 0 && line_cols + 1 + word_cols > max_cols) append_line();
+        if (line_cols == 0) line_start = word_start;
+        if (word_cols > max_cols) {
+            if (!line.empty()) append_line();
+            std::string part;
+            int cols = 0;
+            size_t part_start = word_start;
+            for (size_t i = 0; i < word.size();) {
+                size_t len = utf8CharLen(static_cast<unsigned char>(word[i]));
+                if (i + len > word.size()) len = 1;
+                if (cols >= max_cols) {
+                    line_start = part_start;
+                    line = part;
+                    line_cols = cols;
+                    append_line();
+                    part.clear();
+                    cols = 0;
+                    part_start = word_start + i;
+                }
+                part.append(word, i, len);
+                ++cols;
+                i += len;
+            }
+            line_start = part_start;
+            line = part;
+            line_cols = cols;
+        } else {
+            if (line_cols > 0) { line += ' '; ++line_cols; }
+            line += word;
+            line_cols += word_cols;
+        }
+        word.clear();
+        word_cols = 0;
+    };
+
+    for (size_t i = 0; i < n && reader_stream_lines.size() < READER_STREAM_LOOKAHEAD_LINES;) {
+        unsigned char c = bytes[i];
+        if (c == '\r') { ++i; continue; }
+        if (c == '\n') {
+            flush_word();
+            if (!line.empty() || reader_stream_lines.empty() || line_start != reader_stream_offset + i) append_line();
+            ++i;
+            line_start = reader_stream_offset + i;
+            continue;
+        }
+        if (c == ' ' || c == '\t') { flush_word(); ++i; continue; }
+        size_t len = utf8CharLen(c);
+        if (i + len > n) break; // Do not split a UTF-8 character at the window boundary.
+        if (word.empty()) word_start = reader_stream_offset + i;
+        word.append(reinterpret_cast<const char*>(bytes.data() + i), len);
+        ++word_cols;
+        i += len;
+    }
+    if (reader_stream_lines.size() < READER_STREAM_LOOKAHEAD_LINES) {
+        flush_word();
+        if (!line.empty()) append_line();
+    }
+    if (reader_stream_lines.empty()) {
+        reader_stream_line_offsets.push_back(reader_stream_offset);
+        reader_stream_lines.push_back(" ");
+    }
+    return true;
+}
+
+bool readerStreamMoveForward(int lines)
+{
+    bool moved = false;
+    for (int i = 0; i < lines; ++i) {
+        if (reader_stream_line_offsets.size() < 2) break;
+        size_t next = reader_stream_line_offsets[1];
+        if (next <= reader_stream_offset || next >= reader_stream_file_size) break;
+        const size_t previous = reader_stream_offset;
+        reader_stream_history.push_back(previous);
+        reader_stream_offset = next;
+        std::string read_error;
+        if (!loadReaderStreamPage(&read_error)) {
+            reader_stream_offset = previous;
+            reader_stream_history.pop_back();
+            loadReaderStreamPage(nullptr);
+            reader_stream_status = "READ: " + (read_error.empty() ? std::string("failed") : read_error);
+            break;
+        }
+        moved = true;
+    }
+    return moved;
+}
+
+bool readerStreamMoveBack(int lines)
+{
+    bool moved = false;
+    for (int i = 0; i < lines && !reader_stream_history.empty(); ++i) {
+        const size_t previous = reader_stream_offset;
+        reader_stream_offset = reader_stream_history.back();
+        reader_stream_history.pop_back();
+        std::string read_error;
+        if (!loadReaderStreamPage(&read_error)) {
+            reader_stream_history.push_back(reader_stream_offset);
+            reader_stream_offset = previous;
+            loadReaderStreamPage(nullptr);
+            reader_stream_status = "READ: " + (read_error.empty() ? std::string("failed") : read_error);
+            break;
+        }
+        moved = true;
+    }
+    return moved;
+}
+
 bool loadTextFile(const std::string& path, const std::string& label, std::string* err = nullptr)
 {
+    closeReaderStream();
+    reader_streaming = false;
+    reader_stream_path.clear();
+    reader_stream_lines.clear();
+    reader_stream_line_offsets.clear();
+    reader_stream_history.clear();
     struct stat st = {};
     if (stat(path.c_str(), &st) != 0) {
         if (err) {
@@ -1500,8 +1687,13 @@ int currentReaderLineForBookmark()
 
 void saveReaderBookmark()
 {
-    if (active_book_name.empty() || reader_lines.empty()) return;
+    if (active_book_name.empty()) return;
     last_reader_book = active_book_name;
+    if (reader_streaming) {
+        reader_stream_bookmarks[active_book_name] = reader_stream_offset;
+        return;
+    }
+    if (reader_lines.empty()) return;
     reader_bookmarks[active_book_name] = clampReaderLine(currentReaderLineForBookmark());
 }
 
@@ -1511,11 +1703,44 @@ bool loadSelectedBook(std::string* err = nullptr)
         if (err) *err = "no books";
         return false;
     }
-    if (!loadTextFile(selectedBookPath(), books[selected_book], err)) return false;
+    const std::string path = selectedBookPath();
+    closeReaderStream();
+    reader_streaming = false;
+    reader_stream_status.clear();
+    struct stat st = {};
+    if (stat(path.c_str(), &st) != 0 || st.st_size <= 0) {
+        if (err) *err = st.st_size <= 0 ? "empty file" : std::string("stat: ") + std::strerror(errno);
+        return false;
+    }
+    if (static_cast<size_t>(st.st_size) > MAX_BOOK_BYTES) {
+        reader_streaming = true;
+        reader_stream_path = path;
+        reader_stream_file_size = static_cast<size_t>(st.st_size);
+        reader_stream_offset = 0;
+        reader_stream_history.clear();
+        reader_stream_status.clear();
+        reader_text.clear();
+        reader_lines.clear();
+        reader_words.clear();
+        active_book_name = books[selected_book];
+        auto stream_bmk = reader_stream_bookmarks.find(active_book_name);
+        if (stream_bmk != reader_stream_bookmarks.end() && stream_bmk->second < reader_stream_file_size) {
+            reader_stream_offset = stream_bmk->second;
+        }
+        if (!loadReaderStreamPage(err)) {
+            closeReaderStream();
+            reader_streaming = false;
+            return false;
+        }
+    } else if (!loadTextFile(path, books[selected_book], err)) {
+        return false;
+    }
     last_reader_book = active_book_name;
     reader_opened_this_session = true;
-    auto it = reader_bookmarks.find(active_book_name);
-    if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
+    if (!reader_streaming) {
+        auto it = reader_bookmarks.find(active_book_name);
+        if (it != reader_bookmarks.end()) reader_scroll = clampReaderLine(it->second);
+    }
     saveReaderState();
     return true;
 }
@@ -2586,9 +2811,7 @@ void resumeContext()
                 auto it = std::find(books.begin(), books.end(), last_reader_book);
                 if (it != books.end()) selected_book = static_cast<int>(std::distance(books.begin(), it));
                 std::string err;
-                if (loadTextFile(selectedBookPath(), books[selected_book], &err)) {
-                    auto bm = reader_bookmarks.find(active_book_name);
-                    if (bm != reader_bookmarks.end()) reader_scroll = clampReaderLine(bm->second);
+                if (loadSelectedBook(&err)) {
                     screen = Screen::ReaderView;
                     break;
                 }
@@ -3392,7 +3615,8 @@ void drawReaderList()
             canvas.setTextColor(i == selected_book ? uiBg() : uiFg(), i == selected_book ? uiFg() : uiBg());
             std::string label = books[i];
             if (i == selected_book) label = marqueeText(label, 12);
-            canvas.printf("%c%c%.12s", i == selected_book ? '>' : ' ', reader_bookmarks.count(books[i]) ? '*' : ' ', label.c_str());
+            const bool bookmarked = reader_bookmarks.count(books[i]) || reader_stream_bookmarks.count(books[i]);
+            canvas.printf("%c%c%.12s", i == selected_book ? '>' : ' ', bookmarked ? '*' : ' ', label.c_str());
         }
     }
     canvas.setTextSize(1);
@@ -3409,10 +3633,20 @@ void drawReaderView()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 5);
-    canvas.printf("%.14s %d/%d", active_book_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
+    if (reader_streaming) {
+        int pct = reader_stream_file_size ? static_cast<int>(reader_stream_offset * 100 / reader_stream_file_size) : 0;
+        canvas.printf("%.14s %d%%", active_book_name.c_str(), pct);
+    } else {
+        canvas.printf("%.14s %d/%d", active_book_name.c_str(), reader_lines.empty() ? 0 : reader_scroll + 1, static_cast<int>(reader_lines.size()));
+    }
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
-    if (reader_lines.empty()) {
+    if (reader_streaming) {
+        for (int row = 0; row < READER_LINES_PER_PAGE; ++row) {
+            if (row >= static_cast<int>(reader_stream_lines.size())) break;
+            drawTextLineSmart(8, 22 + row * 24, reader_stream_lines[row]);
+        }
+    } else if (reader_lines.empty()) {
         canvas.setCursor(8, 48);
         canvas.print("EMPTY");
     } else {
@@ -3425,7 +3659,8 @@ void drawReaderView()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("UP/DN LINE L/R PAGE 1 SPD GO LIST");
+    if (!reader_stream_status.empty()) canvas.printf("%.36s", reader_stream_status.c_str());
+    else canvas.print("UP/DN LINE L/R PAGE 1 SPD GO LIST");
     canvas.pushSprite(0, 0);
 }
 
@@ -3782,6 +4017,18 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
     if (ext == ".txt") {
         active_book_name = e.name;
         active_note_name = e.name;
+        if (e.path.rfind(std::string(BOOKS_DIR) + "/", 0) == 0) {
+            scanBooks();
+            auto it = std::find(books.begin(), books.end(), e.name);
+            if (it == books.end()) {
+                if (err) *err = "book not found";
+                return false;
+            }
+            selected_book = static_cast<int>(std::distance(books.begin(), it));
+            if (!loadSelectedBook(err)) return false;
+            screen = Screen::ReaderView;
+            return true;
+        }
         if (!loadTextFile(e.path, e.name, err)) return false;
         screen = e.path.rfind(std::string(NOTES_DIR) + "/", 0) == 0 ? Screen::NotesView : Screen::ReaderView;
         return true;
@@ -5250,6 +5497,24 @@ void handleKey(KeyEvent ev)
     }
 
     if (screen == Screen::ReaderView) {
+        if (reader_streaming) {
+            reader_stream_status.clear();
+            if (ev.key == Key::Up) readerStreamMoveBack(1);
+            else if (ev.key == Key::Down) readerStreamMoveForward(1);
+            else if (ev.key == Key::Left) readerStreamMoveBack(READER_LINES_PER_PAGE);
+            else if (ev.key == Key::Right) readerStreamMoveForward(READER_LINES_PER_PAGE);
+            else if (ev.key == Key::One) reader_stream_status = "SPEED: short books only";
+            else if (ev.key == Key::Home || ev.key == Key::Back) {
+                saveReaderBookmark();
+                saveReaderState();
+                closeReaderStream();
+                screen = Screen::ReaderList;
+                blockInput(250);
+            }
+            if (screen == Screen::ReaderView) saveReaderBookmark();
+            dirty = true;
+            return;
+        }
         const int max_scroll = std::max(0, static_cast<int>(reader_lines.size()) - READER_LINES_PER_PAGE);
         if (ev.key == Key::Up) { reader_scroll = std::max(0, reader_scroll - 1); saveReaderBookmark(); }
         else if (ev.key == Key::Down) { reader_scroll = std::min(max_scroll, reader_scroll + 1); saveReaderBookmark(); }
