@@ -2313,10 +2313,9 @@ void formatTenthsSeconds(uint32_t ms, char* out, size_t out_len)
 
 void applyVolume()
 {
-    int vol = 80;
-    if (volume_mode == VolumeMode::Mute) vol = 0;
-    if (volume_mode == VolumeMode::Loud) vol = 160;
-    vol = std::min(vol, soundVolume());
+    int vol = 180;
+    if (volume_mode == VolumeMode::Mute || sound_mode == SoundMode::Off) vol = 0;
+    else if (volume_mode == VolumeMode::Loud) vol = 255;
     M5.Speaker.setVolume(vol);
 }
 
@@ -2504,6 +2503,29 @@ void nextTrack(int delta)
     dirty = true;
 }
 
+bool playNextAvailableTrack(int delta, std::string* err = nullptr)
+{
+    if (tracks.empty()) {
+        if (err) *err = "no tracks";
+        return false;
+    }
+    const int original = selected_track;
+    for (size_t attempt = 0; attempt < tracks.size(); ++attempt) {
+        if (shuffle_on && tracks.size() > 1) {
+            int candidate = selected_track;
+            for (int i = 0; i < 4 && candidate == selected_track; ++i) candidate = esp_random() % tracks.size();
+            selected_track = candidate;
+        } else {
+            selected_track = (selected_track + delta + tracks.size()) % tracks.size();
+        }
+        std::string local_err;
+        if (startPlayback(&local_err)) return true;
+        if (err && err->empty()) *err = tracks[selected_track] + ": " + local_err;
+    }
+    selected_track = original;
+    return false;
+}
+
 void drawWaveform(const std::vector<int16_t>& pcm, int channels)
 {
     if (display_off || pcm.empty()) return;
@@ -2622,8 +2644,12 @@ void updateAudio()
     } else if (!decodeChunk(&err)) {
         const bool eof = mp3_eof && err.find("eof") != std::string::npos;
         if (eof) {
-            if (tracks.size() > 1) {
-                nextTrack(1);
+            if (tracks.size() > 1 && override_music_path.empty()) {
+                std::string next_err;
+                if (!playNextAvailableTrack(1, &next_err)) {
+                    stopPlayback();
+                    showMessage("Playback stopped", next_err.empty() ? "no playable track" : next_err, MessageReturn::Music);
+                }
             } else {
                 stopPlayback();
                 screen = Screen::MusicList;
@@ -5765,6 +5791,11 @@ char shortcutChar(KeyEvent ev)
     return static_cast<char>(c);
 }
 
+bool isMusicShuffleKey(KeyEvent ev)
+{
+    return ev.key == Key::One || shortcutChar(ev) == 's';
+}
+
 bool handleOneButtonCapture(KeyEvent ev)
 {
     if (screen != Screen::Launcher) return false;
@@ -5827,7 +5858,12 @@ void processMusicAutostart()
 
 void handleKey(KeyEvent ev)
 {
-    if (ev.key == Key::None && screen != Screen::NotesEdit && screen != Screen::HabitsEdit && screen != Screen::Launcher) return;
+    if (ev.key == Key::None &&
+        screen != Screen::NotesEdit &&
+        screen != Screen::HabitsEdit &&
+        screen != Screen::Launcher &&
+        screen != Screen::MusicList &&
+        screen != Screen::MusicPlaying) return;
     last_input_ms = M5.millis();
     if (display_off || display_dim) {
         wakeDisplay();
@@ -5872,7 +5908,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Down && !tracks.empty()) selected_track = std::min(static_cast<int>(tracks.size()) - 1, selected_track + 1);
         else if (ev.key == Key::Left) nextTrack(-1);
         else if (ev.key == Key::Right) nextTrack(1);
-        else if (ev.key == Key::One) shuffle_on = !shuffle_on;
+        else if (isMusicShuffleKey(ev)) shuffle_on = !shuffle_on;
         else if (ev.key == Key::Ok) {
             if (!tracks.empty()) {
                 override_music_path.clear();
@@ -5903,7 +5939,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Right) nextTrack(1);
         else if (ev.key == Key::Up) { volume_mode = static_cast<VolumeMode>(std::min(2, static_cast<int>(volume_mode) + 1)); applyVolume(); }
         else if (ev.key == Key::Down) { volume_mode = static_cast<VolumeMode>(std::max(0, static_cast<int>(volume_mode) - 1)); applyVolume(); }
-        else if (ev.key == Key::One) shuffle_on = !shuffle_on;
+        else if (isMusicShuffleKey(ev)) shuffle_on = !shuffle_on;
         dirty = true;
         return;
     }
