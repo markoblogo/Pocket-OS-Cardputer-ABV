@@ -244,14 +244,18 @@ int decoded_chunks = 0;
 int music_underruns = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
+constexpr int REC_LONG_SAMPLE_RATE = 8000;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
 constexpr uint32_t REC_SAFE_SECONDS = 30;
 constexpr uint32_t REC_MAX_SECONDS = REC_SAFE_SECONDS;
 constexpr uint32_t REC_PRESET_SHORT_SECONDS = 5;
 constexpr uint32_t REC_PRESET_LONG_SECONDS = 20;
+// Cardputer ADV has no PSRAM. Direct SD writes while the microphone is active
+// return EIO on hardware, so both presets capture to RAM and save after Mic.end().
 constexpr bool REC_STREAM_RECORDING_ENABLED = false;
 constexpr size_t REC_MAX_SAMPLES = REC_SAMPLE_RATE * REC_MAX_SECONDS;
 constexpr uint32_t REC_MIN_SECONDS = 1;
+constexpr uint32_t REC_STOP_GRACE_MS = 120;
 constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
 constexpr size_t REC_CAPTURE_CHUNK_SAMPLES = 1024;
 FILE* rec_play_file = nullptr;
@@ -264,18 +268,26 @@ FILE* rec_record_file = nullptr;
 bool rec_streaming_record = false;
 std::string rec_stream_path;
 struct RecCaptureChunk {
-    int16_t* data = nullptr;
+    uint8_t* data = nullptr;
     size_t used = 0;
     size_t capacity = 0;
 };
 std::vector<RecCaptureChunk> rec_capture_chunks;
 size_t rec_capture_capacity = 0;
+size_t rec_capture_byte_capacity = 0;
+size_t rec_capture_bytes_written = 0;
 uint32_t rec_samples_written = 0;
 uint32_t rec_started_ms = 0;
 uint32_t rec_play_chunks = 0;
 bool rec_play_next_ready = false;
 uint32_t rec_target_seconds = REC_PRESET_SHORT_SECONDS;
 uint32_t rec_requested_seconds = REC_PRESET_SHORT_SECONDS;
+uint32_t rec_target_ms = REC_PRESET_SHORT_SECONDS * 1000u;
+uint32_t rec_record_sample_rate = REC_SAMPLE_RATE;
+uint16_t rec_record_bits = 16;
+uint16_t rec_play_bits = 16;
+std::vector<uint8_t> rec_u8_buffer;
+std::vector<uint8_t> rec_play_u8_buffer;
 bool rec_auto_stopped = false;
 uint32_t rec_stopped_ms = 0;
 uint32_t rec_mic_chunks = 0;
@@ -324,7 +336,12 @@ bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
 void cleanupStreamingRecordingTemp(bool remove_file);
 void clearCaptureChunks();
-bool appendCaptureChunk(const int16_t* samples, size_t count);
+bool appendCaptureChunk(const void* data, size_t byte_count);
+static std::string recStreamWriteErrorText(int err_no)
+{
+    if (err_no == 0) return "stream write";
+    return std::string("stream write: ") + std::to_string(err_no) + " " + std::strerror(err_no);
+}
 
 bool flushAndClose(FILE* f)
 {
@@ -357,30 +374,36 @@ void clearCaptureChunks()
     }
     rec_capture_chunks.clear();
     rec_capture_capacity = 0;
+    rec_capture_byte_capacity = 0;
+    rec_capture_bytes_written = 0;
 }
 
-bool appendCaptureChunk(const int16_t* samples, size_t count)
+bool appendCaptureChunk(const void* data, size_t byte_count)
 {
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
     size_t offset = 0;
-    while (count > 0) {
+    while (byte_count > 0) {
         if (!rec_capture_chunks.empty() && rec_capture_chunks.back().used < rec_capture_chunks.back().capacity) {
             RecCaptureChunk& chunk = rec_capture_chunks.back();
             const size_t room = chunk.capacity - chunk.used;
-            const size_t n = std::min<size_t>(room, count);
-            std::memcpy(chunk.data + chunk.used, samples + offset, n * sizeof(int16_t));
+            const size_t n = std::min<size_t>(room, byte_count);
+            std::memcpy(chunk.data + chunk.used, bytes + offset, n);
             chunk.used += n;
             offset += n;
-            count -= n;
+            byte_count -= n;
+            rec_capture_bytes_written += n;
             continue;
         }
 
-        const size_t room = rec_capture_capacity > rec_samples_written ? rec_capture_capacity - rec_samples_written : 0;
+        const size_t room = rec_capture_byte_capacity > rec_capture_bytes_written
+                                ? rec_capture_byte_capacity - rec_capture_bytes_written
+                                : 0;
         if (room == 0) return false;
-        const size_t wanted = std::min<size_t>(REC_CAPTURE_CHUNK_SAMPLES, room);
+        const size_t wanted = std::min<size_t>(REC_CAPTURE_CHUNK_SAMPLES * sizeof(int16_t), room);
         if (wanted == 0) return false;
-        int16_t* block = static_cast<int16_t*>(heap_caps_malloc(wanted * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        uint8_t* block = static_cast<uint8_t*>(heap_caps_malloc(wanted, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (!block) {
-            block = static_cast<int16_t*>(heap_caps_malloc(wanted * sizeof(int16_t), MALLOC_CAP_8BIT));
+            block = static_cast<uint8_t*>(heap_caps_malloc(wanted, MALLOC_CAP_8BIT));
             if (!block) return false;
         }
         RecCaptureChunk chunk;
@@ -986,10 +1009,11 @@ void writeLe32(FILE* f, uint32_t v)
     fwrite(b, 1, 4, f);
 }
 
-void writeWavHeader(FILE* f, uint32_t samples)
+void writeWavHeader(FILE* f, uint32_t samples, uint32_t sample_rate = REC_SAMPLE_RATE, uint16_t bits = 16)
 {
-    const uint32_t data_bytes = samples * sizeof(int16_t);
-    const uint32_t byte_rate = REC_SAMPLE_RATE * sizeof(int16_t);
+    const uint16_t bytes_per_sample = bits / 8;
+    const uint32_t data_bytes = samples * bytes_per_sample;
+    const uint32_t byte_rate = sample_rate * bytes_per_sample;
     fseek(f, 0, SEEK_SET);
     fwrite("RIFF", 1, 4, f);
     writeLe32(f, 36 + data_bytes);
@@ -997,15 +1021,16 @@ void writeWavHeader(FILE* f, uint32_t samples)
     writeLe32(f, 16);
     writeLe16(f, 1);
     writeLe16(f, 1);
-    writeLe32(f, REC_SAMPLE_RATE);
+    writeLe32(f, sample_rate);
     writeLe32(f, byte_rate);
-    writeLe16(f, sizeof(int16_t));
-    writeLe16(f, 16);
+    writeLe16(f, bytes_per_sample);
+    writeLe16(f, bits);
     fwrite("data", 1, 4, f);
     writeLe32(f, data_bytes);
 }
 
-bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate, std::string* err = nullptr)
+bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate,
+                   uint16_t* bits_per_sample, std::string* err = nullptr)
 {
     uint8_t h[44] = {};
     fseek(f, 0, SEEK_SET);
@@ -1022,12 +1047,13 @@ bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate, std::s
     const uint16_t channels = h[22] | (h[23] << 8);
     const uint32_t rate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
     const uint16_t bits = h[34] | (h[35] << 8);
-    if (audio_format != 1 || channels != 1 || bits != 16 || rate == 0) {
-        if (err) *err = "wav must be pcm mono 16";
+    if (audio_format != 1 || channels != 1 || (bits != 8 && bits != 16) || rate == 0) {
+        if (err) *err = "wav must be pcm mono 8/16";
         return false;
     }
     if (data_offset) *data_offset = 44;
     if (sample_rate) *sample_rate = rate;
+    if (bits_per_sample) *bits_per_sample = bits;
     return true;
 }
 
@@ -1796,7 +1822,7 @@ std::string selectedPath()
 
 uint32_t recSecondsMsFromSamples(uint32_t samples)
 {
-    return (samples * 1000ULL) / REC_SAMPLE_RATE;
+    return rec_record_sample_rate ? (samples * 1000ULL) / rec_record_sample_rate : 0;
 }
 
 int32_t recClockDeltaMs()
@@ -1804,6 +1830,16 @@ int32_t recClockDeltaMs()
     const uint32_t clk_ms = (rec_stopped_ms >= rec_started_ms) ? (rec_stopped_ms - rec_started_ms) : ((M5.millis() >= rec_started_ms) ? (M5.millis() - rec_started_ms) : 0);
     const uint32_t pcm_ms = recSecondsMsFromSamples(rec_samples_written);
     return static_cast<int32_t>(clk_ms) - static_cast<int32_t>(pcm_ms);
+}
+
+uint32_t recElapsedMs()
+{
+    return rec_started_ms ? M5.millis() - rec_started_ms : 0;
+}
+
+bool recTimeReached()
+{
+    return rec_started_ms != 0 && recElapsedMs() + REC_STOP_GRACE_MS >= rec_target_ms;
 }
 
 void formatTenthsSeconds(uint32_t ms, char* out, size_t out_len)
@@ -2078,11 +2114,15 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    // Voice v0.x targets quick memory notes, with short/long presets.
-    // Long preset streams directly to SD to avoid RAM truncation.
+    // Short preset keeps 16 kHz/16-bit quality. Long preset uses telephone-grade
+    // 8 kHz/8-bit PCM so 20 seconds fit in the same RAM budget (~160 KB).
     target_seconds = std::max(REC_MIN_SECONDS, std::min<uint32_t>(target_seconds, REC_MAX_SECONDS));
     rec_requested_seconds = target_seconds;
     rec_target_seconds = target_seconds;
+    rec_target_ms = target_seconds * 1000u;
+    const bool long_preset = target_seconds >= REC_PRESET_LONG_SECONDS;
+    rec_record_sample_rate = long_preset ? REC_LONG_SAMPLE_RATE : REC_SAMPLE_RATE;
+    rec_record_bits = long_preset ? 8 : 16;
     rec_streaming_record = REC_STREAM_RECORDING_ENABLED && (target_seconds >= REC_PRESET_LONG_SECONDS);
     if (rec_streaming_record) {
         if (!ensureRecordingsDir(err)) {
@@ -2090,7 +2130,8 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
             rec_streaming_record = false;
             return false;
         }
-        rec_capture_capacity = static_cast<size_t>(target_seconds) * REC_SAMPLE_RATE;
+        rec_capture_capacity = static_cast<size_t>(target_seconds) * rec_record_sample_rate;
+        rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
         std::string path = recordings_dir + "/" + active_recording_name;
         for (int i = 0; i < 20; ++i) {
             struct stat st = {};
@@ -2105,19 +2146,20 @@ bool startRecording(uint32_t target_seconds = REC_PRESET_SHORT_SECONDS, std::str
             return false;
         }
         rec_stream_path = path;
-        writeWavHeader(rec_record_file, 0);
+        writeWavHeader(rec_record_file, 0, rec_record_sample_rate, rec_record_bits);
         if (fflush(rec_record_file) != 0) {
             if (err) *err = "header";
             cleanupStreamingRecordingTemp(true);
             return false;
         }
     } else {
-        rec_capture_capacity = static_cast<size_t>(target_seconds) * REC_SAMPLE_RATE;
+        rec_capture_capacity = static_cast<size_t>(target_seconds) * rec_record_sample_rate;
+        rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
         if (rec_capture_capacity == 0) {
             if (err) *err = "ram alloc 0";
             return false;
         }
-        rec_target_seconds = rec_capture_capacity / REC_SAMPLE_RATE;
+        rec_target_seconds = rec_capture_capacity / rec_record_sample_rate;
     }
 
     M5.Speaker.end();
@@ -2162,17 +2204,17 @@ bool saveCapturedRecording(std::string* err = nullptr)
         }
         return false;
     }
-    writeWavHeader(f, rec_samples_written);
+    writeWavHeader(f, rec_samples_written, rec_record_sample_rate, rec_record_bits);
     bool ok = true;
-    size_t samples_left = rec_samples_written;
+    size_t bytes_left = rec_samples_written * (rec_record_bits / 8);
     for (const auto& chunk : rec_capture_chunks) {
         if (!chunk.data || chunk.used == 0) continue;
-        const size_t todo = std::min<size_t>(samples_left, chunk.used);
+        const size_t todo = std::min<size_t>(bytes_left, chunk.used);
         size_t wrote_total = 0;
-        const int16_t* base = chunk.data;
+        const uint8_t* base = chunk.data;
         while (wrote_total < todo) {
-            const size_t todo_now = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES, todo - wrote_total);
-            const size_t wrote = fwrite(base + wrote_total, sizeof(int16_t), todo_now, f);
+            const size_t todo_now = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES * sizeof(int16_t), todo - wrote_total);
+            const size_t wrote = fwrite(base + wrote_total, 1, todo_now, f);
             wrote_total += wrote;
             if (wrote != todo_now) {
                 ok = false;
@@ -2180,11 +2222,11 @@ bool saveCapturedRecording(std::string* err = nullptr)
             }
             vTaskDelay(pdMS_TO_TICKS(1));
         }
-        samples_left -= todo;
+        bytes_left -= todo;
         if (!ok) break;
-        if (samples_left == 0) break;
+        if (bytes_left == 0) break;
     }
-    if (samples_left != 0) ok = false;
+    if (bytes_left != 0) ok = false;
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
         if (err) {
@@ -2226,7 +2268,7 @@ bool finalizeStreamingRecording(std::string* err = nullptr)
         cleanupStreamingRecordingTemp(false);
         return false;
     }
-    writeWavHeader(rec_record_file, rec_samples_written);
+    writeWavHeader(rec_record_file, rec_samples_written, rec_record_sample_rate, rec_record_bits);
     if (fflush(rec_record_file) != 0) {
         if (err) *err = "flush";
         cleanupStreamingRecordingTemp(false);
@@ -2297,6 +2339,9 @@ void stopRecording(bool save)
         cleanupStreamingRecordingTemp(!save || failed);
     }
     rec_capture_capacity = 0;
+    rec_target_ms = REC_PRESET_SHORT_SECONDS * 1000u;
+    rec_record_sample_rate = REC_SAMPLE_RATE;
+    rec_record_bits = 16;
     dirty = true;
     blockInput(400);
 }
@@ -2305,16 +2350,47 @@ void updateRecording()
 {
     if (screen != Screen::RecorderRecording || rec_buffer.empty()) return;
     if (rec_write_error) return;
-    if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), REC_SAMPLE_RATE)) {
+    if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), rec_record_sample_rate)) {
         const size_t room = rec_capture_capacity > rec_samples_written ? rec_capture_capacity - rec_samples_written : 0;
-        size_t take = std::min(room, rec_buffer.size());
 
-        if (take == 0) {
+        if (room == 0) {
+            if (rec_capture_capacity > 0 || recTimeReached()) {
+                rec_auto_stopped = true;
+                stopRecording(true);
+            }
             return;
         }
 
-        if (take > 0) {
-            if (!appendCaptureChunk(rec_buffer.data(), take)) {
+        size_t take = std::min(room, rec_buffer.size());
+
+        if (rec_streaming_record) {
+            if (!rec_record_file) {
+                rec_write_error = true;
+                rec_write_error_text = "stream not ready";
+                stopRecording(true);
+                return;
+            }
+
+            const size_t wrote = fwrite(rec_buffer.data(), sizeof(int16_t), take, rec_record_file);
+            if (wrote != take) {
+                rec_write_error = true;
+                rec_write_error_text = recStreamWriteErrorText(errno);
+                stopRecording(true);
+                return;
+            }
+        } else {
+            bool captured = false;
+            if (rec_record_bits == 8) {
+                rec_u8_buffer.resize(take);
+                for (size_t i = 0; i < take; ++i) {
+                    const int32_t unsigned_sample = (static_cast<int32_t>(rec_buffer[i]) + 32768) >> 8;
+                    rec_u8_buffer[i] = static_cast<uint8_t>(std::max<int32_t>(0, std::min<int32_t>(255, unsigned_sample)));
+                }
+                captured = appendCaptureChunk(rec_u8_buffer.data(), take);
+            } else {
+                captured = appendCaptureChunk(rec_buffer.data(), take * sizeof(int16_t));
+            }
+            if (!captured) {
                 rec_write_error = true;
                 rec_write_error_text = "ram alloc";
                 stopRecording(true);
@@ -2326,10 +2402,22 @@ void updateRecording()
         rec_last_take = take;
         pcm_chunk = rec_buffer;
         pcm_channels = 1;
-        pcm_rate = REC_SAMPLE_RATE;
+        pcm_rate = rec_record_sample_rate;
         if (!display_off) dirty = true;
 
+        if (rec_streaming_record && (rec_mic_chunks % 8u) == 0u) {
+            if (fflush(rec_record_file) != 0) {
+                rec_write_error = true;
+                rec_write_error_text = recStreamWriteErrorText(errno);
+                stopRecording(true);
+                return;
+            }
+        }
+
         if (rec_capture_capacity > 0 && rec_samples_written >= rec_capture_capacity) {
+            rec_auto_stopped = true;
+            stopRecording(true);
+        } else if (recTimeReached()) {
             rec_auto_stopped = true;
             stopRecording(true);
         }
@@ -2355,7 +2443,14 @@ std::string recordingMetaLine(const std::string& name)
     const std::string ext = lowerExt(name);
     uint32_t seconds = 0;
     if (ext == ".wav" && st.st_size > 44) {
-        seconds = static_cast<uint32_t>((st.st_size - 44) / sizeof(int16_t) / REC_SAMPLE_RATE);
+        FILE* f = fopen(path.c_str(), "rb");
+        uint32_t offset = 44;
+        uint32_t rate = REC_SAMPLE_RATE;
+        uint16_t bits = 16;
+        if (f && readWavHeader(f, &offset, &rate, &bits, nullptr) && rate > 0) {
+            seconds = static_cast<uint32_t>((st.st_size - offset) / (bits / 8) / rate);
+        }
+        if (f) fclose(f);
     } else if (ext == ".pcm") {
         seconds = static_cast<uint32_t>(st.st_size / sizeof(int16_t) / REC_SAMPLE_RATE);
     }
@@ -2393,7 +2488,8 @@ bool startRecordingPlayback(std::string* err = nullptr)
     const bool wav = lowerExt(path) == ".wav";
     uint32_t wav_offset = 0;
     uint32_t wav_rate = REC_SAMPLE_RATE;
-    if (wav && !readWavHeader(f, &wav_offset, &wav_rate, err)) {
+    uint16_t wav_bits = 16;
+    if (wav && !readWavHeader(f, &wav_offset, &wav_rate, &wav_bits, err)) {
         fclose(f);
         return false;
     }
@@ -2403,8 +2499,9 @@ bool startRecordingPlayback(std::string* err = nullptr)
         if (err) *err = "empty";
         return false;
     }
-    const size_t samples = static_cast<size_t>((file_size - data_offset) / sizeof(int16_t));
-    if (samples < REC_SAMPLE_RATE / 4) {
+    const size_t bytes_per_sample = wav ? wav_bits / 8 : sizeof(int16_t);
+    const size_t samples = static_cast<size_t>((file_size - data_offset) / bytes_per_sample);
+    if (samples < (wav ? wav_rate : REC_SAMPLE_RATE) / 4) {
         fclose(f);
         if (err) *err = "bad rec";
         return false;
@@ -2423,6 +2520,7 @@ bool startRecordingPlayback(std::string* err = nullptr)
     pcm_chunk.clear();
     pcm_channels = 1;
     pcm_rate = wav ? static_cast<int>(wav_rate) : REC_SAMPLE_RATE;
+    rec_play_bits = wav ? wav_bits : 16;
     screen = Screen::RecorderPlaying;
     dirty = true;
     blockInput(500);
@@ -2441,6 +2539,8 @@ void stopRecordingPlayback()
     rec_play_next_ready = false;
     rec_play_next_last = false;
     rec_play_current_last = false;
+    rec_play_bits = 16;
+    rec_play_u8_buffer.clear();
     screen = Screen::RecorderList;
     dirty = true;
     blockInput(350);
@@ -2449,10 +2549,22 @@ void stopRecordingPlayback()
 bool readNextRecPlayChunk(std::vector<int16_t>& out, bool* out_partial = nullptr)
 {
     if (!rec_play_file) return false;
-    if (out.size() != REC_BUFFER_SAMPLES * 4) out.assign(REC_BUFFER_SAMPLES * 4, 0);
+    constexpr size_t output_samples = REC_BUFFER_SAMPLES * 4;
+    if (rec_play_bits == 8) {
+        rec_play_u8_buffer.resize(output_samples);
+        const size_t n = fread(rec_play_u8_buffer.data(), 1, rec_play_u8_buffer.size(), rec_play_file);
+        if (n == 0) return false;
+        out.resize(n);
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = static_cast<int16_t>((static_cast<int>(rec_play_u8_buffer[i]) - 128) << 8);
+        }
+        if (out_partial) *out_partial = (n < output_samples);
+        return true;
+    }
+    if (out.size() != output_samples) out.assign(output_samples, 0);
     const size_t n = fread(out.data(), sizeof(int16_t), out.size(), rec_play_file);
     if (n == 0) return false;
-    if (out_partial) *out_partial = (n < REC_BUFFER_SAMPLES * 4);
+    if (out_partial) *out_partial = (n < output_samples);
     out.resize(n);
     return true;
 }
@@ -3422,7 +3534,7 @@ void drawRecorderRecording()
         canvas.printf("PCM:%s", pcm_dur);
         canvas.setTextSize(1);
         canvas.setCursor(8, 82);
-        canvas.printf("CLK %s  MAX %lus", clk_dur, static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / REC_SAMPLE_RATE)));
+        canvas.printf("CLK %s  MAX %lus", clk_dur, static_cast<unsigned long>(std::max<size_t>(REC_MIN_SECONDS, rec_capture_capacity / rec_record_sample_rate)));
         canvas.setCursor(8, 94);
         if (delta_ms >= 0) {
             canvas.printf("DIFF +%s", delta_dur);
@@ -3899,9 +4011,22 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
             if (err) { *err = "open: "; *err += std::strerror(errno); }
             return false;
         }
-        fseek(rec_play_file, 44, SEEK_SET);
+        uint32_t data_offset = 0;
+        uint32_t sample_rate = REC_SAMPLE_RATE;
+        uint16_t bits = 16;
+        if (ext == ".wav" && !readWavHeader(rec_play_file, &data_offset, &sample_rate, &bits, err)) {
+            fclose(rec_play_file);
+            rec_play_file = nullptr;
+            return false;
+        }
+        fseek(rec_play_file, static_cast<long>(data_offset), SEEK_SET);
         rec_buffer.assign(REC_BUFFER_SAMPLES * 4, 0);
         rec_play_chunks = 0;
+        rec_play_next_ready = false;
+        rec_play_current_last = false;
+        rec_play_bits = bits;
+        pcm_rate = static_cast<int>(sample_rate);
+        pcm_channels = 1;
         active_recording_name = e.name;
         M5.Mic.end();
         M5.Speaker.begin();
