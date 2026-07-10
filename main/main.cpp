@@ -293,6 +293,9 @@ std::vector<std::string> reader_stream_lines;
 std::vector<size_t> reader_stream_line_offsets;
 std::vector<size_t> reader_stream_history;
 std::string reader_stream_status;
+std::string reader_stream_speed_text;
+size_t reader_stream_speed_offset = 0;
+size_t reader_stream_speed_next_offset = 0;
 int speed_index = 0;
 int speed_wpm = SPEED_WPM_MIN;
 SpeedMode speed_mode = SpeedMode::OneWord;
@@ -1620,6 +1623,85 @@ bool readerStreamMoveBack(int lines)
         moved = true;
     }
     return moved;
+}
+
+bool readerStreamReadWord(size_t from, std::string* out, size_t* start_out, size_t* next_out, std::string* err = nullptr)
+{
+    if (!reader_stream_file || from >= reader_stream_file_size) {
+        if (err) *err = "end of book";
+        return false;
+    }
+    if (fseek(reader_stream_file, static_cast<long>(from), SEEK_SET) != 0) {
+        if (err) *err = "seek failed";
+        return false;
+    }
+    uint8_t bytes[512];
+    size_t n = fread(bytes, 1, sizeof(bytes), reader_stream_file);
+    if (n == 0) {
+        if (err) *err = "read failed";
+        return false;
+    }
+    size_t i = 0;
+    auto whitespace = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (i < n && whitespace(bytes[i])) ++i;
+    if (i >= n) {
+        if (err) *err = "end of book";
+        return false;
+    }
+    const size_t start = from + i;
+    std::string word;
+    while (i < n && !whitespace(bytes[i])) {
+        size_t len = utf8CharLen(bytes[i]);
+        if (i + len > n) break;
+        if (word.size() + len > 96) break;
+        word.append(reinterpret_cast<const char*>(bytes + i), len);
+        i += len;
+    }
+    if (word.empty()) {
+        if (err) *err = "word too long";
+        return false;
+    }
+    *out = word;
+    *start_out = start;
+    *next_out = from + i;
+    return true;
+}
+
+bool loadReaderStreamSpeedUnit(std::string* err = nullptr)
+{
+    reader_stream_speed_text.clear();
+    reader_stream_speed_next_offset = 0;
+    if (speed_mode == SpeedMode::Line) {
+        reader_stream_offset = reader_stream_speed_offset;
+        if (!loadReaderStreamPage(err)) return false;
+        reader_stream_speed_offset = reader_stream_offset;
+        reader_stream_speed_text = reader_stream_lines.empty() ? " " : reader_stream_lines.front();
+        if (reader_stream_line_offsets.size() > 1) reader_stream_speed_next_offset = reader_stream_line_offsets[1];
+        return true;
+    }
+
+    std::string first;
+    size_t first_start = 0;
+    size_t first_next = 0;
+    if (!readerStreamReadWord(reader_stream_speed_offset, &first, &first_start, &first_next, err)) return false;
+    reader_stream_speed_offset = first_start;
+    reader_stream_offset = first_start;
+    reader_stream_speed_text = first;
+    reader_stream_speed_next_offset = first_next;
+    if (speed_mode == SpeedMode::TwoWords) {
+        std::string second;
+        size_t second_start = 0;
+        size_t second_next = 0;
+        std::string ignored;
+        if (readerStreamReadWord(first_next, &second, &second_start, &second_next, &ignored)) {
+            reader_stream_speed_text += " ";
+            reader_stream_speed_text += second;
+            reader_stream_speed_next_offset = second_next;
+        } else {
+            reader_stream_speed_next_offset = 0;
+        }
+    }
+    return true;
 }
 
 bool loadTextFile(const std::string& path, const std::string& label, std::string* err = nullptr)
@@ -3673,6 +3755,7 @@ const char* speedModeName()
 
 std::string currentSpeedText()
 {
+    if (reader_streaming) return reader_stream_speed_text;
     if (speed_mode == SpeedMode::Line) {
         if (reader_lines.empty()) return "";
         return reader_lines[std::max(0, std::min(speed_index, static_cast<int>(reader_lines.size()) - 1))];
@@ -3729,8 +3812,13 @@ void drawReaderSpeed()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 106);
-    int total = speed_mode == SpeedMode::Line ? static_cast<int>(reader_lines.size()) : static_cast<int>(reader_words.size());
-    canvas.printf("POS %d/%d", std::min(speed_index + 1, std::max(1, total)), total);
+    if (reader_streaming) {
+        int pct = reader_stream_file_size ? static_cast<int>(reader_stream_speed_offset * 100 / reader_stream_file_size) : 0;
+        canvas.printf("POS %d%%", pct);
+    } else {
+        int total = speed_mode == SpeedMode::Line ? static_cast<int>(reader_lines.size()) : static_cast<int>(reader_words.size());
+        canvas.printf("POS %d/%d", std::min(speed_index + 1, std::max(1, total)), total);
+    }
     canvas.setCursor(8, 122);
     canvas.print("OK RUN/PAUSE  UP/DN WPM  L/R MODE");
     canvas.pushSprite(0, 0);
@@ -5282,6 +5370,23 @@ void updateSpeedReader()
     if (screen != Screen::ReaderSpeed || speed_paused) return;
     uint32_t now = M5.millis();
     if (now < speed_next_ms) return;
+    if (reader_streaming) {
+        if (reader_stream_speed_next_offset == 0 || reader_stream_speed_next_offset >= reader_stream_file_size) {
+            speed_paused = true;
+            dirty = true;
+            return;
+        }
+        reader_stream_speed_offset = reader_stream_speed_next_offset;
+        std::string ignored;
+        if (!loadReaderStreamSpeedUnit(&ignored)) {
+            speed_paused = true;
+            reader_stream_status = "SPEED: " + (ignored.empty() ? std::string("read failed") : ignored);
+        }
+        saveReaderBookmark();
+        speed_next_ms = now + speedIntervalMs();
+        if (!display_off) dirty = true;
+        return;
+    }
     int total = speed_mode == SpeedMode::Line ? static_cast<int>(reader_lines.size()) : static_cast<int>(reader_words.size());
     if (total <= 0) {
         speed_paused = true;
@@ -5503,7 +5608,19 @@ void handleKey(KeyEvent ev)
             else if (ev.key == Key::Down) readerStreamMoveForward(1);
             else if (ev.key == Key::Left) readerStreamMoveBack(READER_LINES_PER_PAGE);
             else if (ev.key == Key::Right) readerStreamMoveForward(READER_LINES_PER_PAGE);
-            else if (ev.key == Key::One) reader_stream_status = "SPEED: short books only";
+            else if (ev.key == Key::One) {
+                speed_mode = SpeedMode::OneWord;
+                speed_paused = true;
+                reader_stream_speed_offset = reader_stream_offset;
+                std::string speed_error;
+                if (loadReaderStreamSpeedUnit(&speed_error)) {
+                    speed_next_ms = M5.millis() + speedIntervalMs();
+                    screen = Screen::ReaderSpeed;
+                    blockInput(300);
+                } else {
+                    reader_stream_status = "SPEED: " + (speed_error.empty() ? std::string("read failed") : speed_error);
+                }
+            }
             else if (ev.key == Key::Home || ev.key == Key::Back) {
                 saveReaderBookmark();
                 saveReaderState();
@@ -5538,6 +5655,31 @@ void handleKey(KeyEvent ev)
     }
 
     if (screen == Screen::ReaderSpeed) {
+        if (reader_streaming) {
+            if (ev.key == Key::Ok) {
+                speed_paused = !speed_paused;
+                speed_next_ms = M5.millis() + speedIntervalMs();
+            } else if (ev.key == Key::Up) speed_wpm = std::min(SPEED_WPM_MAX, speed_wpm + SPEED_WPM_STEP);
+            else if (ev.key == Key::Down) speed_wpm = std::max(SPEED_WPM_MIN, speed_wpm - SPEED_WPM_STEP);
+            else if (ev.key == Key::Left || ev.key == Key::Right) {
+                int mode = static_cast<int>(speed_mode);
+                mode = ev.key == Key::Left ? (mode + 2) % 3 : (mode + 1) % 3;
+                speed_mode = static_cast<SpeedMode>(mode);
+                std::string ignored;
+                if (!loadReaderStreamSpeedUnit(&ignored)) reader_stream_status = "SPEED: read failed";
+            } else if (ev.key == Key::Home || ev.key == Key::Back) {
+                reader_stream_offset = reader_stream_speed_offset;
+                reader_stream_history.clear();
+                std::string ignored;
+                loadReaderStreamPage(&ignored);
+                saveReaderBookmark();
+                saveReaderState();
+                screen = Screen::ReaderView;
+                blockInput(250);
+            }
+            dirty = true;
+            return;
+        }
         if (ev.key == Key::Ok) {
             speed_paused = !speed_paused;
             speed_next_ms = M5.millis() + speedIntervalMs();

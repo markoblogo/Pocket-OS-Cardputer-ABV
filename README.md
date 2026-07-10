@@ -36,7 +36,7 @@ Stable baseline:
 - Boot: ABVx splash and large monochrome launcher.
 - Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
 - Voice/Record: one RAM-first 20-second WAV voice-note mode, save/play/delete, continuous playback, waveform.
-- Read/Reader: TXT books, English/Russian display, speed reading, persistent bookmarks.
+- Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer, alarm.
 - Files: SD browser, file opening, file info, delete confirmation.
@@ -63,7 +63,7 @@ Global:
 App highlights:
 
 - Listen: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle.
-- Read: Up/Down line, Left/Right page, `1` speed mode, OK pause/resume in speed mode.
+- Read: Up/Down line, Left/Right page, `1` speed mode for any supported book, OK pause/resume in speed mode.
 - Write: `1` new/edit, Backspace delete from list.
 - Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.
 - Routines: OK toggles, `1` next day, Right stats, Left manage.
@@ -148,7 +148,7 @@ idf.py -p /dev/cu.usbmodem101 flash
 1. Boot: ABVx splash and launcher.
 2. Music: play `A.MP3`, check smooth sound/waveform, stop.
 3. Record: create short note, confirm `Record saved`, play it back, delete test file.
-4. Reader: open TXT, scroll, speed mode, exit/reopen and confirm bookmark.
+4. Reader: open both a small TXT and a large English/Russian TXT, scroll by line/page, test `1W / 2W / LINE`, then exit/reopen and confirm the bookmark.
 5. Notes: create LAT note, edit it, delete it; Cyrillic note should be view-only.
 6. Time: stopwatch, timer, alarm sound.
 7. Files: browse SD, open TXT/MP3/WAV, open unsupported file info.
