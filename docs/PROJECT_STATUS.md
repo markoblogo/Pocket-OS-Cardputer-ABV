@@ -1,11 +1,13 @@
 # ABVx Project Status
 
-Current baseline: offline-first Cardputer ADV firmware with stable local apps. Product direction is now **ABVx Pocket OS**: fast capture, memory, reading/listening, routines, and transfer.
+Current baseline: **v0.2.0 Release Baseline**.
+
+ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, reading/listening, routines, and transfer.
 
 ## Working hardware-verified features
 
 - Launcher: large monochrome list UI, app navigation, battery indicator.
-- Music: MP3 files from `/sdcard/music`, double-buffered 16 kHz mono playback, waveform, volume, shuffle, prev/next.
+- Music: MP3 files from `/sdcard/music`, smoother buffered 16 kHz mono playback, waveform, volume, shuffle, prev/next.
 - Record: one hardware-verified 20-second 8 kHz/8-bit WAV mode, RAM-first capture, waveform, playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
@@ -14,7 +16,7 @@ Current baseline: offline-first Cardputer ADV firmware with stable local apps. P
 - Habits: routines list, daily checks, manual next-day rollover, 7D/30D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, 64 KB small upload limit.
+- Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, 64 KB small-file upload limit.
 
 ## Product reframing
 
@@ -42,6 +44,7 @@ The apps are no longer the top-level product idea. They are implementation modul
 - Notes editor is LAT/plain text only; Cyrillic files are view-only.
 - Reader Cyrillic is custom/best-effort; French/Ukrainian polish is postponed.
 - Connections is useful for diagnostics/list/download/small files, not large media sync.
+- Inbox is present as an early Pocket OS layer but must not do background SD writes during normal app use.
 
 ## Architecture
 

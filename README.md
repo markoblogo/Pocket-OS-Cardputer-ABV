@@ -29,6 +29,8 @@ Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ## Current status
 
+Current baseline: **v0.2.0 Release Baseline**.
+
 Tested on real Cardputer ADV hardware.
 
 Stable baseline:
@@ -43,11 +45,12 @@ Stable baseline:
 - Routines/Habits: daily checklist, manual next day, 7D/30D stats.
 - Decide/Randomizer: `YES / NO / MB`.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Transfer/Connections: Wi-Fi AP list/download/small-upload diagnostics.
+- Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics.
 
 Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
+Changes: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Controls
 
@@ -120,7 +123,7 @@ Small upload only:
 python3 tools/cardputer_upload.py ./NOTE.TXT /notes/NOTE.TXT
 ```
 
-Upload is intentionally limited to 64KB. Large MP3 upload over Wi-Fi is unstable on Cardputer ADV and is disabled. Use an SD reader for music files.
+Upload is intentionally limited to 64KB. Large MP3 upload over Wi-Fi is unstable on Cardputer ADV and is disabled. Use an SD reader/hub for music files.
 
 ## Build
 
@@ -155,3 +158,4 @@ idf.py -p /dev/cu.usbmodem101 flash
 8. Habits: toggle habit, next day, stats.
 9. Settings: SD reprobe, About, config/theme.
 10. Connections: AP starts, `/api/ping`, list, download, write-test.
+11. Settings: About shows ABVx Pocket OS `v0.2.0`.

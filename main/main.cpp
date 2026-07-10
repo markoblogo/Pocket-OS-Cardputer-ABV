@@ -6443,8 +6443,7 @@ void handleKey(KeyEvent ev)
             } else if (settings_cursor == 5 && ev.key == Key::Ok) {
                 const esp_app_desc_t* app = esp_app_get_description();
                 char buf[160];
-                snprintf(buf, sizeof(buf), "%s\nver %s\n%s %s\nIDF %s",
-                         app ? app->project_name : "ABVx",
+                snprintf(buf, sizeof(buf), "ABVx Pocket OS\nv%s\n%s %s\nIDF %s",
                          app ? app->version : "-",
                          app ? app->date : __DATE__,
                          app ? app->time : __TIME__,

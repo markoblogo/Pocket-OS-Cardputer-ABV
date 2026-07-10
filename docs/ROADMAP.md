@@ -17,13 +17,13 @@ Architecture:
 
 ## Phase 1: Stability baseline
 
-Status: mostly complete.
+Status: v0.2.0 release baseline prepared.
 
 Remaining work:
 
 - Continue smoke testing Music -> Record -> Reader -> Notes -> Files after SD operations.
 - Keep large Wi-Fi upload disabled until a separate transfer redesign is done.
-- Tag a first test release after one clean full hardware pass.
+- Tag first public test release after one clean full hardware pass.
 
 Acceptance:
 
