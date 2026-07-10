@@ -2129,6 +2129,12 @@ std::string musicDisplayName(const std::string& file)
     return file;
 }
 
+std::string sortKey(std::string s)
+{
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
 void scanMusic()
 {
     music_scan_status = "MOUNT";
@@ -2207,8 +2213,10 @@ void scanMusic()
             f_closedir(&fat_dir);
         }
     }
-    std::sort(next_tracks.begin(), next_tracks.end());
     loadMusicIndex();
+    std::sort(next_tracks.begin(), next_tracks.end(), [](const std::string& a, const std::string& b) {
+        return sortKey(musicDisplayName(a)) < sortKey(musicDisplayName(b));
+    });
     tracks.swap(next_tracks);
     if (tracks.empty() && used_fatfs_fallback && fatfs_result != FR_OK) {
         music_scan_status = "FAT " + std::to_string(static_cast<int>(fatfs_result));
@@ -2245,6 +2253,33 @@ std::string selectedPath()
 {
     if (tracks.empty()) return "";
     return std::string(MUSIC_DIR) + "/" + tracks[selected_track];
+}
+
+std::string musicProblemBody(const std::string& path, const std::string& err)
+{
+    struct stat st = {};
+    std::string body = baseName(path);
+    if (stat(path.c_str(), &st) == 0) {
+        body += "\nSIZE ";
+        body += std::to_string(static_cast<unsigned long long>(st.st_size));
+        body += "B";
+    }
+    body += "\n";
+    body += err.empty() ? "decode failed" : err;
+    return body;
+}
+
+bool hasMusicPlaybackHeap(std::string* err = nullptr)
+{
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const size_t needed = INPUT_BUF_SIZE + (MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) + (AUDIO_OUTPUT_RATE * CHUNK_MS / 1000 * sizeof(int16_t) * 2) + 8192;
+    if (largest >= needed) return true;
+    if (err) {
+        *err = "low heap ";
+        *err += std::to_string(static_cast<unsigned long long>(largest));
+        *err += "B";
+    }
+    return false;
 }
 
 uint32_t recSecondsMsFromSamples(uint32_t samples)
@@ -2395,6 +2430,19 @@ bool startPlayback(std::string* err = nullptr)
         return false;
     }
     std::string path = override_music_path.empty() ? selectedPath() : override_music_path;
+    struct stat st = {};
+    if (stat(path.c_str(), &st) != 0) {
+        if (err) {
+            *err = "stat failed: ";
+            *err += std::strerror(errno);
+        }
+        return false;
+    }
+    if (st.st_size < 64) {
+        if (err) *err = "file too small";
+        return false;
+    }
+    if (!hasMusicPlaybackHeap(err)) return false;
     mp3_file = fopen(path.c_str(), "rb");
     if (!mp3_file) {
         if (err) {
@@ -2445,7 +2493,14 @@ void nextTrack(int delta)
     } else {
         selected_track = (selected_track + delta + tracks.size()) % tracks.size();
     }
-    if (playing) startPlayback();
+    if (playing) {
+        std::string err;
+        const std::string path = selectedPath();
+        if (!startPlayback(&err)) {
+            showMessage("BAD MP3", musicProblemBody(path, err), MessageReturn::Music);
+            blockInput(500);
+        }
+    }
     dirty = true;
 }
 
@@ -2574,8 +2629,9 @@ void updateAudio()
                 screen = Screen::MusicList;
             }
         } else {
+            const std::string path = override_music_path.empty() ? selectedPath() : override_music_path;
             stopPlayback();
-            showMessage("Playback failed", err.empty() ? "decode failed" : err, MessageReturn::Music);
+            showMessage("BAD MP3", musicProblemBody(path, err), MessageReturn::Music);
         }
         dirty = true;
         blockInput(350);
@@ -4380,7 +4436,10 @@ bool openFileEntry(const FileEntry& e, std::string* err = nullptr)
     }
     if (ext == ".mp3") {
         override_music_path = e.path;
-        if (!startPlayback(err)) return false;
+        if (!startPlayback(err)) {
+            if (err) *err = musicProblemBody(e.path, *err);
+            return false;
+        }
         return true;
     }
     if (ext == ".wav" || ext == ".pcm") {
@@ -5759,8 +5818,9 @@ void processMusicAutostart()
     music_autostart_pending = false;
     if (screen != Screen::MusicList && screen != Screen::Launcher) return;
     std::string err;
+    const std::string path = selectedPath();
     if (!startPlayback(&err)) {
-        showMessage("Music failed", err.empty() ? "no music" : err);
+        showMessage("BAD MP3", path.empty() ? (err.empty() ? "no music" : err) : musicProblemBody(path, err));
     }
     dirty = true;
 }
@@ -5817,8 +5877,9 @@ void handleKey(KeyEvent ev)
             if (!tracks.empty()) {
                 override_music_path.clear();
                 std::string err;
+                const std::string path = selectedPath();
                 if (!startPlayback(&err)) {
-                    showMessage("Playback failed", err.empty() ? "open failed" : err, MessageReturn::Music);
+                    showMessage("BAD MP3", musicProblemBody(path, err), MessageReturn::Music);
                     blockInput(500);
                 }
             }
