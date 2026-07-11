@@ -2087,6 +2087,81 @@ std::string utf8TailByChars(const std::string& text, int max_chars)
     return text.substr(start);
 }
 
+std::vector<std::string> wrapUtf8TextColumns(const std::string& text, int max_cols)
+{
+    std::vector<std::string> lines;
+    std::string line;
+    std::string word;
+    int line_cols = 0;
+    int word_cols = 0;
+    auto flush_word = [&]() {
+        if (word.empty()) return;
+        if (line_cols > 0 && line_cols + 1 + word_cols > max_cols) {
+            lines.push_back(line);
+            line.clear();
+            line_cols = 0;
+        }
+        if (word_cols > max_cols) {
+            if (!line.empty()) {
+                lines.push_back(line);
+                line.clear();
+                line_cols = 0;
+            }
+            std::string part;
+            int cols = 0;
+            for (size_t i = 0; i < word.size();) {
+                size_t len = utf8CharLen(static_cast<unsigned char>(word[i]));
+                if (i + len > word.size()) len = 1;
+                if (cols >= max_cols) {
+                    lines.push_back(part);
+                    part.clear();
+                    cols = 0;
+                }
+                part.append(word, i, len);
+                ++cols;
+                i += len;
+            }
+            line = part;
+            line_cols = cols;
+        } else {
+            if (line_cols > 0) {
+                line += ' ';
+                ++line_cols;
+            }
+            line += word;
+            line_cols += word_cols;
+        }
+        word.clear();
+        word_cols = 0;
+    };
+    for (size_t i = 0; i < text.size();) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c == '\r') { ++i; continue; }
+        if (c == '\n') {
+            flush_word();
+            lines.push_back(line.empty() ? " " : line);
+            line.clear();
+            line_cols = 0;
+            ++i;
+            continue;
+        }
+        if (c == ' ' || c == '\t') {
+            flush_word();
+            ++i;
+            continue;
+        }
+        size_t len = utf8CharLen(c);
+        if (i + len > text.size()) len = 1;
+        word.append(text, i, len);
+        ++word_cols;
+        i += len;
+    }
+    flush_word();
+    if (!line.empty()) lines.push_back(line);
+    if (lines.empty()) lines.push_back("");
+    return lines;
+}
+
 bool saveNewNote(std::string* out_name, std::string* err = nullptr)
 {
     if (!ensureNotesDir(err)) return false;
@@ -4216,10 +4291,12 @@ void drawNotesEdit()
     canvas.setTextColor(uiFg(), uiBg());
     std::string display_text = note_input;
     std::string tail = utf8TailByChars(display_text, 57);
+    std::vector<std::string> lines = wrapUtf8TextColumns(tail, 19);
+    int start = std::max(0, static_cast<int>(lines.size()) - 3);
     for (int row = 0; row < 3; ++row) {
         canvas.setCursor(8, 52 + row * 22);
-        size_t off = row * 19;
-        if (off < tail.size()) canvas.print(tail.substr(off, 19).c_str());
+        int idx = start + row;
+        if (idx < static_cast<int>(lines.size())) canvas.print(lines[idx].c_str());
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
