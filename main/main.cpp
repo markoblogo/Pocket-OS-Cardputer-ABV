@@ -50,6 +50,7 @@ constexpr const char* RECORDINGS_FALLBACK_DIR = "/sdcard/RECS";
 constexpr const char* HABITS_DIR = "/sdcard/habits";
 constexpr const char* HABITS_FILE = "/sdcard/habits/HABITS.TXT";
 constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
+constexpr const char* HABIT_LOG_TMP_FILE = "/sdcard/habits/LOG.NEW";
 constexpr const char* HABIT_STATE_FILE = "/sdcard/habits/STATE.TXT";
 constexpr const char* CONFIG_DIR = "/sdcard/CARDPTR";
 constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
@@ -100,7 +101,7 @@ volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Dashboard, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, Settings, Connections, InboxList, Message };
+enum class Screen { Launcher, Dashboard, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -198,6 +199,10 @@ int habit_day = 1;
 int habit_stats_window = 7;
 int habits_manage_cursor = 0;
 std::string habit_input;
+std::string habit_edit_id;
+bool habit_edit_renaming = false;
+std::string pending_habit_id;
+std::string pending_habit_name;
 int settings_cursor = 0;
 ThemeMode theme_mode = ThemeMode::White;
 SoundMode sound_mode = SoundMode::Mid;
@@ -221,6 +226,8 @@ uint32_t last_input_ms = 0;
 bool display_off = false;
 bool display_dim = false;
 bool dirty = true;
+int battery_last_level = -1;
+int battery_last_mv = -1;
 
 FILE* mp3_file = nullptr;
 mp3dec_t mp3_dec;
@@ -339,6 +346,8 @@ bool initSd();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
 void clearCaptureChunks();
 bool appendCaptureChunk(const void* data, size_t byte_count);
+uint32_t elapsedClockSeconds();
+void formatHMS(uint32_t total, char* out, size_t out_len);
 bool flushAndClose(FILE* f)
 {
     if (!f) return false;
@@ -1297,7 +1306,10 @@ void saveHabitLogForDay()
 {
     if (!ensureHabitsDir()) return;
     std::string day = habitDayId();
-    std::vector<std::string> old_lines;
+    unlink(HABIT_LOG_TMP_FILE);
+    FILE* out = fopen(HABIT_LOG_TMP_FILE, "wb");
+    if (!out) return;
+    bool ok = true;
     FILE* in = fopen(HABIT_LOG_FILE, "rb");
     if (in) {
         char line[160];
@@ -1305,18 +1317,24 @@ void saveHabitLogForDay()
             std::string s = line;
             size_t p = s.find('|');
             if (p != std::string::npos && s.substr(0, p) == day) continue;
-            if (old_lines.size() < MAX_STATE_RECORDS) old_lines.push_back(s);
+            if (fputs(line, out) == EOF) { ok = false; break; }
         }
         fclose(in);
     }
-    FILE* out = fopen(HABIT_LOG_FILE, "wb");
-    if (!out) return;
-    for (const auto& s : old_lines) fputs(s.c_str(), out);
     for (const auto& h : habits) {
         if (!h.active) continue;
-        fprintf(out, "%s|%s|%d\n", day.c_str(), h.id.c_str(), h.done ? 1 : 0);
+        if (fprintf(out, "%s|%s|%d\n", day.c_str(), h.id.c_str(), h.done ? 1 : 0) < 0) ok = false;
     }
-    flushAndClose(out);
+    if (!flushAndClose(out)) ok = false;
+    if (!ok) {
+        unlink(HABIT_LOG_TMP_FILE);
+        return;
+    }
+    if (rename(HABIT_LOG_TMP_FILE, HABIT_LOG_FILE) != 0) {
+        // FATFS may not replace an existing target atomically.
+        unlink(HABIT_LOG_FILE);
+        if (rename(HABIT_LOG_TMP_FILE, HABIT_LOG_FILE) != 0) unlink(HABIT_LOG_TMP_FILE);
+    }
 }
 
 void scanHabits()
@@ -1393,6 +1411,64 @@ bool appendHabit(const std::string& title, std::string* err = nullptr)
     return flushAndClose(f);
 }
 
+bool renameHabit(const std::string& id, const std::string& title, std::string* err = nullptr)
+{
+    if (!ensureDefaultHabits(err)) return false;
+    std::string clean = title.substr(0, 32);
+    for (char& c : clean) {
+        if (c == '|' || static_cast<unsigned char>(c) < 32) c = ' ';
+    }
+    if (clean.empty()) {
+        if (err) *err = "empty title";
+        return false;
+    }
+    FILE* in = fopen(HABITS_FILE, "rb");
+    if (!in) {
+        if (err) *err = "open";
+        return false;
+    }
+    const std::string tmp_path = std::string(HABITS_DIR) + "/HABITS.NEW";
+    unlink(tmp_path.c_str());
+    FILE* out = fopen(tmp_path.c_str(), "wb");
+    if (!out) {
+        fclose(in);
+        if (err) *err = "write open";
+        return false;
+    }
+    bool found = false;
+    bool ok = true;
+    char line[160];
+    while (fgets(line, sizeof(line), in)) {
+        std::string s = line;
+        size_t p1 = s.find('|');
+        size_t p2 = p1 == std::string::npos ? std::string::npos : s.find('|', p1 + 1);
+        if (p1 != std::string::npos && p2 != std::string::npos && s.substr(0, p1) == id) {
+            const std::string active = s.substr(p2 + 1);
+            if (fprintf(out, "%s|%s|%s", id.c_str(), clean.c_str(), active.c_str()) < 0) ok = false;
+            found = true;
+        } else if (fputs(line, out) == EOF) {
+            ok = false;
+        }
+        if (!ok) break;
+    }
+    fclose(in);
+    if (!flushAndClose(out)) ok = false;
+    if (!ok || !found) {
+        unlink(tmp_path.c_str());
+        if (err) *err = found ? "write" : "not found";
+        return false;
+    }
+    if (rename(tmp_path.c_str(), HABITS_FILE) != 0) {
+        unlink(HABITS_FILE);
+        if (rename(tmp_path.c_str(), HABITS_FILE) != 0) {
+            unlink(tmp_path.c_str());
+            if (err) *err = "replace";
+            return false;
+        }
+    }
+    return true;
+}
+
 bool disableHabit(const std::string& id, std::string* err = nullptr)
 {
     if (!ensureDefaultHabits(err)) return false;
@@ -1443,6 +1519,30 @@ int habitDoneCount(const std::string& id, int start_day, int end_day)
     }
     fclose(f);
     return done_count;
+}
+
+int habitStreak(const std::string& id)
+{
+    constexpr int kStreakWindow = 365;
+    const int start_day = std::max(1, habit_day - kStreakWindow + 1);
+    std::vector<uint8_t> done(static_cast<size_t>(habit_day - start_day + 1), 0);
+    FILE* f = fopen(HABIT_LOG_FILE, "rb");
+    if (!f) return 0;
+    char line[160];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s = line;
+        size_t p1 = s.find('|');
+        size_t p2 = p1 == std::string::npos ? std::string::npos : s.find('|', p1 + 1);
+        if (p1 == std::string::npos || p2 == std::string::npos) continue;
+        const std::string day = s.substr(0, p1);
+        const int day_num = day.size() == 7 && day.rfind("DAY", 0) == 0 ? std::atoi(day.substr(3).c_str()) : 0;
+        if (day_num < start_day || day_num > habit_day) continue;
+        if (s.substr(p1 + 1, p2 - p1 - 1) == id && s.substr(p2 + 1) == "1") done[day_num - start_day] = 1;
+    }
+    fclose(f);
+    int streak = 0;
+    for (int day = habit_day; day >= start_day && done[day - start_day]; --day) ++streak;
+    return streak;
 }
 
 size_t utf8CharLen(unsigned char c)
@@ -2273,12 +2373,24 @@ std::string musicProblemBody(const std::string& path, const std::string& err)
 
 bool hasMusicPlaybackHeap(std::string* err = nullptr)
 {
+    const size_t pcm_values = (AUDIO_OUTPUT_RATE * CHUNK_MS / 1000) + MINIMP3_MAX_SAMPLES_PER_FRAME;
+    const auto allocationNeeded = [](size_t current_capacity, size_t required_capacity, size_t element_size) {
+        return current_capacity >= required_capacity ? static_cast<size_t>(0) : required_capacity * element_size;
+    };
+    const size_t input_need = allocationNeeded(mp3_buf.capacity(), INPUT_BUF_SIZE, sizeof(uint8_t));
+    const size_t frame_need = allocationNeeded(mp3_frame_pcm.capacity(), MINIMP3_MAX_SAMPLES_PER_FRAME, sizeof(mp3d_sample_t));
+    const size_t current_need = allocationNeeded(pcm_chunk.capacity(), pcm_values, sizeof(int16_t));
+    const size_t queued_need = allocationNeeded(pcm_next_chunk.capacity(), pcm_values, sizeof(int16_t));
+    const size_t required_total = input_need + frame_need + current_need + queued_need + 8192;
+    const size_t required_block = std::max(std::max(input_need, frame_need), std::max(current_need, queued_need));
     const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    const size_t needed = INPUT_BUF_SIZE + (MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) + (AUDIO_OUTPUT_RATE * CHUNK_MS / 1000 * sizeof(int16_t) * 2) + 8192;
-    if (largest >= needed) return true;
+    const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    if (largest >= required_block && free_bytes >= required_total) return true;
     if (err) {
         *err = "low heap ";
         *err += std::to_string(static_cast<unsigned long long>(largest));
+        *err += "B free ";
+        *err += std::to_string(static_cast<unsigned long long>(free_bytes));
         *err += "B";
     }
     return false;
@@ -2324,7 +2436,7 @@ void applyVolume()
 const char* volumeName()
 {
     if (volume_mode == VolumeMode::Mute) return "MUTE";
-    if (volume_mode == VolumeMode::Loud) return "LOUD";
+    if (volume_mode == VolumeMode::Loud) return "MAX";
     return "MID";
 }
 
@@ -2423,7 +2535,7 @@ bool seekPastId3(FILE* f, std::string* err = nullptr)
 
 bool decodeChunk(std::string* err);
 
-bool startPlayback(std::string* err = nullptr)
+bool startPlaybackOnce(std::string* err = nullptr)
 {
     stopPlayback();
     if (tracks.empty()) {
@@ -2484,6 +2596,35 @@ bool startPlayback(std::string* err = nullptr)
     blockInput(400);
     appendInboxEvent("LISTEN", override_music_path.empty() ? tracks[selected_track] : override_music_path.substr(override_music_path.find_last_of('/') + 1));
     return true;
+}
+
+bool playbackFailureMayBeSdTransient(const std::string& err)
+{
+    return err.find("stat failed") != std::string::npos ||
+           err.find("open failed") != std::string::npos ||
+           err.find("seek failed") != std::string::npos ||
+           err.find("no mpeg sync") != std::string::npos ||
+           err.find("decode produced no pcm") != std::string::npos;
+}
+
+bool startPlayback(std::string* err = nullptr)
+{
+    std::string first_error;
+    if (startPlaybackOnce(&first_error)) return true;
+
+    // Settings writes CONFIG.TXT on the shared FAT volume. Cardputer ADV can
+    // leave the next VFS read in a transient failure state; retry once after a
+    // controlled reprobe instead of mislabeling every valid track as BAD MP3.
+    if (!playbackFailureMayBeSdTransient(first_error) || !manualSdReprobe()) {
+        if (err) *err = first_error;
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    std::string retry_error;
+    if (startPlaybackOnce(&retry_error)) return true;
+    if (err) *err = retry_error.empty() ? first_error : retry_error;
+    return false;
 }
 
 void nextTrack(int delta)
@@ -3088,9 +3229,46 @@ void updateRecordingPlayback()
 
 int batteryPercent()
 {
-    int level = M5.Power.getBatteryLevel();
-    if (level < 0 || level > 100) return -1;
-    return level;
+    static int stable_level = -1;
+    static int pending_drop = -1;
+    static uint32_t last_sample_ms = 0;
+    const uint32_t now = M5.millis();
+    if (last_sample_ms != 0 && now - last_sample_ms < 2000) return stable_level;
+    last_sample_ms = now;
+
+    int level = -1;
+    // The first ADC conversion after a display/app transition can be zero on
+    // Cardputer ADV. Take a few short samples before declaring it unavailable.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        level = M5.Power.getBatteryLevel();
+        if (level > 0 && level <= 100) break;
+        if (attempt < 2) vTaskDelay(pdMS_TO_TICKS(12));
+    }
+    battery_last_level = level;
+    battery_last_mv = M5.Power.getBatteryVoltage();
+    // The voltage path is independent at the public API boundary. Use it if
+    // level reporting is unavailable but the Cardputer ADC returned a real
+    // Li-Po voltage.
+    if ((level <= 0 || level > 100) && battery_last_mv >= 3300 && battery_last_mv <= 4300) {
+        level = std::max(0, std::min(100, (battery_last_mv - 3300) * 100 / 800));
+    }
+    if (level < 0 || level > 100) return stable_level;
+    // Cardputer ADV occasionally reports one false 0% while running from the
+    // battery. Until there is a credible sample, show --% rather than a false
+    // flat-battery warning; afterwards keep the last credible value.
+    if (level == 0 && !(battery_last_mv >= 2800 && battery_last_mv <= 4300)) {
+        if (stable_level < 0 || stable_level > 5) return stable_level;
+    }
+    if (stable_level < 0 || level >= stable_level || level >= stable_level - 12) {
+        stable_level = level;
+        pending_drop = -1;
+    } else if (pending_drop == level) {
+        stable_level = level;
+        pending_drop = -1;
+    } else {
+        pending_drop = level;
+    }
+    return stable_level;
 }
 
 void drawBatteryWidget(int x, int y)
@@ -3234,6 +3412,16 @@ void resumeContext()
     dirty = true;
 }
 
+void openDashboard()
+{
+    // Read-only refresh for today's routine status. This does not create a
+    // new storage format or alter the current Music/Record state.
+    scanHabits();
+    screen = Screen::Dashboard;
+    blockInput(250);
+    dirty = true;
+}
+
 void pulseUi()
 {
     // Visual glitch effects are disabled for now. They were visually ambiguous
@@ -3290,31 +3478,49 @@ void drawDashboard()
     canvas.print("DASH");
     drawBatteryWidget(166, 8);
 
+    char clock_text[16];
+    formatHMS(elapsedClockSeconds(), clock_text, sizeof(clock_text));
+    canvas.setTextSize(3);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(42, 30);
+    canvas.print(clock_text);
+
+    int done_count = 0;
+    for (const auto& h : habits) if (h.done) ++done_count;
+    const int habit_total = static_cast<int>(habits.size());
+    const int habit_pct = habit_total > 0 ? (done_count * 100) / habit_total : 0;
+
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
-    canvas.setCursor(8, 34);
+    canvas.setCursor(8, 64);
     canvas.printf("RESUME %s", resumeName());
+    canvas.setCursor(8, 76);
+    canvas.printf("TODAY %d/%d  %d%%", done_count, habit_total, habit_pct);
 
     uint64_t total = 0;
     uint64_t free_b = 0;
-    canvas.setCursor(8, 50);
+    canvas.setCursor(8, 88);
     if (sdUsage(&total, &free_b) && total >= free_b) {
         canvas.printf("SD FREE %s USED %s", formatBytes(free_b).c_str(), formatBytes(total - free_b).c_str());
     } else {
         canvas.print("SD NOT READY");
     }
 
-    canvas.setTextColor(uiFg(), uiBg());
-    canvas.setTextSize(2);
-    canvas.setCursor(8, 72);
-    canvas.printf("M:%d B:%d", static_cast<int>(tracks.size()), static_cast<int>(books.size()));
-    canvas.setCursor(8, 96);
-    canvas.printf("N:%d R:%d", static_cast<int>(notes.size()), static_cast<int>(recordings.size()));
-
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
-    canvas.setCursor(8, 122);
-    canvas.print("OK RESUME      GO BACK");
+    canvas.setCursor(8, 102);
+    const int dashboard_battery = batteryPercent();
+    if (dashboard_battery < 0) {
+        canvas.printf("BAT L%d V%d B%d", battery_last_level, battery_last_mv, static_cast<int>(M5.getBoard()));
+    } else if (dashboard_battery <= 5 && battery_last_mv > 0) {
+        canvas.printf("BAT LOW %dmV", battery_last_mv);
+    } else {
+        canvas.printf("M%d B%d N%d V%d", static_cast<int>(tracks.size()), static_cast<int>(books.size()), static_cast<int>(notes.size()), static_cast<int>(recordings.size()));
+    }
+    canvas.setCursor(8, 114);
+    canvas.print("1 LISTEN  2 READ  3 WRITE");
+    canvas.setCursor(8, 124);
+    canvas.print("OK RESUME        GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -3425,7 +3631,7 @@ void drawHabitsList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 112);
-    canvas.print("L MANAGE  R STATS  1 NEW");
+    canvas.print("L MANAGE R STATS 1 NEXT DAY");
     canvas.setCursor(8, 122);
     canvas.print("OK CHECK        GO BACK");
     canvas.pushSprite(0, 0);
@@ -3451,11 +3657,11 @@ void drawHabitsStats()
     canvas.setTextSize(2);
     for (int i = 0; i < rows; ++i) {
         int done = habitDoneCount(habits[i].id, start_day, habit_day);
+        int streak = habitStreak(habits[i].id);
         total_done += done;
-        int pct = days > 0 ? (done * 100) / days : 0;
         canvas.setCursor(8, 44 + i * 22);
         canvas.setTextColor(uiFg(), uiBg());
-        canvas.printf("%.8s %d/%d %d%%", habits[i].title.c_str(), done, days, pct);
+        canvas.printf("%.7s %d/%d S%d", habits[i].title.c_str(), done, days, streak);
     }
     for (int i = rows; i < static_cast<int>(habits.size()); ++i) {
         total_done += habitDoneCount(habits[i].id, start_day, habit_day);
@@ -3465,21 +3671,21 @@ void drawHabitsStats()
     canvas.setCursor(8, 106);
     canvas.printf("TOTAL %d/%d %d%%", total_done, total_possible, (total_done * 100) / total_possible);
     canvas.setCursor(8, 122);
-    canvas.print("L/R 7D/30D       GO BACK");
+    canvas.print("L/R 7D/30D/365D  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
 void drawHabitsManage()
 {
-    static const char* items[] = {"ADD HABIT", "DISABLE SEL", "BACK"};
+    static const char* items[] = {"ADD HABIT", "RENAME SEL", "DISABLE SEL", "BACK"};
     canvas.fillScreen(uiBg());
     drawCyberAccent();
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.print("MANAGE");
-    for (int i = 0; i < 3; ++i) {
-        canvas.setCursor(8, 38 + i * 24);
+    for (int i = 0; i < 4; ++i) {
+        canvas.setCursor(8, 32 + i * 20);
         canvas.setTextColor(i == habits_manage_cursor ? uiBg() : uiFg(), i == habits_manage_cursor ? uiFg() : uiBg());
         canvas.printf("%c %s", i == habits_manage_cursor ? '>' : ' ', items[i]);
     }
@@ -3493,6 +3699,25 @@ void drawHabitsManage()
     canvas.pushSprite(0, 0);
 }
 
+void drawHabitsDisableConfirm()
+{
+    canvas.fillScreen(uiBg());
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 10);
+    canvas.print("DISABLE?");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(8, 48);
+    canvas.printf("%.28s", pending_habit_name.c_str());
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 104);
+    canvas.print("history stays in stats");
+    canvas.setCursor(8, 122);
+    canvas.print("OK DISABLE       GO CANCEL");
+    canvas.pushSprite(0, 0);
+}
+
 void drawHabitsEdit()
 {
     canvas.fillScreen(uiBg());
@@ -3500,7 +3725,7 @@ void drawHabitsEdit()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.print("ADD HABIT");
+    canvas.print(habit_edit_renaming ? "RENAME" : "ADD HABIT");
     canvas.setTextSize(2);
     canvas.setCursor(8, 48);
     std::string tail = habit_input.size() > 19 ? habit_input.substr(habit_input.size() - 19) : habit_input;
@@ -5722,6 +5947,7 @@ void drawIfDirty()
     else if (screen == Screen::HabitsStats) drawHabitsStats();
     else if (screen == Screen::HabitsManage) drawHabitsManage();
     else if (screen == Screen::HabitsEdit) drawHabitsEdit();
+    else if (screen == Screen::HabitsDisableConfirm) drawHabitsDisableConfirm();
     else if (screen == Screen::Settings) drawSettings();
     else if (screen == Screen::Connections) drawConnections();
     else if (screen == Screen::InboxList) drawInboxList();
@@ -5851,9 +6077,7 @@ bool handleOneButtonCapture(KeyEvent ev)
         return true;
     }
     if (c == 'd' || c == '0') {
-        screen = Screen::Dashboard;
-        blockInput(250);
-        dirty = true;
+        openDashboard();
         return true;
     }
     if (c == '2' || c == '@' || c == 's') {
@@ -5883,6 +6107,7 @@ void handleKey(KeyEvent ev)
         screen != Screen::NotesEdit &&
         screen != Screen::HabitsEdit &&
         screen != Screen::Launcher &&
+        screen != Screen::Dashboard &&
         screen != Screen::MusicList &&
         screen != Screen::MusicPlaying) return;
     last_input_ms = M5.millis();
@@ -5904,6 +6129,9 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Dashboard) {
         if (ev.key == Key::Ok) resumeContext();
+        else if (shortcutChar(ev) == '1') { last_resume_target = ResumeTarget::Music; resumeContext(); }
+        else if (shortcutChar(ev) == '2') { last_resume_target = ResumeTarget::Reader; resumeContext(); }
+        else if (shortcutChar(ev) == '3') { last_resume_target = ResumeTarget::Notes; resumeContext(); }
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
@@ -6472,7 +6700,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::HabitsStats) {
         if (ev.key == Key::Left || ev.key == Key::Right || ev.key == Key::Ok) {
-            habit_stats_window = habit_stats_window == 7 ? 30 : 7;
+            habit_stats_window = habit_stats_window == 7 ? 30 : (habit_stats_window == 30 ? 365 : 7);
             blockInput(220);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::HabitsList;
@@ -6484,18 +6712,26 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::HabitsManage) {
         if (ev.key == Key::Up) habits_manage_cursor = std::max(0, habits_manage_cursor - 1);
-        else if (ev.key == Key::Down) habits_manage_cursor = std::min(2, habits_manage_cursor + 1);
+        else if (ev.key == Key::Down) habits_manage_cursor = std::min(3, habits_manage_cursor + 1);
         else if (ev.key == Key::Ok) {
             if (habits_manage_cursor == 0) {
                 habit_input.clear();
+                habit_edit_id.clear();
+                habit_edit_renaming = false;
                 screen = Screen::HabitsEdit;
             } else if (habits_manage_cursor == 1) {
                 if (!habits.empty()) {
-                    std::string id = habits[habits_cursor].id;
-                    disableHabit(id);
-                    scanHabits();
+                    habit_edit_id = habits[habits_cursor].id;
+                    habit_input = habits[habits_cursor].title;
+                    habit_edit_renaming = true;
+                    screen = Screen::HabitsEdit;
                 }
-                screen = Screen::HabitsList;
+            } else if (habits_manage_cursor == 2) {
+                if (!habits.empty()) {
+                    pending_habit_id = habits[habits_cursor].id;
+                    pending_habit_name = habits[habits_cursor].title;
+                    screen = Screen::HabitsDisableConfirm;
+                }
             } else {
                 screen = Screen::HabitsList;
             }
@@ -6511,16 +6747,21 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::HabitsEdit) {
         if (ev.key == Key::Ok) {
             if (!habit_input.empty()) {
-                appendHabit(habit_input);
+                if (habit_edit_renaming) renameHabit(habit_edit_id, habit_input);
+                else appendHabit(habit_input);
                 scanHabits();
             }
             habit_input.clear();
+            habit_edit_id.clear();
+            habit_edit_renaming = false;
             screen = Screen::HabitsList;
             blockInput(300);
         } else if (ev.key == Key::Backspace) {
             if (!habit_input.empty()) habit_input.pop_back();
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             habit_input.clear();
+            habit_edit_id.clear();
+            habit_edit_renaming = false;
             screen = Screen::HabitsManage;
             blockInput(250);
         } else if (ev.key == Key::None && ev.name && ev.name[0] && !ev.name[1]) {
@@ -6528,6 +6769,26 @@ void handleKey(KeyEvent ev)
             if (static_cast<unsigned char>(c) >= 32 && static_cast<unsigned char>(c) <= 126 && c != '|' && habit_input.size() < 32) {
                 habit_input.push_back(c);
             }
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::HabitsDisableConfirm) {
+        if (ev.key == Key::Ok) {
+            if (!pending_habit_id.empty()) {
+                disableHabit(pending_habit_id);
+                scanHabits();
+            }
+            pending_habit_id.clear();
+            pending_habit_name.clear();
+            screen = Screen::HabitsList;
+            blockInput(300);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            pending_habit_id.clear();
+            pending_habit_name.clear();
+            screen = Screen::HabitsManage;
+            blockInput(250);
         }
         dirty = true;
         return;

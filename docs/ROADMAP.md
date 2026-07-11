@@ -17,7 +17,7 @@ Architecture:
 
 ## Phase 1: Stability baseline
 
-Status: v0.2.0 release baseline prepared.
+Status: v0.2.0 baseline is hardware-tested; the next checkpoint adds Dashboard and Habits v2.
 
 Remaining work:
 
@@ -62,10 +62,10 @@ Acceptance:
 - Captured activity appears in a single file.
 - Inbox survives reboot.
 
-### 2.3 Context Resume
+### 2.3 Context Resume / Dashboard
 
 - Store last useful state: book, track, note, recording, timer/habits summary.
-- Add Resume screen or Dashboard section.
+- Dashboard shows Resume, time, battery, SD, routines progress, and keyboard shortcuts.
 
 Acceptance:
 
@@ -73,8 +73,7 @@ Acceptance:
 
 ### 2.4 Fast Dashboard
 
-- Boot/default screen with battery, resume state, habits count, current book/track, shortcuts.
-- Launcher remains accessible via OK/Menu.
+- Dashboard MVP implemented; later it can become an optional boot/default screen.
 
 Acceptance:
 
@@ -116,7 +115,7 @@ Apps stay as implementation modules under Pocket OS actions.
 
 5. Time/Habits polish
    - Timer presets.
-   - Cleaner habit summaries.
+   - Durable daily history, rename/disable, streaks, and 7D/30D/365D summaries.
    - Future date/time sync hook.
 
 ## Phase 4: Connections / Transfer

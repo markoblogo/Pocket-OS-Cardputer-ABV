@@ -1,19 +1,19 @@
 # ABVx Project Status
 
-Current baseline: **v0.2.0 Release Baseline**.
+Current baseline: **v0.2.0 + local Pocket OS checkpoint**.
 
 ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, reading/listening, routines, and transfer.
 
 ## Working hardware-verified features
 
-- Launcher: large monochrome list UI, app navigation, battery indicator.
+- Launcher/Dashboard: large monochrome launcher, Resume, current time, routines progress, SD summary, and battery/low-voltage status.
 - Music: MP3 files from `/sdcard/music`, smoother buffered 16 kHz mono playback, waveform, volume, shuffle, prev/next.
 - Record: one hardware-verified 20-second 8 kHz/8-bit WAV mode, RAM-first capture, waveform, playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
 - Files: SD browser, known file opening, unsupported file info, delete confirmation.
 - Time: manual clock, stopwatch with fractions, timer, alarm sound.
-- Habits: routines list, daily checks, manual next-day rollover, 7D/30D summaries.
+- Habits: routines list, daily checks, manual next-day rollover, rename, confirmed disable, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, 64 KB small-file upload limit.
