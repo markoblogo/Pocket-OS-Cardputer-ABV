@@ -101,7 +101,7 @@ volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Dashboard, MusicList, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, Message };
+enum class Screen { Launcher, Dashboard, MusicList, MusicInfo, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -2283,6 +2283,13 @@ std::string musicDisplayName(const std::string& file)
     return file;
 }
 
+bool musicFileStat(const std::string& file, struct stat* out)
+{
+    if (file.empty() || !out) return false;
+    const std::string path = std::string(MUSIC_DIR) + "/" + file;
+    return stat(path.c_str(), out) == 0 && S_ISREG(out->st_mode);
+}
+
 std::string sortKey(std::string s)
 {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -2321,6 +2328,8 @@ void scanMusic()
             if (isHidden(name) || !hasMp3Ext(name)) continue;
             ++music_mp3_entries;
             if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
+            struct stat st = {};
+            if (musicFileStat(name, &st) && st.st_size <= 0) continue;
             next_tracks.push_back(name);
             if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
         }
@@ -2361,6 +2370,7 @@ void scanMusic()
                 if (isHidden(name) || !hasMp3Ext(name)) continue;
                 ++music_mp3_entries;
                 if (info.fattrib & AM_DIR) continue;
+                if (info.fsize == 0) continue;
                 next_tracks.push_back(name);
                 if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
             }
@@ -3829,7 +3839,46 @@ void drawMusicList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK PLAY   1 SHUF   GO BACK");
+    canvas.print("OK PLAY  2 INFO  1 SHUF");
+    canvas.pushSprite(0, 0);
+}
+
+void drawMusicInfo()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.println("TRACK INFO");
+    if (tracks.empty()) {
+        canvas.setCursor(8, 42);
+        canvas.println("No track");
+    } else {
+        const std::string stored = tracks[selected_track];
+        const std::string title = musicDisplayName(stored);
+        struct stat st = {};
+        const bool exists = musicFileStat(stored, &st);
+        canvas.setCursor(8, 36);
+        canvas.printf("%.14s", marqueeText(title, 14).c_str());
+        canvas.setTextSize(1);
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 62);
+        canvas.printf("FILE %.20s", stored.c_str());
+        canvas.setCursor(8, 76);
+        if (exists) canvas.printf("SIZE %lu B", static_cast<unsigned long>(st.st_size));
+        else canvas.print("SIZE missing");
+        canvas.setCursor(8, 90);
+        if (!exists) canvas.print("STATUS missing");
+        else if (st.st_size <= 0) canvas.print("STATUS bad zero");
+        else canvas.print("STATUS ready");
+        canvas.setCursor(8, 104);
+        canvas.printf("INDEX %d/%d", selected_track + 1, static_cast<int>(tracks.size()));
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 122);
+    canvas.print("OK PLAY   GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -5979,6 +6028,7 @@ void drawIfDirty()
     if (screen == Screen::Launcher) drawLauncher();
     else if (screen == Screen::Dashboard) drawDashboard();
     else if (screen == Screen::MusicList) drawMusicList();
+    else if (screen == Screen::MusicInfo) drawMusicInfo();
     else if (screen == Screen::MusicPlaying) drawMusicPlaying();
     else if (screen == Screen::ReaderList) drawReaderList();
     else if (screen == Screen::ReaderView) drawReaderView();
@@ -6094,6 +6144,11 @@ char shortcutChar(KeyEvent ev)
 bool isMusicShuffleKey(KeyEvent ev)
 {
     return ev.key == Key::One || shortcutChar(ev) == 's';
+}
+
+bool isMusicInfoKey(KeyEvent ev)
+{
+    return ev.key == Key::Two || shortcutChar(ev) == 'i';
 }
 
 bool handleOneButtonCapture(KeyEvent ev)
@@ -6212,6 +6267,10 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Left) nextTrack(-1);
         else if (ev.key == Key::Right) nextTrack(1);
         else if (isMusicShuffleKey(ev)) shuffle_on = !shuffle_on;
+        else if (isMusicInfoKey(ev)) {
+            if (!tracks.empty()) screen = Screen::MusicInfo;
+            blockInput(250);
+        }
         else if (ev.key == Key::Ok) {
             if (!tracks.empty()) {
                 override_music_path.clear();
@@ -6226,6 +6285,25 @@ void handleKey(KeyEvent ev)
             alarm_ringing = false;
             alert_until_ms = 0;
             screen = Screen::Launcher;
+            blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::MusicInfo) {
+        if (ev.key == Key::Ok) {
+            if (!tracks.empty()) {
+                override_music_path.clear();
+                std::string err;
+                const std::string path = selectedPath();
+                if (!startPlayback(&err)) {
+                    showMessage("BAD MP3", musicProblemBody(path, err), MessageReturn::Music);
+                    blockInput(500);
+                }
+            }
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::MusicList;
             blockInput(250);
         }
         dirty = true;

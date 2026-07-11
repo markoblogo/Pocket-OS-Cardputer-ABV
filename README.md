@@ -36,7 +36,7 @@ Tested on real Cardputer ADV hardware.
 Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
-- Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, MAX volume, double-buffered playback, sorted library, and safer bad-track handling.
+- Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, MAX volume, double-buffered playback, sorted library, selected-title marquee, track info, and safer bad-track handling.
 - Voice/Record: one RAM-first 20-second WAV voice-note mode, save/play/delete, continuous playback, waveform.
 - Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
@@ -65,7 +65,7 @@ Global:
 
 App highlights:
 
-- Listen: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle.
+- Listen: OK play/stop, Up/Down volume, Left/Right track, `1` shuffle, `2`/`I` track info.
 - Read: Up/Down line, Left/Right page, `1` speed mode for any supported book, OK pause/resume in speed mode.
 - Write: `1` new/edit, Backspace delete from list.
 - Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.

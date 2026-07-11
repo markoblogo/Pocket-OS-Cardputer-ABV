@@ -3,6 +3,7 @@
 ## Unreleased checkpoint
 
 - Listen: MAX volume label, shuffle fallback key, resilient restart after Settings, and heap preflight that reuses existing audio buffers.
+- Listen: selected-track marquee, `2`/`I` track info screen, original upload title display, and zero-byte MP3 filtering.
 - Time: timer presets for 1/5/10/20 minutes.
 - Dashboard: current time, Resume, routines progress, SD status, direct Listen/Read/Write shortcuts, and battery/low-voltage diagnostics.
 - Routines: streaming history persistence without the former 256-line truncation, 7D/30D/365D stats, current streaks, larger list text, rename, confirmed disable, keyboard fallbacks for manage/stats, and restore-all for disabled habits.
