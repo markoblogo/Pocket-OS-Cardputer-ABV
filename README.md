@@ -29,22 +29,22 @@ Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ## Current status
 
-Current baseline: **v0.2.0 Release Baseline**.
+Current baseline: **post-v0.2 Pocket OS checkpoint**.
 
 Tested on real Cardputer ADV hardware.
 
 Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
-- Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, double-buffered playback.
+- Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, MAX volume, double-buffered playback, sorted library, and safer bad-track handling.
 - Voice/Record: one RAM-first 20-second WAV voice-note mode, save/play/delete, continuous playback, waveform.
 - Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
-- Time: manual clock, stopwatch, timer, alarm.
+- Time: manual clock, stopwatch, timer presets, alarm.
 - Files: SD browser, file opening, file info, delete confirmation.
-- Routines/Habits: daily checklist, manual next day, 7D/30D stats.
+- Routines/Habits: larger daily checklist, manual next day, manage screen, restore disabled habits, 7D/30D/365D stats.
 - Decide/Randomizer: `YES / NO / MB`.
-- Settings: theme, sound, timeout, power preset, SD reprobe, About.
+- Dashboard/Settings: Resume dashboard, SD summary, battery/low-voltage diagnostics, theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics.
 
 Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
@@ -69,7 +69,7 @@ App highlights:
 - Read: Up/Down line, Left/Right page, `1` speed mode for any supported book, OK pause/resume in speed mode.
 - Write: `1` new/edit, Backspace delete from list.
 - Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.
-- Routines: OK toggles, `1` next day, Right stats, Left manage.
+- Routines: OK toggles, `1` next day, Right/`S` stats, Left/`M` manage.
 - Transfer: OK starts AP, GO stops it.
 
 One Button Capture from launcher:
@@ -158,4 +158,4 @@ idf.py -p /dev/cu.usbmodem101 flash
 8. Habits: toggle habit, next day, stats.
 9. Settings: SD reprobe, About, config/theme.
 10. Connections: AP starts, `/api/ping`, list, download, write-test.
-11. Settings: About shows ABVx Pocket OS `v0.2.0`.
+11. Dashboard: `D` or `0` opens Resume/status; Settings About shows the current ABVx Pocket OS build.

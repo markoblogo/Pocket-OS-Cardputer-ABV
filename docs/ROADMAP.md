@@ -17,13 +17,13 @@ Architecture:
 
 ## Phase 1: Stability baseline
 
-Status: v0.2.0 baseline is hardware-tested; the next checkpoint adds Dashboard and Habits v2.
+Status: v0.2.0 baseline is hardware-tested; the current checkpoint adds Dashboard, Music/Time polish, battery diagnostics, and Habits v2.
 
 Remaining work:
 
 - Continue smoke testing Music -> Record -> Reader -> Notes -> Files after SD operations.
 - Keep large Wi-Fi upload disabled until a separate transfer redesign is done.
-- Tag first public test release after one clean full hardware pass.
+- Keep release checkpoints small and hardware-test them before tagging public binaries.
 
 Acceptance:
 
@@ -115,7 +115,7 @@ Apps stay as implementation modules under Pocket OS actions.
 
 5. Time/Habits polish
    - Timer presets.
-   - Durable daily history, rename/disable, streaks, and 7D/30D/365D summaries.
+   - Durable daily history, rename/disable/restore, streaks, and 7D/30D/365D summaries.
    - Future date/time sync hook.
 
 ## Phase 4: Connections / Transfer

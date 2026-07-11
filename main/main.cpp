@@ -110,7 +110,7 @@ enum class TimeSetField { Hours = 0, Minutes = 1, Seconds = 2 };
 enum class ThemeMode { White = 0, Green = 1, Yellow = 2, Invert = 3 };
 enum class SoundMode { Off = 0, Low = 1, Mid = 2, Loud = 3, Max = 4 };
 enum class TimeoutMode { Short = 0, Normal = 1, Long = 2 };
-enum class MessageReturn { Launcher, Music, Notes, Files, Recorder };
+enum class MessageReturn { Launcher, Music, Notes, Files, Recorder, Habits };
 enum class ResumeTarget { Music = 0, Reader = 1, Notes = 2, Recorder = 3, Time = 4, Files = 5, Randomizer = 6, Habits = 7, Settings = 8, Connections = 9 };
 
 struct KeyEvent {
@@ -189,6 +189,7 @@ std::vector<std::string> inbox_pending_events;
 std::vector<FileEntry> file_entries;
 FileEntry file_info_entry;
 std::vector<Habit> habits;
+int disabled_habit_count = 0;
 std::string pending_delete_path;
 std::string pending_delete_name;
 std::string files_path = MOUNT_POINT;
@@ -1340,6 +1341,7 @@ void saveHabitLogForDay()
 void scanHabits()
 {
     habits.clear();
+    disabled_habit_count = 0;
     std::string err;
     if (!ensureDefaultHabits(&err)) return;
     loadHabitState();
@@ -1358,6 +1360,7 @@ void scanHabits()
         h.active = s.substr(p2 + 1) != "0";
         h.done = false;
         if (h.active && !h.id.empty() && !h.title.empty() && habits.size() < MAX_HABITS) habits.push_back(h);
+        else if (!h.active && !h.id.empty() && !h.title.empty()) ++disabled_habit_count;
     }
     fclose(f);
     loadHabitLogForDay();
@@ -1497,6 +1500,55 @@ bool disableHabit(const std::string& id, std::string* err = nullptr)
     }
     for (const auto& s : lines) fputs(s.c_str(), out);
     return flushAndClose(out);
+}
+
+bool restoreAllHabits(std::string* err = nullptr)
+{
+    if (!ensureDefaultHabits(err)) return false;
+    FILE* in = fopen(HABITS_FILE, "rb");
+    if (!in) {
+        if (err) *err = "open";
+        return false;
+    }
+    const std::string tmp_path = std::string(HABITS_DIR) + "/HABITS.NEW";
+    unlink(tmp_path.c_str());
+    FILE* out = fopen(tmp_path.c_str(), "wb");
+    if (!out) {
+        fclose(in);
+        if (err) *err = "write open";
+        return false;
+    }
+    bool ok = true;
+    char line[160];
+    while (fgets(line, sizeof(line), in)) {
+        std::string s = line;
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        size_t p1 = s.find('|');
+        size_t p2 = p1 == std::string::npos ? std::string::npos : s.find('|', p1 + 1);
+        if (p1 != std::string::npos && p2 != std::string::npos) {
+            s = s.substr(0, p2 + 1) + "1";
+        }
+        if (fputs((s + "\n").c_str(), out) == EOF) {
+            ok = false;
+            break;
+        }
+    }
+    fclose(in);
+    if (!flushAndClose(out)) ok = false;
+    if (!ok) {
+        unlink(tmp_path.c_str());
+        if (err) *err = "write";
+        return false;
+    }
+    if (rename(tmp_path.c_str(), HABITS_FILE) != 0) {
+        unlink(HABITS_FILE);
+        if (rename(tmp_path.c_str(), HABITS_FILE) != 0) {
+            unlink(tmp_path.c_str());
+            if (err) *err = "replace";
+            return false;
+        }
+    }
+    return true;
 }
 
 int habitDoneCount(const std::string& id, int start_day, int end_day)
@@ -3611,27 +3663,28 @@ void drawHabitsList()
         canvas.setTextSize(2);
         canvas.setTextColor(uiFg(), uiBg());
         canvas.setCursor(8, 48);
-        canvas.print("NO HABITS");
+        canvas.print(disabled_habit_count > 0 ? "NO ACTIVE" : "NO HABITS");
         canvas.setTextSize(1);
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 78);
-        canvas.print("/sdcard/habits");
+        canvas.print(disabled_habit_count > 0 ? "OK RESTORE ALL" : "/sdcard/habits");
     } else {
-        int rows = 4;
+        int rows = 3;
         int start = std::max(0, habits_cursor - 1);
         start = std::min(start, std::max(0, static_cast<int>(habits.size()) - rows));
         int end = std::min(static_cast<int>(habits.size()), start + rows);
+        canvas.setTextSize(2);
         for (int i = start; i < end; ++i) {
             const auto& h = habits[i];
-            canvas.setCursor(8, 34 + (i - start) * 21);
+            canvas.setCursor(8, 38 + (i - start) * 24);
             canvas.setTextColor(i == habits_cursor ? uiBg() : uiFg(), i == habits_cursor ? uiFg() : uiBg());
-            canvas.printf("%c[%c] %.10s", i == habits_cursor ? '>' : ' ', h.done ? 'x' : ' ', h.title.c_str());
+            canvas.printf("%c[%c] %.11s", i == habits_cursor ? '>' : ' ', h.done ? 'x' : ' ', h.title.c_str());
         }
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 112);
-    canvas.print("L MANAGE R STATS 1 NEXT DAY");
+    canvas.print("< MANAGE  > STATS  1 NEXT DAY");
     canvas.setCursor(8, 122);
     canvas.print("OK CHECK        GO BACK");
     canvas.pushSprite(0, 0);
@@ -3653,7 +3706,7 @@ void drawHabitsStats()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 28);
-    canvas.printf("last %d internal days", days);
+    canvas.printf("WINDOW < %dD >", days);
     canvas.setTextSize(2);
     for (int i = 0; i < rows; ++i) {
         int done = habitDoneCount(habits[i].id, start_day, habit_day);
@@ -3671,7 +3724,7 @@ void drawHabitsStats()
     canvas.setCursor(8, 106);
     canvas.printf("TOTAL %d/%d %d%%", total_done, total_possible, (total_done * 100) / total_possible);
     canvas.setCursor(8, 122);
-    canvas.print("L/R 7D/30D/365D  GO BACK");
+    canvas.print("< / >  7D/30D/365D  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -3712,7 +3765,7 @@ void drawHabitsDisableConfirm()
     canvas.printf("%.28s", pending_habit_name.c_str());
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 104);
-    canvas.print("history stays in stats");
+    canvas.print("history kept on SD");
     canvas.setCursor(8, 122);
     canvas.print("OK DISABLE       GO CANCEL");
     canvas.pushSprite(0, 0);
@@ -6106,6 +6159,7 @@ void handleKey(KeyEvent ev)
     if (ev.key == Key::None &&
         screen != Screen::NotesEdit &&
         screen != Screen::HabitsEdit &&
+        screen != Screen::HabitsList &&
         screen != Screen::Launcher &&
         screen != Screen::Dashboard &&
         screen != Screen::MusicList &&
@@ -6668,7 +6722,12 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::HabitsList) {
         if (ev.key == Key::Up && !habits.empty()) habits_cursor = std::max(0, habits_cursor - 1);
         else if (ev.key == Key::Down && !habits.empty()) habits_cursor = std::min(static_cast<int>(habits.size()) - 1, habits_cursor + 1);
-        else if (ev.key == Key::Ok && !habits.empty()) {
+        else if (ev.key == Key::Ok && habits.empty() && disabled_habit_count > 0) {
+            std::string err;
+            if (!restoreAllHabits(&err)) showMessage("Restore failed", err.empty() ? "storage" : err, MessageReturn::Habits);
+            else scanHabits();
+            blockInput(300);
+        } else if (ev.key == Key::Ok && !habits.empty()) {
             habits[habits_cursor].done = !habits[habits_cursor].done;
             saveHabitLogForDay();
             if (habits[habits_cursor].done) appendInboxEvent("HABIT", habits[habits_cursor].title);
@@ -6680,12 +6739,12 @@ void handleKey(KeyEvent ev)
             saveHabitState();
             saveHabitLogForDay();
             blockInput(300);
-        } else if (ev.key == Key::Right) {
+        } else if (ev.key == Key::Right || shortcutChar(ev) == 's') {
             saveHabitLogForDay();
             habit_stats_window = 7;
             screen = Screen::HabitsStats;
             blockInput(250);
-        } else if (ev.key == Key::Left) {
+        } else if (ev.key == Key::Left || shortcutChar(ev) == 'm') {
             habits_manage_cursor = 0;
             screen = Screen::HabitsManage;
             blockInput(250);
@@ -6869,6 +6928,7 @@ void handleKey(KeyEvent ev)
             else if (target == MessageReturn::Notes) { scanNotes(); screen = Screen::NotesList; }
             else if (target == MessageReturn::Files) screen = Screen::FilesList;
             else if (target == MessageReturn::Recorder) { scanRecordings(); screen = Screen::RecorderList; }
+            else if (target == MessageReturn::Habits) { scanHabits(); screen = Screen::HabitsList; }
             else screen = Screen::Launcher;
         }
         dirty = true;
