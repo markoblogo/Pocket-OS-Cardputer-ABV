@@ -2165,18 +2165,30 @@ std::vector<std::string> wrapUtf8TextColumns(const std::string& text, int max_co
 bool saveNewNote(std::string* out_name, std::string* err = nullptr)
 {
     if (!ensureNotesDir(err)) return false;
-    scanNotes();
     std::string name = nextNoteName();
     if (name.empty()) {
         if (err) *err = "note namespace full";
         return false;
     }
     std::string path = std::string(NOTES_DIR) + "/" + name;
+    for (int tries = 0; tries < 9999; ++tries) {
+        struct stat st = {};
+        if (stat(path.c_str(), &st) != 0) break;
+        notes.push_back(name);
+        name = nextNoteName();
+        if (name.empty()) {
+            if (err) *err = "note namespace full";
+            return false;
+        }
+        path = std::string(NOTES_DIR) + "/" + name;
+    }
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) {
         if (err) {
-            *err = "open: ";
+            *err = "open ";
             *err += std::strerror(errno);
+            *err += " ";
+            *err += name;
         }
         return false;
     }
@@ -2186,7 +2198,12 @@ bool saveNewNote(std::string* out_name, std::string* err = nullptr)
     bool ok = n == body.size();
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
-        if (err) *err = "write failed";
+        if (err) {
+            *err = "write ";
+            *err += std::strerror(errno);
+            *err += " ";
+            *err += name;
+        }
         unlink(path.c_str());
         return false;
     }
@@ -2247,8 +2264,10 @@ bool saveExistingNote(std::string* err = nullptr)
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) {
         if (err) {
-            *err = "open: ";
+            *err = "open ";
             *err += std::strerror(errno);
+            *err += " ";
+            *err += active_note_name;
         }
         return false;
     }
@@ -2258,7 +2277,12 @@ bool saveExistingNote(std::string* err = nullptr)
     bool ok = n == body.size();
     if (!flushAndClose(f)) ok = false;
     if (!ok) {
-        if (err) *err = "write failed";
+        if (err) {
+            *err = "write ";
+            *err += std::strerror(errno);
+            *err += " ";
+            *err += active_note_name;
+        }
         return false;
     }
     scanNotes();
