@@ -216,6 +216,12 @@ std::string override_music_path;
 std::string music_scan_status = "NOT SCANNED";
 size_t music_raw_entries = 0;
 size_t music_mp3_entries = 0;
+std::string music_info_title;
+std::string music_info_file;
+std::string music_info_size = "-";
+std::string music_info_status = "READY";
+int music_info_index = 0;
+int music_info_total = 0;
 int selected_book = 0;
 std::string last_reader_book;
 int notes_cursor = 0;
@@ -2431,6 +2437,78 @@ std::string musicProblemBody(const std::string& path, const std::string& err)
     return body;
 }
 
+bool isValidMp3FrameHeader(const uint8_t* p);
+
+void prepareMusicInfo()
+{
+    music_info_title.clear();
+    music_info_file.clear();
+    music_info_size = "-";
+    music_info_status = "READY";
+    music_info_index = tracks.empty() ? 0 : selected_track + 1;
+    music_info_total = static_cast<int>(tracks.size());
+    if (tracks.empty()) return;
+    music_info_file = tracks[selected_track];
+    music_info_title = musicDisplayName(music_info_file);
+    struct stat st = {};
+    if (musicFileStat(music_info_file, &st)) {
+        music_info_size = std::to_string(static_cast<unsigned long>(st.st_size)) + " B";
+        if (st.st_size <= 0) music_info_status = "BAD zero";
+    } else {
+        music_info_status = "MISSING";
+    }
+}
+
+bool probeSelectedMusic(std::string* status)
+{
+    prepareMusicInfo();
+    if (tracks.empty()) {
+        if (status) *status = "BAD no track";
+        return false;
+    }
+    const std::string path = selectedPath();
+    struct stat st = {};
+    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        if (status) {
+            *status = "BAD stat ";
+            *status += std::strerror(errno);
+        }
+        return false;
+    }
+    if (st.st_size < 64) {
+        if (status) *status = "BAD small";
+        return false;
+    }
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        if (status) {
+            *status = "BAD open ";
+            *status += std::strerror(errno);
+        }
+        return false;
+    }
+    std::vector<uint8_t> probe(32768);
+    size_t n = fread(probe.data(), 1, probe.size(), f);
+    fclose(f);
+    if (n < 4) {
+        if (status) *status = "BAD read";
+        return false;
+    }
+    size_t sync = std::string::npos;
+    for (size_t i = 0; i + 3 < n; ++i) {
+        if (isValidMp3FrameHeader(probe.data() + i)) {
+            sync = i;
+            break;
+        }
+    }
+    if (sync == std::string::npos) {
+        if (status) *status = "BAD no sync";
+        return false;
+    }
+    if (status) *status = "OK sync " + std::to_string(static_cast<unsigned long>(sync));
+    return true;
+}
+
 bool hasMusicPlaybackHeap(std::string* err = nullptr)
 {
     const size_t pcm_values = (AUDIO_OUTPUT_RATE * CHUNK_MS / 1000) + MINIMP3_MAX_SAMPLES_PER_FRAME;
@@ -3849,34 +3927,27 @@ void drawMusicInfo()
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("TRACK INFO");
-    if (tracks.empty()) {
+    if (tracks.empty() || music_info_file.empty()) {
         canvas.setCursor(8, 42);
         canvas.println("No track");
     } else {
-        const std::string stored = tracks[selected_track];
-        const std::string title = musicDisplayName(stored);
-        struct stat st = {};
-        const bool exists = musicFileStat(stored, &st);
         canvas.setCursor(8, 36);
-        canvas.printf("%.14s", marqueeText(title, 14).c_str());
+        canvas.printf("%.14s", marqueeText(music_info_title, 14).c_str());
         canvas.setTextSize(1);
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 62);
-        canvas.printf("FILE %.20s", stored.c_str());
+        canvas.printf("FILE %.20s", music_info_file.c_str());
         canvas.setCursor(8, 76);
-        if (exists) canvas.printf("SIZE %lu B", static_cast<unsigned long>(st.st_size));
-        else canvas.print("SIZE missing");
+        canvas.printf("SIZE %.18s", music_info_size.c_str());
         canvas.setCursor(8, 90);
-        if (!exists) canvas.print("STATUS missing");
-        else if (st.st_size <= 0) canvas.print("STATUS bad zero");
-        else canvas.print("STATUS ready");
+        canvas.printf("STATUS %.16s", music_info_status.c_str());
         canvas.setCursor(8, 104);
-        canvas.printf("INDEX %d/%d", selected_track + 1, static_cast<int>(tracks.size()));
+        canvas.printf("INDEX %d/%d", music_info_index, music_info_total);
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK PLAY   GO BACK");
+    canvas.print("OK PLAY  2 PROBE  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -6269,7 +6340,10 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Right) nextTrack(1);
         else if (isMusicShuffleKey(ev)) shuffle_on = !shuffle_on;
         else if (isMusicInfoKey(ev)) {
-            if (!tracks.empty()) screen = Screen::MusicInfo;
+            if (!tracks.empty()) {
+                prepareMusicInfo();
+                screen = Screen::MusicInfo;
+            }
             blockInput(250);
         }
         else if (ev.key == Key::Ok) {
@@ -6303,6 +6377,11 @@ void handleKey(KeyEvent ev)
                     blockInput(500);
                 }
             }
+        } else if (isMusicInfoKey(ev) || shortcutChar(ev) == 'p') {
+            std::string status;
+            probeSelectedMusic(&status);
+            music_info_status = status.empty() ? "UNKNOWN" : status;
+            blockInput(300);
         } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::MusicList;
             blockInput(250);
