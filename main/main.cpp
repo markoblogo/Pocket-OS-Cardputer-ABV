@@ -916,9 +916,11 @@ std::string fileTypeLabel(const FileEntry& e)
 std::string filesDisplayPath(const std::string& path)
 {
     if (path == MOUNT_POINT) return "ROOT /";
-    if (path == CONFIG_DIR) return "/CARDPTR";
+    if (path == CONFIG_DIR) return "/TRANSFER";
     if (path.rfind(MOUNT_POINT, 0) == 0) {
         std::string rel = path.substr(std::strlen(MOUNT_POINT));
+        if (rel == "/CARDPTR") return "/TRANSFER";
+        if (rel.rfind("/CARDPTR/", 0) == 0) return "/TRANSFER" + rel.substr(std::strlen("/CARDPTR"));
         return rel.empty() ? "ROOT /" : rel;
     }
     return path;
@@ -985,7 +987,7 @@ void scanFiles(const std::string& path)
     } else {
         struct stat cfg_st = {};
         if (stat(CONFIG_DIR, &cfg_st) == 0 && S_ISDIR(cfg_st.st_mode)) {
-            file_entries.push_back({"CARDPTR", CONFIG_DIR, true, 0});
+            file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
         }
     }
     while (dirent* entry = readdir(dir)) {
@@ -4923,7 +4925,7 @@ void drawFilesInfo()
     canvas.setTextSize(2);
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
-    canvas.print(isSupportedOpenFile(file_info_entry) ? "FILE INFO" : "UNSUPPORTED");
+    canvas.print("FILE INFO");
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 32);
@@ -4941,7 +4943,7 @@ void drawFilesInfo()
     else if (isSupportedOpenFile(file_info_entry)) canvas.print("Known file type");
     else canvas.print("Stored only, not opened");
     canvas.setCursor(8, 122);
-    canvas.print("OK/BACK FILES   GO FILES");
+    canvas.print("OK/BACK FILES");
     canvas.pushSprite(0, 0);
 }
 
@@ -5505,7 +5507,8 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
     const char* body =
         "<!doctype html><html><body>"
         "<h1>ABVx Connections</h1>"
-        "<p>Wi-Fi AP read-only MVP.</p>"
+        "<p>Wi-Fi AP transfer MVP: list and download are stable. Upload is limited to small files.</p>"
+        "<p><b>Large MP3/books:</b> use SD reader for now.</p>"
         "<ul>"
         "<li><a href=\"/api/ping\">/api/ping</a></li>"
         "<li><a href=\"/api/status\">/api/status</a></li>"
@@ -5516,10 +5519,13 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "<li><a href=\"/api/list?path=/rec\">/api/list?path=/rec</a></li>"
         "</ul>"
         "<p><a href=\"/api/write-test\">/api/write-test</a></p>"
-        "<p>Download: /api/download?path=/notes/NOTE0001.TXT</p>"
-        "<p>Small upload: POST raw body to /api/upload?path=/books/B1.TXT</p>"
-        "<p>Large upload disabled: use SD reader for MP3 files.</p>"
-        "<p>8.3 names for non-music. No overwrite. Delete later.</p>"
+        "<h2>Safe commands</h2>"
+        "<pre>curl http://192.168.4.1/api/ping\n"
+        "curl \"http://192.168.4.1/api/list?path=/music\"\n"
+        "curl \"http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT\"</pre>"
+        "<p>Small upload: POST raw body to /api/upload?path=/books/B1.TXT, max 64KB.</p>"
+        "<p>Use /cardputer as generic transfer folder. It appears as TRANSFER in Files.</p>"
+        "<p>8.3 names are safest. No overwrite. Delete later.</p>"
         "</body></html>";
     return httpd_resp_sendstr(req, body);
 }
@@ -6130,16 +6136,15 @@ void drawConnections()
         canvas.printf("PASS %s", connection_ap_password);
         canvas.setCursor(8, 82);
         canvas.print("URL  192.168.4.1");
-        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setTextColor(uiAccent(), uiBg());
         canvas.setCursor(8, 96);
-        canvas.printf("REQ:%d", connection_req_count);
-        canvas.setCursor(70, 96);
-        canvas.printf("LAST: %.22s", connection_last_endpoint);
+        canvas.print("LIST/DOWNLOAD OK");
+        canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 108);
         if (connection_upload_active) {
             canvas.printf("UPLOAD %d/%d", connection_upload_done, connection_upload_total);
         } else {
-            canvas.printf("ERR: %.28s", connection_last_error);
+            canvas.print("SMALL UPLOAD ONLY");
         }
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 122);
@@ -6155,11 +6160,11 @@ void drawConnections()
     canvas.setCursor(8, 62);
     canvas.print("OK START");
     canvas.setCursor(8, 84);
-    canvas.print("WiFi file transfer");
+    canvas.print("List/download files");
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 106);
-    canvas.print("SSID after start");
+    canvas.print("Small upload only");
     canvas.setCursor(8, 122);
     canvas.print("OK START         GO BACK");
     canvas.pushSprite(0, 0);

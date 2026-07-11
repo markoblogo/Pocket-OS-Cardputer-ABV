@@ -11,12 +11,12 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Record: one hardware-verified 20-second 8 kHz/8-bit WAV mode, RAM-first capture, waveform, playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
-- Files: SD browser, known file opening, unsupported file info, delete confirmation.
+- Files: SD browser, `TRANSFER` folder for `/sdcard/CARDPTR`, known file opening, unsupported file info, delete confirmation.
 - Time: manual clock, stopwatch with fractions, timer presets, alarm sound.
 - Habits: larger routines list, daily checks, manual next-day rollover, rename, confirmed disable, restore disabled habits, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD reprobe, About.
-- Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, 64 KB small-file upload limit.
+- Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, and 64 KB small-file upload limit. It is not yet a full SD flash-drive replacement.
 
 ## Product reframing
 

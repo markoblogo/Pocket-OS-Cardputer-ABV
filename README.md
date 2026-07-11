@@ -41,11 +41,11 @@ Stable baseline:
 - Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer presets, alarm.
-- Files: SD browser, file opening, file info, delete confirmation.
+- Files: SD browser, `TRANSFER` folder, file opening, unsupported-file info, delete confirmation.
 - Routines/Habits: larger daily checklist, manual next day, manage screen, restore disabled habits, 7D/30D/365D stats.
 - Decide/Randomizer: `YES / NO / MB`.
 - Dashboard/Settings: Resume dashboard, SD summary, battery/low-voltage diagnostics, theme, sound, timeout, power preset, SD reprobe, About.
-- Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics.
+- Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics; large media transfer still needs SD reader.
 
 Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
 
@@ -70,7 +70,7 @@ App highlights:
 - Write: `1` new/edit, Backspace delete from list.
 - Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.
 - Routines: OK toggles, `1` next day, Right/`S` stats, Left/`M` manage.
-- Transfer: OK starts AP, GO stops it.
+- Transfer: OK starts AP, GO stops it; list/download are stable, upload is small-file only.
 
 One Button Capture from launcher:
 
@@ -117,13 +117,13 @@ curl "http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT"
 curl http://192.168.4.1/api/write-test
 ```
 
-Small upload only:
+Small upload only, max 64KB:
 
 ```sh
 python3 tools/cardputer_upload.py ./NOTE.TXT /notes/NOTE.TXT
 ```
 
-Upload is intentionally limited to 64KB. Large MP3 upload over Wi-Fi is unstable on Cardputer ADV and is disabled. Use an SD reader/hub for music files.
+Upload is intentionally limited to 64KB. Large MP3/book upload over Wi-Fi is unstable on Cardputer ADV and is disabled. Use an SD reader/hub for large files. `/cardputer` appears as `TRANSFER` in Files and can hold generic carry files.
 
 ## Build
 
