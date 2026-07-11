@@ -6211,6 +6211,8 @@ void processMusicAutostart()
 
 void handleKey(KeyEvent ev)
 {
+    const bool has_shortcut_char = shortcutChar(ev) != 0;
+    if (ev.key == Key::None && !has_shortcut_char) return;
     if (ev.key == Key::None &&
         screen != Screen::NotesEdit &&
         screen != Screen::HabitsEdit &&
@@ -6218,6 +6220,7 @@ void handleKey(KeyEvent ev)
         screen != Screen::Launcher &&
         screen != Screen::Dashboard &&
         screen != Screen::MusicList &&
+        screen != Screen::MusicInfo &&
         screen != Screen::MusicPlaying) return;
     last_input_ms = M5.millis();
     if (display_off || display_dim) {
@@ -7046,6 +7049,7 @@ extern "C" void app_main(void)
         }
         if (!display_off && now - marquee_last_frame_ms >= 180) {
             if (screen == Screen::MusicList ||
+                screen == Screen::MusicInfo ||
                 screen == Screen::ReaderList || screen == Screen::NotesList ||
                 screen == Screen::RecorderList || screen == Screen::FilesList) {
                 marquee_last_frame_ms = now;
