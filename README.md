@@ -44,7 +44,7 @@ Stable baseline:
 - Files: SD browser, `TRANSFER` folder, file opening, unsupported-file info, delete confirmation.
 - Routines/Habits: larger daily checklist, manual next day, manage screen, restore disabled habits, 7D/30D/365D stats.
 - Decide/Randomizer: `YES / NO / MB`.
-- Dashboard/Settings: Resume dashboard, SD summary, battery/low-voltage diagnostics, theme, sound, timeout, power preset, SD reprobe, About.
+- Dashboard/Settings: Resume dashboard, current context, battery/low-voltage diagnostics, theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics; large media transfer still needs SD reader.
 
 Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.

@@ -6,7 +6,7 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 
 ## Working hardware-verified features
 
-- Launcher/Dashboard: large monochrome launcher, Resume, current time, routines progress, SD summary, and battery/low-voltage diagnostics.
+- Launcher/Dashboard: large monochrome launcher, Resume, current time, routines progress, current context, and battery/low-voltage diagnostics.
 - Music: MP3 files from `/sdcard/music`, smoother buffered 16 kHz mono playback, waveform, MAX volume, shuffle, prev/next, sorted library, track info/probe, and bad-track screen.
 - Record: one hardware-verified 20-second 8 kHz/8-bit WAV mode, RAM-first capture, waveform, playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.

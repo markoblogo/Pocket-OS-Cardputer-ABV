@@ -301,6 +301,7 @@ std::string active_recording_name;
 std::string active_book_name;
 bool reader_opened_this_session = false;
 std::string active_note_name;
+std::string last_note_name;
 std::string note_input;
 bool note_edit_existing = false;
 std::string reader_text;
@@ -2210,6 +2211,8 @@ bool saveNewNote(std::string* out_name, std::string* err = nullptr)
         return false;
     }
     if (out_name) *out_name = name;
+    active_note_name = name;
+    last_note_name = name;
     scanNotes();
     for (int i = 0; i < static_cast<int>(notes.size()); ++i) {
         if (notes[i] == name) {
@@ -2287,6 +2290,7 @@ bool saveExistingNote(std::string* err = nullptr)
         }
         return false;
     }
+    last_note_name = active_note_name;
     scanNotes();
     return true;
 }
@@ -3595,6 +3599,34 @@ const char* resumeName()
     return "LISTEN";
 }
 
+std::string dashboardClip(std::string text, size_t width)
+{
+    if (text.empty()) return "-";
+    if (text.size() <= width) return text;
+    return text.substr(0, width);
+}
+
+std::string dashboardMusicName()
+{
+    if (tracks.empty()) return "-";
+    return dashboardClip(musicDisplayName(tracks[std::max(0, std::min(selected_track, static_cast<int>(tracks.size()) - 1))]), 15);
+}
+
+std::string dashboardBookName()
+{
+    return dashboardClip(last_reader_book.empty() ? active_book_name : last_reader_book, 15);
+}
+
+std::string dashboardNoteName()
+{
+    return dashboardClip(last_note_name.empty() ? active_note_name : last_note_name, 15);
+}
+
+std::string dashboardRecordingName()
+{
+    return dashboardClip(active_recording_name, 15);
+}
+
 void resumeContext()
 {
     switch (last_resume_target) {
@@ -3732,34 +3764,23 @@ void drawDashboard()
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.setCursor(8, 64);
-    canvas.printf("RESUME %s", resumeName());
+    canvas.printf("RESUME %-8s OK", resumeName());
     canvas.setCursor(8, 76);
     canvas.printf("TODAY %d/%d  %d%%", done_count, habit_total, habit_pct);
 
-    uint64_t total = 0;
-    uint64_t free_b = 0;
     canvas.setCursor(8, 88);
-    if (sdUsage(&total, &free_b) && total >= free_b) {
-        canvas.printf("SD FREE %s USED %s", formatBytes(free_b).c_str(), formatBytes(total - free_b).c_str());
-    } else {
-        canvas.print("SD NOT READY");
-    }
+    canvas.printf("M %.15s", dashboardMusicName().c_str());
 
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 102);
-    const int dashboard_battery = batteryPercent();
-    if (dashboard_battery < 0) {
-        canvas.printf("BAT L%d V%d B%d", battery_last_level, battery_last_mv, static_cast<int>(M5.getBoard()));
-    } else if (dashboard_battery <= 5 && battery_last_mv > 0) {
-        canvas.printf("BAT LOW %dmV", battery_last_mv);
-    } else {
-        canvas.printf("M%d B%d N%d V%d", static_cast<int>(tracks.size()), static_cast<int>(books.size()), static_cast<int>(notes.size()), static_cast<int>(recordings.size()));
-    }
+    canvas.printf("B %.15s", dashboardBookName().c_str());
+    canvas.setCursor(124, 102);
+    canvas.printf("N %.10s", dashboardNoteName().c_str());
     canvas.setCursor(8, 114);
-    canvas.print("1 LISTEN  2 READ  3 WRITE");
+    canvas.printf("V %.15s", dashboardRecordingName().c_str());
     canvas.setCursor(8, 124);
-    canvas.print("OK RESUME        GO BACK");
+    canvas.print("1 LISTEN 2 READ 3 WRITE GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -6659,6 +6680,7 @@ void handleKey(KeyEvent ev)
             } else {
                 std::string err;
                 if (loadSelectedNote(&err)) {
+                    last_note_name = active_note_name;
                     screen = Screen::NotesView;
                     blockInput(300);
                 } else {

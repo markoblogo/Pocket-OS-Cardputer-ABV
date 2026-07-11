@@ -8,6 +8,7 @@
 - Dashboard: current time, Resume, routines progress, SD status, direct Listen/Read/Write shortcuts, and battery/low-voltage diagnostics.
 - Routines: streaming history persistence without the former 256-line truncation, 7D/30D/365D stats, current streaks, larger list text, rename, confirmed disable, keyboard fallbacks for manage/stats, and restore-all for disabled habits.
 - Files/Transfer: `/sdcard/CARDPTR` is shown as `TRANSFER`, unsupported files use `FILE INFO`, and Connections states list/download/small-upload limits on device and web root.
+- Dashboard: shows current Resume target plus last music, book, note, and recording context with clearer shortcut footer.
 
 ## v0.2.0 - Release Baseline
 
