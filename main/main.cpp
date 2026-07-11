@@ -2328,8 +2328,6 @@ void scanMusic()
             if (isHidden(name) || !hasMp3Ext(name)) continue;
             ++music_mp3_entries;
             if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
-            struct stat st = {};
-            if (musicFileStat(name, &st) && st.st_size <= 0) continue;
             next_tracks.push_back(name);
             if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
         }
