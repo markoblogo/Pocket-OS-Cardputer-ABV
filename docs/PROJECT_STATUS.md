@@ -15,7 +15,7 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Time: manual clock, stopwatch with fractions, timer presets, alarm sound.
 - Habits: larger routines list, daily checks, manual next-day rollover, rename, confirmed disable, restore disabled habits, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
-- Settings: theme, sound, timeout, power preset, SD reprobe, About.
+- Settings: theme, sound, timeout, power preset, SD/BAT/Transfer password status, SD reprobe, About.
 - Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, and 64 KB small-file upload limit. It is not yet a full SD flash-drive replacement.
 
 ## Product reframing

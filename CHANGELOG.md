@@ -9,6 +9,7 @@
 - Routines: streaming history persistence without the former 256-line truncation, 7D/30D/365D stats, current streaks, larger list text, rename, confirmed disable, keyboard fallbacks for manage/stats, and restore-all for disabled habits.
 - Files/Transfer: `/sdcard/CARDPTR` is shown as `TRANSFER`, unsupported files use `FILE INFO`, and Connections states list/download/small-upload limits on device and web root.
 - Dashboard: shows current Resume target plus last music, book, note, and recording context with clearer shortcut footer.
+- Settings/About: compact SD/BAT/Transfer password status and clearer build/About screen.
 
 ## v0.2.0 - Release Baseline
 

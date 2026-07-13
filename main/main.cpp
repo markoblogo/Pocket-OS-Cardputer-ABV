@@ -5069,12 +5069,14 @@ void drawSettings()
     uint64_t total = 0, free_b = 0;
     canvas.setCursor(8, 102);
     if (sdUsage(&total, &free_b) && total >= free_b) {
-        canvas.printf("SD %s FREE USED %s", formatBytes(free_b).c_str(), formatBytes(total - free_b).c_str());
+        canvas.printf("SD FREE %s USED %s", formatBytes(free_b).c_str(), formatBytes(total - free_b).c_str());
     } else {
-        canvas.print("SD --");
+        canvas.print("SD NOT READY");
     }
     canvas.setCursor(8, 112);
-    canvas.printf("CFG %s", config_status.c_str());
+    int level = batteryPercent();
+    if (level >= 0) canvas.printf("BAT %d%% PASS %s", level, connection_ap_password);
+    else canvas.printf("BAT -- V%d PASS %s", battery_last_mv, connection_ap_password);
     canvas.setCursor(8, 122);
     canvas.print("OK OPEN/CHANGE       GO BACK");
     canvas.pushSprite(0, 0);
@@ -7167,11 +7169,10 @@ void handleKey(KeyEvent ev)
             } else if (settings_cursor == 5 && ev.key == Key::Ok) {
                 const esp_app_desc_t* app = esp_app_get_description();
                 char buf[160];
-                snprintf(buf, sizeof(buf), "ABVx Pocket OS\nv%s\n%s %s\nIDF %s",
+                snprintf(buf, sizeof(buf), "Pocket OS v%s\nBUILD %s\nPASS %s",
                          app ? app->version : "-",
                          app ? app->date : __DATE__,
-                         app ? app->time : __TIME__,
-                         app ? app->idf_ver : "-");
+                         connection_ap_password);
                 showMessage("ABOUT", buf);
             } else if (settings_cursor == 6 && ev.key == Key::Ok) {
                 screen = Screen::Connections;
