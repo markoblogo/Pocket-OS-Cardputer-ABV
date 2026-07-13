@@ -44,6 +44,7 @@ Stable baseline:
 - Files: SD browser, `TRANSFER` folder, file opening, unsupported-file info, delete confirmation.
 - Routines/Habits: larger daily checklist, manual next day, manage screen, restore disabled habits, 7D/30D/365D stats.
 - Decide/Randomizer: `YES / NO / MB`.
+- Inbox/Timeline: manual event log of confirmed activity; events persist only when Inbox is opened or refreshed.
 - Dashboard/Settings: Resume dashboard, current context, battery/low-voltage diagnostics, Transfer password, theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics; large media transfer still needs SD reader.
 
@@ -71,6 +72,7 @@ App highlights:
 - Write: `1` new/edit, Backspace delete from list.
 - Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.
 - Routines: OK toggles, `1` next day, Right/`S` stats, Left/`M` manage.
+- Inbox: OK opens event detail, `1` manually refreshes and persists queued events.
 - Transfer: OK starts AP, GO stops it; list/download are stable, upload is small-file only.
 
 One Button Capture from launcher:

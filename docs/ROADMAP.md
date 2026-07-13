@@ -53,14 +53,16 @@ Next acceptance:
 
 ### 2.2 Universal Inbox
 
-- Add `/sdcard/inbox/INBOX.TXT`.
-- Log voice saves, note saves, habit checks, reading opens, music plays, timer events.
-- Start as append-only text log.
+- Implemented as safe manual Timeline MVP.
+- `/sdcard/inbox/INBOX.TXT` is append-only.
+- Voice saves, note saves, habit checks, reading opens, music plays, and timer events queue in RAM first.
+- Inbox writes are explicit only: open Inbox or press `1 REFRESH`.
 
 Acceptance:
 
-- Captured activity appears in a single file.
+- Captured activity appears in a single file after manual refresh.
 - Inbox survives reboot.
+- No background SD writes during Music/Reader/Recorder operation.
 
 ### 2.3 Context Resume / Dashboard
 
@@ -81,7 +83,8 @@ Acceptance:
 
 ### 2.5 Timeline
 
-- Build a simple view over Inbox.
+- Simple list/detail view over Inbox is implemented.
+- Later: richer grouping by day/context after RTC/time sync.
 - Use manual day/session time until real sync exists.
 
 Acceptance:

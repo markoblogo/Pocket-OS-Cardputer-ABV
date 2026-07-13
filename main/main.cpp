@@ -101,7 +101,7 @@ volatile int connection_upload_total = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Dashboard, MusicList, MusicInfo, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, Message };
+enum class Screen { Launcher, Dashboard, MusicList, MusicInfo, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, InboxDetail, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -186,6 +186,7 @@ std::vector<std::string> notes;
 std::vector<std::string> recordings;
 std::vector<std::string> inbox_entries;
 std::vector<std::string> inbox_pending_events;
+std::string inbox_status = "MANUAL";
 std::vector<FileEntry> file_entries;
 FileEntry file_info_entry;
 std::vector<Habit> habits;
@@ -226,6 +227,7 @@ int selected_book = 0;
 std::string last_reader_book;
 int notes_cursor = 0;
 int inbox_cursor = 0;
+int inbox_flushed_last = 0;
 int selected_recording = 0;
 bool shuffle_on = false;
 VolumeMode volume_mode = VolumeMode::Mid;
@@ -1151,6 +1153,30 @@ void appendInboxEvent(const char* type, const std::string& detail)
     if (inbox_pending_events.size() > 16) inbox_pending_events.erase(inbox_pending_events.begin());
 }
 
+struct InboxEventView {
+    std::string stamp;
+    std::string type;
+    std::string detail;
+};
+
+InboxEventView parseInboxEvent(const std::string& raw)
+{
+    InboxEventView out;
+    const size_t first = raw.find('|');
+    const size_t second = first == std::string::npos ? std::string::npos : raw.find('|', first + 1);
+    if (first == std::string::npos || second == std::string::npos) {
+        out.type = "EVENT";
+        out.detail = raw;
+        return out;
+    }
+    out.stamp = raw.substr(0, first);
+    out.type = raw.substr(first + 1, second - first - 1);
+    out.detail = raw.substr(second + 1);
+    if (out.type.empty()) out.type = "EVENT";
+    if (out.detail.empty()) out.detail = "-";
+    return out;
+}
+
 void flushInboxEvents()
 {
     // Inbox persistence is explicit, not a background SD write. This prevents
@@ -1168,6 +1194,7 @@ void flushInboxEvents()
     }
     if (!flushAndClose(f)) return;
     if (written) inbox_pending_events.erase(inbox_pending_events.begin(), inbox_pending_events.begin() + written);
+    inbox_flushed_last = static_cast<int>(written);
 }
 
 void scanInbox()
@@ -1194,6 +1221,19 @@ void scanInbox()
     std::reverse(inbox_entries.begin(), inbox_entries.end());
     if (inbox_entries.empty()) inbox_cursor = 0;
     else inbox_cursor = std::max(0, std::min(inbox_cursor, static_cast<int>(inbox_entries.size()) - 1));
+    inbox_status = "READY";
+}
+
+void refreshInboxManual()
+{
+    // Manual only: this is the only Inbox path that persists queued events.
+    // Normal apps keep logging in RAM to avoid SD writes during audio/reader work.
+    inbox_flushed_last = 0;
+    flushInboxEvents();
+    scanInbox();
+    if (!sd_ready) inbox_status = "NO SD";
+    else if (inbox_flushed_last > 0) inbox_status = "SAVED " + std::to_string(inbox_flushed_last);
+    else inbox_status = "READY";
 }
 
 void scanNotes()
@@ -3575,8 +3615,7 @@ void openLauncherApp(int index)
     else if (index == 8) { screen = Screen::Settings; blockInput(250); }
     else if (index == 9) { screen = Screen::Connections; blockInput(250); }
     else if (index == 10) {
-        flushInboxEvents();
-        scanInbox();
+        refreshInboxManual();
         screen = Screen::InboxList;
         blockInput(250);
     }
@@ -3822,33 +3861,79 @@ void drawInboxList()
     canvas.print("INBOX");
     canvas.setTextSize(1);
     canvas.setTextColor(uiAccent(), uiBg());
-    canvas.setCursor(168, 14);
-    canvas.printf("%d", static_cast<int>(inbox_entries.size()));
+    canvas.setCursor(130, 14);
+    canvas.printf("%d P%d", static_cast<int>(inbox_entries.size()), static_cast<int>(inbox_pending_events.size()));
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 28);
+    canvas.printf("manual %s", inbox_status.c_str());
     if (inbox_entries.empty()) {
         canvas.setTextSize(2);
         canvas.setTextColor(uiFg(), uiBg());
-        canvas.setCursor(8, 48);
+        canvas.setCursor(8, 54);
         canvas.print("NO EVENTS");
         canvas.setTextSize(1);
         canvas.setTextColor(uiDim(), uiBg());
-        canvas.setCursor(8, 78);
-        canvas.print("capture something first");
+        canvas.setCursor(8, 84);
+        canvas.print("open/save/play to log");
     } else {
-        const int rows = 4;
+        const int rows = 3;
         int start = std::max(0, inbox_cursor - 1);
         start = std::min(start, std::max(0, static_cast<int>(inbox_entries.size()) - rows));
         const int end = std::min(static_cast<int>(inbox_entries.size()), start + rows);
         canvas.setTextSize(1);
         for (int i = start; i < end; ++i) {
-            canvas.setCursor(8, 36 + (i - start) * 20);
+            InboxEventView ev = parseInboxEvent(inbox_entries[i]);
+            canvas.setCursor(8, 46 + (i - start) * 22);
             canvas.setTextColor(i == inbox_cursor ? uiBg() : uiFg(), i == inbox_cursor ? uiFg() : uiBg());
-            canvas.printf("%c %.29s", i == inbox_cursor ? '>' : ' ', inbox_entries[i].c_str());
+            canvas.printf("%c %.8s %.19s", i == inbox_cursor ? '>' : ' ', ev.type.c_str(), ev.detail.c_str());
         }
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("UP/DN SCROLL       GO BACK");
+    canvas.print("OK DETAIL  1 REFRESH  GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawInboxDetail()
+{
+    canvas.fillScreen(uiBg());
+    drawCyberAccent();
+    canvas.setTextSize(2);
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 8);
+    canvas.print("EVENT");
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(124, 14);
+    canvas.printf("%d/%d", inbox_entries.empty() ? 0 : inbox_cursor + 1, static_cast<int>(inbox_entries.size()));
+    if (inbox_entries.empty()) {
+        canvas.setTextSize(2);
+        canvas.setTextColor(uiFg(), uiBg());
+        canvas.setCursor(8, 54);
+        canvas.print("NO EVENT");
+    } else {
+        InboxEventView ev = parseInboxEvent(inbox_entries[inbox_cursor]);
+        canvas.setTextSize(2);
+        canvas.setTextColor(uiAccent(), uiBg());
+        canvas.setCursor(8, 38);
+        canvas.printf("%.10s", ev.type.c_str());
+        canvas.setTextSize(1);
+        canvas.setTextColor(uiDim(), uiBg());
+        canvas.setCursor(8, 64);
+        canvas.printf("time %s", ev.stamp.empty() ? "-" : ev.stamp.c_str());
+        canvas.setTextColor(uiFg(), uiBg());
+        canvas.setCursor(8, 84);
+        canvas.printf("%.32s", ev.detail.c_str());
+        if (ev.detail.size() > 32) {
+            canvas.setCursor(8, 98);
+            canvas.printf("%.32s", ev.detail.c_str() + 32);
+        }
+    }
+    canvas.setTextSize(1);
+    canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 122);
+    canvas.print("OK LIST   1 REFRESH   GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -6251,6 +6336,7 @@ void drawIfDirty()
     else if (screen == Screen::Settings) drawSettings();
     else if (screen == Screen::Connections) drawConnections();
     else if (screen == Screen::InboxList) drawInboxList();
+    else if (screen == Screen::InboxDetail) drawInboxDetail();
     else drawMessage();
     dirty = false;
 }
@@ -6452,10 +6538,27 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::InboxList) {
         if (ev.key == Key::Up && !inbox_entries.empty()) inbox_cursor = std::max(0, inbox_cursor - 1);
         else if (ev.key == Key::Down && !inbox_entries.empty()) inbox_cursor = std::min(static_cast<int>(inbox_entries.size()) - 1, inbox_cursor + 1);
-        else if (ev.key == Key::Ok) scanInbox();
+        else if (ev.key == Key::Ok && !inbox_entries.empty()) {
+            screen = Screen::InboxDetail;
+            blockInput(200);
+        }
+        else if (ev.key == Key::One) refreshInboxManual();
         else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::Launcher;
             blockInput(250);
+        }
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::InboxDetail) {
+        if (ev.key == Key::One) {
+            refreshInboxManual();
+            screen = Screen::InboxList;
+            blockInput(200);
+        } else if (ev.key == Key::Ok || ev.key == Key::Home || ev.key == Key::Back) {
+            screen = Screen::InboxList;
+            blockInput(200);
         }
         dirty = true;
         return;
