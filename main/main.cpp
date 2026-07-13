@@ -885,6 +885,12 @@ bool sdPathIsDir(const std::string& path)
     return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+std::string sdPathToFatPath(const std::string& path)
+{
+    if (path == MOUNT_POINT) return "0:/";
+    if (path.rfind(MOUNT_POINT, 0) == 0) return "0:" + path.substr(std::strlen(MOUNT_POINT));
+    return path;
+}
 
 std::string baseName(const std::string& path)
 {
@@ -983,8 +989,6 @@ void scanFiles(const std::string& path)
     files_cursor = 0;
     files_status = "OPEN FAIL";
     DIR* dir = openSdDirWithRetry(files_path.c_str());
-    if (!dir && files_path == MOUNT_POINT) files_status = "NO SD";
-    if (!dir) return;
     files_status = "EMPTY";
     if (files_path != MOUNT_POINT) {
         file_entries.push_back({"..", "", true, 0});
@@ -994,18 +998,46 @@ void scanFiles(const std::string& path)
             file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
         }
     }
-    while (dirent* entry = readdir(dir)) {
-        std::string name = entry->d_name;
-        if (isHidden(name)) continue;
-        if (files_path == MOUNT_POINT && name == "CARDPTR") continue;
-        std::string full = files_path + "/" + name;
-        struct stat st = {};
-        if (stat(full.c_str(), &st) != 0) continue;
-        bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
-        file_entries.push_back({name, full, dir_flag, static_cast<size_t>(st.st_size)});
-        if (file_entries.size() >= MAX_LIST_ENTRIES) break;
+    if (dir) {
+        while (dirent* entry = readdir(dir)) {
+            std::string name = entry->d_name;
+            if (isHidden(name)) continue;
+            if (files_path == MOUNT_POINT && name == "CARDPTR") continue;
+            std::string full = files_path + "/" + name;
+            struct stat st = {};
+            if (stat(full.c_str(), &st) != 0) continue;
+            bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
+            file_entries.push_back({name, full, dir_flag, static_cast<size_t>(st.st_size)});
+            if (file_entries.size() >= MAX_LIST_ENTRIES) break;
+        }
+        closedir(dir);
     }
-    closedir(dir);
+    const size_t before_fat = file_entries.size();
+    const bool root_only_transfer = files_path == MOUNT_POINT && before_fat == 1 && file_entries[0].path == CONFIG_DIR;
+    const bool subdir_only_parent = files_path != MOUNT_POINT && before_fat == 1;
+    if (!dir || root_only_transfer || subdir_only_parent) {
+        FF_DIR fat_dir = {};
+        FILINFO info = {};
+        if (f_opendir(&fat_dir, sdPathToFatPath(files_path).c_str()) == FR_OK) {
+            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+                std::string name = info.fname;
+                if (isHidden(name)) continue;
+                if (files_path == MOUNT_POINT && name == "CARDPTR") {
+                    bool exists = false;
+                    for (const auto& e : file_entries) if (e.path == CONFIG_DIR) exists = true;
+                    if (!exists) file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
+                    continue;
+                }
+                std::string full = files_path + "/" + name;
+                file_entries.push_back({name, full, (info.fattrib & AM_DIR) != 0, static_cast<size_t>(info.fsize)});
+                if (file_entries.size() >= MAX_LIST_ENTRIES) break;
+            }
+            f_closedir(&fat_dir);
+            files_status = "FAT OK";
+        } else if (!dir && files_path == MOUNT_POINT) {
+            files_status = "NO SD";
+        }
+    }
     std::sort(file_entries.begin() + (files_path == MOUNT_POINT ? 0 : 1), file_entries.end(), [](const FileEntry& a, const FileEntry& b) {
         if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;
         return a.name < b.name;
@@ -2534,17 +2566,35 @@ void scanMusic()
 void scanRecordings()
 {
     recordings.clear();
-    if (!ensureRecordingsDir()) return;
     DIR* dir = openSdDirWithRetry(recordings_dir.c_str());
-    if (!dir) return;
-    while (dirent* entry = readdir(dir)) {
-        std::string name = entry->d_name;
-        if (isHidden(name) || !hasRecordingExt(name)) continue;
-        if (sdPathIsDir(recordings_dir + "/" + name)) continue;
-        recordings.push_back(name);
-        if (recordings.size() >= MAX_LIST_ENTRIES) break;
+    if (dir) {
+        while (dirent* entry = readdir(dir)) {
+            std::string name = entry->d_name;
+            if (isHidden(name) || !hasRecordingExt(name)) continue;
+            if (sdPathIsDir(recordings_dir + "/" + name)) continue;
+            recordings.push_back(name);
+            if (recordings.size() >= MAX_LIST_ENTRIES) break;
+        }
+        closedir(dir);
     }
-    closedir(dir);
+    if (recordings.empty()) {
+        static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR};
+        for (const char* candidate : dirs) {
+            FF_DIR fat_dir = {};
+            FILINFO info = {};
+            if (f_opendir(&fat_dir, sdPathToFatPath(candidate).c_str()) != FR_OK) continue;
+            recordings_dir = candidate;
+            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+                std::string name = info.fname;
+                if (isHidden(name) || !hasRecordingExt(name)) continue;
+                if (info.fattrib & AM_DIR) continue;
+                recordings.push_back(name);
+                if (recordings.size() >= MAX_LIST_ENTRIES) break;
+            }
+            f_closedir(&fat_dir);
+            if (!recordings.empty()) break;
+        }
+    }
     std::sort(recordings.begin(), recordings.end());
     if (selected_recording >= static_cast<int>(recordings.size())) selected_recording = std::max(0, static_cast<int>(recordings.size()) - 1);
     recorder_cursor = std::min(recorder_cursor, static_cast<int>(recordings.size()));
