@@ -29,7 +29,7 @@ Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ## Current status
 
-Current baseline: **post-v0.2 Pocket OS checkpoint**.
+Current baseline: **v0.2.2-test Pocket OS checkpoint**.
 
 Tested on real Cardputer ADV hardware.
 
@@ -51,6 +51,7 @@ Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi u
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
 Changes: [`CHANGELOG.md`](CHANGELOG.md)
+Smoke test: [`docs/SMOKE_TEST.md`](docs/SMOKE_TEST.md)
 
 ## Controls
 
@@ -104,7 +105,7 @@ Use 8.3-safe filenames for now.
 Wi-Fi AP:
 
 - SSID: `ABVX-Cardputer`
-- Password: generated for each Transfer session and shown on Cardputer.
+- Password: `cardputer`
 - URL: `http://192.168.4.1`
 
 Useful endpoints:

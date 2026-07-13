@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased checkpoint
+## v0.2.2-test - Pocket OS Polish Checkpoint
 
 - Listen: MAX volume label, shuffle fallback key, resilient restart after Settings, and heap preflight that reuses existing audio buffers.
 - Listen: selected-track marquee, `2`/`I` track info screen, original upload title display, cached file size/status, safe `2`/`P` MP3 sync probe, and zero-byte filtering in the FatFS fallback.

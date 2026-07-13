@@ -1,6 +1,6 @@
 # ABVx Project Status
 
-Current baseline: **post-v0.2 Pocket OS checkpoint**.
+Current baseline: **v0.2.2-test Pocket OS checkpoint**.
 
 ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, reading/listening, routines, and transfer.
 
@@ -16,7 +16,7 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Habits: larger routines list, daily checks, manual next-day rollover, rename, confirmed disable, restore disabled habits, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD/BAT/Transfer password status, SD reprobe, About.
-- Transfer/Connections: temporary Wi-Fi AP with per-session password, ping/status/list/download/write-test, and 64 KB small-file upload limit. It is not yet a full SD flash-drive replacement.
+- Transfer/Connections: temporary Wi-Fi AP with fixed password `cardputer`, ping/status/list/download/write-test, and 64 KB small-file upload limit. It is not yet a full SD flash-drive replacement.
 
 ## Product reframing
 
