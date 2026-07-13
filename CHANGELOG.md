@@ -3,6 +3,7 @@
 ## v0.2.2-test - Pocket OS Polish Checkpoint
 
 - Listen: MAX volume label, shuffle fallback key, resilient restart after Settings, and heap preflight that reuses existing audio buffers.
+- SD: manual reprobe now clears stale card state; Read/Write lists use read-only FatFS fallback like Listen, avoiding false empty Books/Notes after VFS instability.
 - Listen: selected-track marquee, `2`/`I` track info screen, original upload title display, cached file size/status, safe `2`/`P` MP3 sync probe, and zero-byte filtering in the FatFS fallback.
 - Time: timer presets for 1/5/10/20 minutes.
 - Dashboard: current time, Resume, routines progress, SD status, direct Listen/Read/Write shortcuts, and battery/low-voltage diagnostics.

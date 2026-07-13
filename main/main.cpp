@@ -369,11 +369,12 @@ bool flushAndClose(FILE* f)
 
 bool manualSdReprobe()
 {
-    if (sd_ready && sd_card) {
+    if (sd_card) {
         esp_vfs_fat_sdcard_unmount(MOUNT_POINT, sd_card);
     }
     sd_card = nullptr;
     sd_ready = false;
+    vTaskDelay(pdMS_TO_TICKS(50));
     return initSd();
 }
 
@@ -1108,15 +1109,30 @@ void scanBooks()
 {
     books.clear();
     DIR* dir = openSdDirWithRetry(BOOKS_DIR);
-    if (!dir) return;
-    while (dirent* entry = readdir(dir)) {
-        std::string name = entry->d_name;
-        if (isHidden(name) || !hasTextExt(name)) continue;
-        if (sdPathIsDir(std::string(BOOKS_DIR) + "/" + name)) continue;
-        books.push_back(name);
-        if (books.size() >= MAX_LIST_ENTRIES) break;
+    if (dir) {
+        while (dirent* entry = readdir(dir)) {
+            std::string name = entry->d_name;
+            if (isHidden(name) || !hasTextExt(name)) continue;
+            if (sdPathIsDir(std::string(BOOKS_DIR) + "/" + name)) continue;
+            books.push_back(name);
+            if (books.size() >= MAX_LIST_ENTRIES) break;
+        }
+        closedir(dir);
     }
-    closedir(dir);
+    if (books.empty()) {
+        FF_DIR fat_dir = {};
+        FILINFO info = {};
+        if (f_opendir(&fat_dir, "0:/books") == FR_OK) {
+            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+                std::string name = info.fname;
+                if (isHidden(name) || !hasTextExt(name)) continue;
+                if (info.fattrib & AM_DIR) continue;
+                books.push_back(name);
+                if (books.size() >= MAX_LIST_ENTRIES) break;
+            }
+            f_closedir(&fat_dir);
+        }
+    }
     std::sort(books.begin(), books.end());
     if (selected_book >= static_cast<int>(books.size())) selected_book = std::max(0, static_cast<int>(books.size()) - 1);
     if (!last_reader_book.empty()) {
@@ -1197,17 +1213,31 @@ void refreshInboxManual()
 void scanNotes()
 {
     notes.clear();
-    if (!ensureNotesDir()) return;
     DIR* dir = openSdDirWithRetry(NOTES_DIR);
-    if (!dir) return;
-    while (dirent* entry = readdir(dir)) {
-        std::string name = entry->d_name;
-        if (isHidden(name) || !hasTextExt(name)) continue;
-        if (sdPathIsDir(std::string(NOTES_DIR) + "/" + name)) continue;
-        notes.push_back(name);
-        if (notes.size() >= MAX_LIST_ENTRIES) break;
+    if (dir) {
+        while (dirent* entry = readdir(dir)) {
+            std::string name = entry->d_name;
+            if (isHidden(name) || !hasTextExt(name)) continue;
+            if (sdPathIsDir(std::string(NOTES_DIR) + "/" + name)) continue;
+            notes.push_back(name);
+            if (notes.size() >= MAX_LIST_ENTRIES) break;
+        }
+        closedir(dir);
     }
-    closedir(dir);
+    if (notes.empty()) {
+        FF_DIR fat_dir = {};
+        FILINFO info = {};
+        if (f_opendir(&fat_dir, "0:/notes") == FR_OK) {
+            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+                std::string name = info.fname;
+                if (isHidden(name) || !hasTextExt(name)) continue;
+                if (info.fattrib & AM_DIR) continue;
+                notes.push_back(name);
+                if (notes.size() >= MAX_LIST_ENTRIES) break;
+            }
+            f_closedir(&fat_dir);
+        }
+    }
     std::sort(notes.begin(), notes.end());
     const int total = static_cast<int>(notes.size()) + 1;
     notes_cursor = std::max(0, std::min(notes_cursor, total - 1));
