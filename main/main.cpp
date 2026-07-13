@@ -988,6 +988,17 @@ void scanFiles(const std::string& path)
     files_path = path.empty() ? std::string(MOUNT_POINT) : path;
     files_cursor = 0;
     files_status = "EMPTY";
+    if (files_path == MOUNT_POINT) {
+        // Hardware-safe root: avoid depending on root directory reads, which
+        // have been flaky while direct known-folder reads stay reliable.
+        file_entries.push_back({"BOOKS", BOOKS_DIR, true, 0});
+        file_entries.push_back({"MUSIC", MUSIC_DIR, true, 0});
+        file_entries.push_back({"NOTES", NOTES_DIR, true, 0});
+        file_entries.push_back({"VOICE", recordings_dir, true, 0});
+        file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
+        files_status = "VIRTUAL";
+        return;
+    }
     if (files_path != MOUNT_POINT) {
         file_entries.push_back({"..", "", true, 0});
     }
@@ -2544,7 +2555,7 @@ void scanMusic()
 void scanRecordings()
 {
     recordings.clear();
-    static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR};
+    static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR};
     bool fat_seen = false;
     for (const char* candidate : dirs) {
         FF_DIR fat_dir = {};
@@ -3165,17 +3176,21 @@ bool saveCapturedRecording(std::string* err = nullptr)
         if (err) *err = "sd mount";
         return false;
     }
-    const char* sd_dir = RECORDINGS_DIR;
-    std::string fat_dir = sdPathToFatPath(sd_dir);
-    FRESULT fr = f_mkdir(fat_dir.c_str());
-    if (fr != FR_OK && fr != FR_EXIST) {
-        sd_dir = RECORDINGS_FALLBACK_DIR;
-        fat_dir = sdPathToFatPath(sd_dir);
-        fr = f_mkdir(fat_dir.c_str());
-        if (fr != FR_OK && fr != FR_EXIST) {
-            if (err) *err = "mkdir: " + std::to_string(static_cast<int>(fr));
-            return false;
+    const char* sd_dir = nullptr;
+    static const char* save_dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR};
+    FRESULT fr = FR_NO_PATH;
+    for (const char* candidate : save_dirs) {
+        FF_DIR test_dir = {};
+        fr = f_opendir(&test_dir, sdPathToFatPath(candidate).c_str());
+        if (fr == FR_OK) {
+            f_closedir(&test_dir);
+            sd_dir = candidate;
+            break;
         }
+    }
+    if (!sd_dir) {
+        if (err) *err = "no rec dir: " + std::to_string(static_cast<int>(fr));
+        return false;
     }
     recordings_dir = sd_dir;
     std::string path = recordings_dir + "/" + active_recording_name;
