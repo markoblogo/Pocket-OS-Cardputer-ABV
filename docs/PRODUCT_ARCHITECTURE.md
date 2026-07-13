@@ -113,8 +113,10 @@ If Fn combinations are reliable, use `Fn+R`, `Fn+N`, etc. If not, use direct key
 A single event log for captured items:
 
 ```text
-/sdcard/inbox/INBOX.TXT
+/voice/INBOX.LOG
 ```
+
+The log is stored in internal SPIFFS. Events queue in RAM and persist only from the main loop on safe idle screens; Timeline never writes to SD.
 
 Example entries:
 

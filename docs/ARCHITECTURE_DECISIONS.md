@@ -47,6 +47,17 @@ This enables product features that cut across apps:
 
 Do not rewrite stable apps immediately. Add Pocket OS features as a layer over the working firmware baseline.
 
+## Persistence domains
+
+Storage ownership is explicit:
+
+- SD stores bulk user content: music, books, and external notes.
+- Internal SPIFFS stores short critical writes: Voice recordings and Inbox/Timeline.
+- Input, HTTP, decoder, microphone, and speaker handlers do not write persistent state directly.
+- Persistence requests are queued and committed from the main loop on safe idle screens.
+
+Inbox keeps a bounded 64-event journal. This prevents Timeline activity from affecting removable SD lifecycle.
+
 ## AI
 
 AI is online-only.
@@ -148,14 +159,14 @@ Future transfer should be redesigned as a staged/chunked state machine and teste
 
 Current safe design:
 
-- one 20-second 8 kHz/8-bit mode;
+- one 20-second 4 kHz/8-bit mode;
 - RAM-first recording;
-- save to SD only after recording stops;
-- chunked playback from SD.
+- save to internal SPIFFS only after recording stops;
+- chunked playback from internal SPIFFS.
 
 Reason:
 
-- Live SD writes during microphone capture caused I/O errors and SD state loss.
+- SD writes near microphone capture caused I/O errors and SD state loss. Voice is therefore isolated from SD.
 
 Multi-minute recording is outside the current roadmap.
 

@@ -23,6 +23,7 @@
 #include <esp_netif.h>
 #include <esp_random.h>
 #include <esp_spiffs.h>
+#include "persistence.h"
 #include <esp_vfs_fat.h>
 #include <esp_wifi.h>
 #include <ff.h>
@@ -44,8 +45,8 @@ constexpr const char* MUSIC_DIR = "/sdcard/music";
 constexpr const char* MUSIC_INDEX_FILE = "/sdcard/music/INDEX.TXT";
 constexpr const char* BOOKS_DIR = "/sdcard/books";
 constexpr const char* NOTES_DIR = "/sdcard/notes";
-constexpr const char* INBOX_DIR = "/sdcard/inbox";
-constexpr const char* INBOX_FILE = "/sdcard/inbox/INBOX.TXT";
+constexpr const char* INBOX_FILE = "/voice/INBOX.LOG";
+constexpr const char* INBOX_TMP_FILE = "/voice/INBOX.NEW";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
 constexpr const char* RECORDINGS_FALLBACK_DIR = "/sdcard/RECS";
 constexpr const char* RECORDINGS_LEGACY_DIR = "/sdcard/REC";
@@ -59,7 +60,9 @@ constexpr const char* CONFIG_DIR = "/sdcard/CARDPTR";
 constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
 constexpr const char* VOICE_STORE_DIR = "/voice";
 constexpr const char* VOICE_STORE_LABEL = "voice";
-constexpr const char* READER_STATE_FILE = "/sdcard/CARDPTR/READER.TXT";
+constexpr const char* READER_STATE_FILE = "/voice/READER.STA";
+constexpr const char* READER_STATE_TMP_FILE = "/voice/READER.NEW";
+constexpr const char* READER_STATE_LEGACY_FILE = "/sdcard/CARDPTR/READER.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
 // Keep the two queued PCM buffers small enough for a large music library.
@@ -191,7 +194,8 @@ std::vector<std::string> notes;
 std::vector<std::string> recordings;
 std::vector<std::string> inbox_entries;
 std::vector<std::string> inbox_pending_events;
-std::string inbox_status = "MANUAL";
+std::string inbox_status = "INTERNAL";
+bool inbox_persist_requested = false;
 std::vector<FileEntry> file_entries;
 FileEntry file_info_entry;
 std::vector<Habit> habits;
@@ -320,6 +324,7 @@ std::vector<std::string> reader_lines;
 std::vector<std::string> reader_words;
 std::map<std::string, int> reader_bookmarks;
 std::map<std::string, size_t> reader_stream_bookmarks;
+bool reader_state_save_requested = false;
 int reader_scroll = 0;
 bool reader_streaming = false;
 std::string reader_stream_path;
@@ -641,11 +646,11 @@ void loadConfig()
     config_status = "LOADED";
 }
 
-void saveReaderState()
+bool writeReaderState()
 {
-    if (!ensureConfigDir()) return;
-    FILE* f = fopen(READER_STATE_FILE, "wb");
-    if (!f) return;
+    if (!initVoiceStorage()) return false;
+    FILE* f = fopen(READER_STATE_TMP_FILE, "wb");
+    if (!f) return false;
     if (!last_reader_book.empty()) fprintf(f, "LAST|%s\n", last_reader_book.c_str());
     for (const auto& item : reader_bookmarks) {
         fprintf(f, "BMK|%s|%d\n", item.first.c_str(), item.second);
@@ -653,7 +658,25 @@ void saveReaderState()
     for (const auto& item : reader_stream_bookmarks) {
         fprintf(f, "SBK2|%s|%lu\n", item.first.c_str(), static_cast<unsigned long>(item.second));
     }
-    flushAndClose(f);
+    if (!flushAndClose(f)) {
+        std::remove(READER_STATE_TMP_FILE);
+        return false;
+    }
+    if (std::remove(READER_STATE_FILE) != 0 && errno != ENOENT) {
+        std::remove(READER_STATE_TMP_FILE);
+        return false;
+    }
+    if (std::rename(READER_STATE_TMP_FILE, READER_STATE_FILE) != 0) {
+        std::remove(READER_STATE_TMP_FILE);
+        return false;
+    }
+    return true;
+}
+
+void saveReaderState()
+{
+    // Queue only. The main loop writes after the streaming SD file is closed.
+    reader_state_save_requested = true;
 }
 
 void loadReaderState()
@@ -661,8 +684,13 @@ void loadReaderState()
     reader_bookmarks.clear();
     reader_stream_bookmarks.clear();
     last_reader_book.clear();
-    if (!ensureConfigDir()) return;
+    if (!initVoiceStorage()) return;
     FILE* f = fopen(READER_STATE_FILE, "rb");
+    bool loaded_legacy = false;
+    if (!f && initSd()) {
+        f = fopen(READER_STATE_LEGACY_FILE, "rb");
+        loaded_legacy = f != nullptr;
+    }
     if (!f) return;
     char line[180];
     while (fgets(line, sizeof(line), f)) {
@@ -687,6 +715,7 @@ void loadReaderState()
         }
     }
     fclose(f);
+    if (loaded_legacy) reader_state_save_requested = true;
 }
 
 void flushKeyboardEvents()
@@ -1244,6 +1273,7 @@ void appendInboxEvent(const char* type, const std::string& detail)
     if (!type || !type[0]) return;
     inbox_pending_events.push_back("S" + std::to_string(M5.millis() / 1000) + "|" + type + "|" + inboxSafeText(detail));
     if (inbox_pending_events.size() > 16) inbox_pending_events.erase(inbox_pending_events.begin());
+    inbox_persist_requested = true;
 }
 
 struct InboxEventView {
@@ -1270,21 +1300,64 @@ InboxEventView parseInboxEvent(const std::string& raw)
     return out;
 }
 
-void scanInbox()
+void setInboxView(std::vector<std::string> events)
 {
-    inbox_entries.clear();
-    inbox_entries = inbox_pending_events;
+    inbox_entries = std::move(events);
     std::reverse(inbox_entries.begin(), inbox_entries.end());
     if (inbox_entries.empty()) inbox_cursor = 0;
     else inbox_cursor = std::max(0, std::min(inbox_cursor, static_cast<int>(inbox_entries.size()) - 1));
-    inbox_status = "RAM ONLY";
 }
 
 void refreshInboxManual()
 {
-    // Manual refresh only copies RAM events to the visible Timeline. No SD I/O.
+    inbox_status = "QUEUED";
+    inbox_persist_requested = true;
+    dirty = true;
+}
+
+void processPersistence()
+{
+    // Internal flash writes are allowed only from the main loop on idle UI
+    // screens. App handlers and all audio paths remain write-free.
+    const bool safe_screen = screen == Screen::Launcher || screen == Screen::ReaderList ||
+                             screen == Screen::InboxList || screen == Screen::InboxDetail;
+    if (!safe_screen) return;
+    if (reader_state_save_requested) {
+        reader_state_save_requested = false;
+        if (!writeReaderState()) config_status = "READER STATE ERR";
+    }
+    if (!inbox_persist_requested) return;
+    inbox_persist_requested = false;
     inbox_flushed_last = 0;
-    scanInbox();
+
+    std::vector<std::string> stored;
+    std::string err;
+    bool ok = initVoiceStorage();
+    if (!ok) {
+        err = "mount";
+    } else if (inbox_pending_events.empty()) {
+        ok = abvx::loadEventLog(INBOX_FILE, &stored, &err);
+    } else {
+        const size_t pending_count = inbox_pending_events.size();
+        ok = abvx::mergeEventLog(INBOX_FILE, INBOX_TMP_FILE, inbox_pending_events, &stored, &err);
+        if (ok) {
+            inbox_flushed_last = static_cast<int>(pending_count);
+            inbox_pending_events.clear();
+        }
+    }
+
+    if (!ok) {
+        if (stored.empty() && initVoiceStorage()) abvx::loadEventLog(INBOX_FILE, &stored, nullptr);
+        stored.insert(stored.end(), inbox_pending_events.begin(), inbox_pending_events.end());
+        if (stored.size() > abvx::kEventLogMaxEntries) {
+            stored.erase(stored.begin(), stored.end() - abvx::kEventLogMaxEntries);
+        }
+        inbox_status = "ERR " + inboxSafeText(err);
+    } else {
+        inbox_status = inbox_flushed_last > 0 ? "SAVED " + std::to_string(inbox_flushed_last) : "INTERNAL OK";
+    }
+    setInboxView(std::move(stored));
+    dirty = true;
 }
 
 void scanNotes()
@@ -1787,6 +1860,39 @@ void closeReaderStream()
     }
 }
 
+bool readReaderStreamBytes(size_t offset, uint8_t* data, size_t capacity,
+                           size_t* bytes_read, std::string* err = nullptr)
+{
+    int last_errno = EIO;
+    const char* failed_stage = "read";
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (!reader_stream_file) reader_stream_file = fopen(reader_stream_path.c_str(), "rb");
+        if (!reader_stream_file) {
+            last_errno = errno;
+            failed_stage = "open";
+        } else {
+            clearerr(reader_stream_file);
+            errno = 0;
+            if (fseek(reader_stream_file, static_cast<long>(offset), SEEK_SET) != 0) {
+                last_errno = errno ? errno : EIO;
+                failed_stage = "seek";
+            } else {
+                const size_t count = fread(data, 1, capacity, reader_stream_file);
+                if (count > 0) {
+                    *bytes_read = count;
+                    return true;
+                }
+                last_errno = errno ? errno : EIO;
+                failed_stage = feof(reader_stream_file) ? "end" : "read";
+            }
+        }
+        closeReaderStream();
+        if (attempt == 0) vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (err) *err = std::string(failed_stage) + ": " + std::strerror(last_errno);
+    return false;
+}
+
 // Large books are rendered as a small moving window.  Keeping only five wrapped
 // lines avoids the text/word vectors that make a normal book exceed Cardputer RAM.
 bool loadReaderStreamPage(std::string* err = nullptr)
@@ -1797,21 +1903,9 @@ bool loadReaderStreamPage(std::string* err = nullptr)
         if (err) *err = "end of book";
         return false;
     }
-    if (!reader_stream_file) reader_stream_file = fopen(reader_stream_path.c_str(), "rb");
-    if (!reader_stream_file) {
-        if (err) { *err = "open: "; *err += std::strerror(errno); }
-        return false;
-    }
-    if (fseek(reader_stream_file, static_cast<long>(reader_stream_offset), SEEK_SET) != 0) {
-        if (err) *err = "seek failed";
-        return false;
-    }
     std::vector<uint8_t> bytes(READER_STREAM_READ_BYTES);
-    size_t n = fread(bytes.data(), 1, bytes.size(), reader_stream_file);
-    if (n == 0) {
-        if (err) *err = "read failed";
-        return false;
-    }
+    size_t n = 0;
+    if (!readReaderStreamBytes(reader_stream_offset, bytes.data(), bytes.size(), &n, err)) return false;
 
     constexpr int max_cols = 17;
     std::string line;
@@ -1939,20 +2033,13 @@ bool readerStreamMoveBack(int lines)
 
 bool readerStreamReadWord(size_t from, std::string* out, size_t* start_out, size_t* next_out, std::string* err = nullptr)
 {
-    if (!reader_stream_file || from >= reader_stream_file_size) {
+    if (from >= reader_stream_file_size) {
         if (err) *err = "end of book";
         return false;
     }
-    if (fseek(reader_stream_file, static_cast<long>(from), SEEK_SET) != 0) {
-        if (err) *err = "seek failed";
-        return false;
-    }
     uint8_t bytes[512];
-    size_t n = fread(bytes, 1, sizeof(bytes), reader_stream_file);
-    if (n == 0) {
-        if (err) *err = "read failed";
-        return false;
-    }
+    size_t n = 0;
+    if (!readReaderStreamBytes(from, bytes, sizeof(bytes), &n, err)) return false;
     size_t i = 0;
     auto whitespace = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
     while (i < n && whitespace(bytes[i])) ++i;
@@ -2784,6 +2871,42 @@ void stopPlayback()
     playback_decode_after_ms = 0;
 }
 
+template <typename T>
+void releaseVector(std::vector<T>* values)
+{
+    if (!values) return;
+    std::vector<T>().swap(*values);
+}
+
+void releaseTransientBuffersForVoice()
+{
+    // clear() retains capacity. Reader and Music could therefore leave the
+    // heap too fragmented for the bounded 20-second Voice capture pool.
+    stopPlayback();
+    closeReaderStream();
+    if (rec_play_file) {
+        fclose(rec_play_file);
+        rec_play_file = nullptr;
+    }
+    M5.Speaker.stop();
+
+    releaseVector(&mp3_buf);
+    releaseVector(&mp3_frame_pcm);
+    releaseVector(&pcm_chunk);
+    releaseVector(&pcm_next_chunk);
+    std::string().swap(reader_text);
+    releaseVector(&reader_lines);
+    releaseVector(&reader_words);
+    releaseVector(&reader_stream_lines);
+    releaseVector(&reader_stream_line_offsets);
+    releaseVector(&reader_stream_history);
+    releaseVector(&rec_buffer);
+    releaseVector(&rec_u8_buffer);
+    releaseVector(&rec_play_all);
+    releaseVector(&rec_play_next_chunk);
+    releaseVector(&rec_play_u8_buffer);
+}
+
 bool refillInput()
 {
     if (!mp3_file) return false;
@@ -3140,7 +3263,7 @@ void updateAudio()
 
 bool startRecording(std::string* err = nullptr)
 {
-    stopPlayback();
+    releaseTransientBuffersForVoice();
     if (!initVoiceStorage()) {
         if (err) *err = "voice storage";
         return false;
@@ -3168,7 +3291,12 @@ bool startRecording(std::string* err = nullptr)
     rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
     rec_u8_buffer.assign(REC_BUFFER_SAMPLES, 0);
     if (!prepareCaptureChunks()) {
-        if (err) *err = "ram unavailable";
+        if (err) {
+            const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+            const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+            *err = "ram L" + std::to_string(static_cast<unsigned long long>(largest));
+            *err += " F" + std::to_string(static_cast<unsigned long long>(free_bytes));
+        }
         return false;
     }
 
@@ -3296,9 +3424,9 @@ void finishRecordingStop(bool failed, const std::string& failed_text)
             snprintf(stop_line, sizeof(stop_line), "%s %ldms", rec_auto_stopped ? "AUTO" : "MAN", static_cast<long>(delta_ms));
         }
         std::string dur_line = std::string(rec_dur) + " sec\n" + std::string(stop_line);
-        // Do not write Inbox/SD state after a microphone session.  Voice data
-        // lives in the dedicated internal SPIFFS partition; an SD write here
-        // can destabilize the Cardputer SD mount after the mic codec closes.
+        // RAM queue only. The main loop persists this to internal SPIFFS after
+        // Voice exits; no SD or flash write occurs in the audio completion path.
+        appendInboxEvent("VOICE", active_recording_name);
         showMessage("Record saved", active_recording_name + "\n" + dur_line, MessageReturn::Recorder);
     }
     rec_write_error = false;
@@ -3699,8 +3827,8 @@ void openLauncherApp(int index)
     else if (index == 8) { screen = Screen::Settings; blockInput(250); }
     else if (index == 9) { screen = Screen::Connections; blockInput(250); }
     else if (index == 10) {
-        refreshInboxManual();
         screen = Screen::InboxList;
+        refreshInboxManual();
         blockInput(250);
     }
 }
@@ -3949,7 +4077,7 @@ void drawInboxList()
     canvas.printf("%d P%d", static_cast<int>(inbox_entries.size()), static_cast<int>(inbox_pending_events.size()));
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 28);
-    canvas.printf("manual %s", inbox_status.c_str());
+    canvas.printf("store %s", inbox_status.c_str());
     if (inbox_entries.empty()) {
         canvas.setTextSize(2);
         canvas.setTextColor(uiFg(), uiBg());
@@ -3964,18 +4092,18 @@ void drawInboxList()
         int start = std::max(0, inbox_cursor - 1);
         start = std::min(start, std::max(0, static_cast<int>(inbox_entries.size()) - rows));
         const int end = std::min(static_cast<int>(inbox_entries.size()), start + rows);
-        canvas.setTextSize(1);
+        canvas.setTextSize(2);
         for (int i = start; i < end; ++i) {
             InboxEventView ev = parseInboxEvent(inbox_entries[i]);
-            canvas.setCursor(8, 46 + (i - start) * 22);
+            canvas.setCursor(8, 42 + (i - start) * 26);
             canvas.setTextColor(i == inbox_cursor ? uiBg() : uiFg(), i == inbox_cursor ? uiFg() : uiBg());
-            canvas.printf("%c %.8s %.19s", i == inbox_cursor ? '>' : ' ', ev.type.c_str(), ev.detail.c_str());
+            canvas.printf("%c%.6s %.10s", i == inbox_cursor ? '>' : ' ', ev.type.c_str(), ev.detail.c_str());
         }
     }
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK DETAIL  1 RAM REFRESH  GO BACK");
+    canvas.print("OK DETAIL  1 REFRESH  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -4017,7 +4145,7 @@ void drawInboxDetail()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK LIST   1 RAM REFRESH   GO");
+    canvas.print("OK OPEN   1 REFRESH   GO");
     canvas.pushSprite(0, 0);
 }
 
@@ -6582,6 +6710,81 @@ void processMusicAutostart()
     dirty = true;
 }
 
+bool openInboxEvent(std::string* err = nullptr)
+{
+    if (inbox_entries.empty() || inbox_cursor < 0 || inbox_cursor >= static_cast<int>(inbox_entries.size())) {
+        if (err) *err = "no event";
+        return false;
+    }
+    const InboxEventView event = parseInboxEvent(inbox_entries[inbox_cursor]);
+
+    if (event.type == "READ") {
+        scanBooks();
+        auto it = std::find(books.begin(), books.end(), event.detail);
+        if (it == books.end()) {
+            if (err) *err = "book missing";
+            return false;
+        }
+        selected_book = static_cast<int>(std::distance(books.begin(), it));
+        if (!loadSelectedBook(err)) return false;
+        last_resume_target = ResumeTarget::Reader;
+        screen = Screen::ReaderView;
+        return true;
+    }
+    if (event.type == "LISTEN") {
+        scanMusic();
+        auto it = std::find(tracks.begin(), tracks.end(), event.detail);
+        if (it == tracks.end()) {
+            if (err) *err = "track missing";
+            return false;
+        }
+        selected_track = static_cast<int>(std::distance(tracks.begin(), it));
+        override_music_path.clear();
+        if (!startPlayback(err)) return false;
+        last_resume_target = ResumeTarget::Music;
+        return true;
+    }
+    if (event.type == "NOTE" || event.type == "NOTE EDIT") {
+        scanNotes();
+        auto it = std::find(notes.begin(), notes.end(), event.detail);
+        if (it == notes.end()) {
+            if (err) *err = "note missing";
+            return false;
+        }
+        notes_cursor = static_cast<int>(std::distance(notes.begin(), it)) + 1;
+        if (!loadSelectedNote(err)) return false;
+        last_note_name = active_note_name;
+        last_resume_target = ResumeTarget::Notes;
+        screen = Screen::NotesView;
+        return true;
+    }
+    if (event.type == "VOICE") {
+        scanRecordings();
+        auto it = std::find(recordings.begin(), recordings.end(), event.detail);
+        if (it == recordings.end()) {
+            if (err) *err = "voice missing";
+            return false;
+        }
+        recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
+        if (!startRecordingPlayback(err)) return false;
+        last_resume_target = ResumeTarget::Recorder;
+        return true;
+    }
+    if (event.type == "HABIT") {
+        last_resume_target = ResumeTarget::Habits;
+        screen = Screen::HabitsList;
+        return true;
+    }
+    if (event.type == "TIMER") {
+        last_resume_target = ResumeTarget::Time;
+        time_mode = TimeMode::Timer;
+        screen = Screen::TimeApp;
+        return true;
+    }
+    if (err) *err = "unsupported event";
+    return false;
+}
+
 void handleKey(KeyEvent ev)
 {
     const bool has_shortcut_char = shortcutChar(ev) != 0;
@@ -6646,7 +6849,14 @@ void handleKey(KeyEvent ev)
             refreshInboxManual();
             screen = Screen::InboxList;
             blockInput(200);
-        } else if (ev.key == Key::Ok || ev.key == Key::Home || ev.key == Key::Back) {
+        } else if (ev.key == Key::Ok) {
+            std::string err;
+            if (!openInboxEvent(&err)) {
+                inbox_status = "OPEN ERR " + inboxSafeText(err);
+                screen = Screen::InboxList;
+            }
+            blockInput(350);
+        } else if (ev.key == Key::Home || ev.key == Key::Back) {
             screen = Screen::InboxList;
             blockInput(200);
         }
@@ -7435,6 +7645,7 @@ extern "C" void app_main(void)
         M5.update();
         KeyEvent ev = pollKey();
         handleKey(ev);
+        processPersistence();
         if (connection_dirty) {
             connection_dirty = false;
             dirty = true;

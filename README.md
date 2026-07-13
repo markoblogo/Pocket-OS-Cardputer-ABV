@@ -37,14 +37,14 @@ Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
 - Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, MAX volume, double-buffered playback, sorted library, selected-title marquee, track info, safe MP3 probe, and safer bad-track handling.
-- Voice/Record: one RAM-first 20-second WAV voice-note mode, save/play/delete, continuous playback, waveform.
+- Voice/Record: one RAM-first 20-second WAV voice-note mode stored in internal SPIFFS, with save/play/delete and waveform.
 - Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
 - Time: manual clock, stopwatch, timer presets, alarm.
 - Files: SD browser, `TRANSFER` folder, file opening, unsupported-file info, delete confirmation.
 - Routines/Habits: larger daily checklist, manual next day, manage screen, restore disabled habits, 7D/30D/365D stats.
 - Decide/Randomizer: `YES / NO / MB`.
-- Inbox/Timeline: RAM-only session log of confirmed activity; no SD writes.
+- Inbox/Timeline: persistent internal log of the latest 64 confirmed events; no SD access.
 - Dashboard/Settings: Resume dashboard, current context, battery/low-voltage diagnostics, Transfer password, theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics; large media transfer still needs SD reader.
 
@@ -72,7 +72,7 @@ App highlights:
 - Write: `1` new/edit, Backspace delete from list.
 - Voice: OK starts `NEW REC`, OK/GO stops and saves, OK plays a saved recording. Auto-save at 20 seconds.
 - Routines: OK toggles, `1` next day, Right/`S` stats, Left/`M` manage.
-- Inbox: OK opens event detail, `1` refreshes RAM session events.
+- Inbox: OK opens event detail, `1` reloads the internal Timeline.
 - Transfer: OK starts AP, GO stops it; list/download are stable, upload is small-file only.
 
 One Button Capture from launcher:
@@ -92,14 +92,15 @@ Use 8.3-safe filenames for now.
 /sdcard/books/EN1.TXT
 /sdcard/books/RU1.TXT
 /sdcard/notes/NOTE0001.TXT
-/sdcard/rec/REC0001.WAV
-/sdcard/RECS/REC0001.WAV
-/sdcard/inbox/INBOX.TXT
 /sdcard/habits/HABITS.TXT
 /sdcard/habits/LOG.TXT
 /sdcard/habits/STATE.TXT
 /sdcard/CARDPTR/CONFIG.TXT
 /sdcard/CARDPTR/READER.TXT
+
+internal SPIFFS:
+/voice/REC00001.WAV
+/voice/INBOX.LOG
 ```
 
 ## Connections MVP

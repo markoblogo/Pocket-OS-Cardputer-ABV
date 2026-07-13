@@ -45,7 +45,8 @@ The apps are no longer the top-level product idea. They are implementation modul
 - Notes editor is LAT/plain text only; Cyrillic files are view-only.
 - Reader Cyrillic is custom/best-effort; French/Ukrainian polish is postponed.
 - Connections is useful for diagnostics/list/download/small files, not large media sync.
-- Inbox/Timeline is present as a safe RAM-only session viewer. SD persistence is disabled because manual Inbox writes destabilized SD on hardware.
+- Voice and Inbox use the dedicated internal SPIFFS partition. SD remains the bulk user-content store.
+- Inbox/Timeline persists the newest 64 confirmed events and writes only from the main loop on safe idle screens.
 
 ## Architecture
 

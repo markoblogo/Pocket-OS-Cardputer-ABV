@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Persistence: introduced a tested POSIX event-log module with bounded 64-event history and temp-file replacement.
+- Inbox/Timeline: moved persistence from RAM-only state to internal SPIFFS; queued events are committed only from the main loop on Launcher/Inbox screens.
+- Voice: records and plays from internal SPIFFS and queues Timeline events without touching SD after microphone capture.
+- SD: removable storage remains dedicated to user media, books, and external notes; Inbox/Voice writes no longer share its lifecycle.
+
 ## v0.2.2-test - Pocket OS Polish Checkpoint
 
 - Listen: MAX volume label, shuffle fallback key, resilient restart after Settings, and heap preflight that reuses existing audio buffers.

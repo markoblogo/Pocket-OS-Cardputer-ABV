@@ -29,6 +29,15 @@ Use this checklist after flashing a release checkpoint.
 4. `WRITE` creates, wraps, saves, reopens, edits, and deletes LAT notes.
 5. Cyrillic notes open view-only.
 6. `VOICE` records about 20 seconds, saves, plays, and deletes.
+7. After Voice save/play, `READ`, `WRITE`, and `LISTEN` still show their SD files.
+
+## Inbox / Persistence
+
+1. Open a book, play a track, save a note, and save a Voice recording.
+2. Return to launcher, then open `INBOX`.
+3. Timeline shows `READ`, `LISTEN`, `NOTE`, and `VOICE` events.
+4. Reboot and reopen `INBOX`; events remain visible.
+5. `1` refreshes the internal journal without changing SD availability.
 
 ## Utilities
 
