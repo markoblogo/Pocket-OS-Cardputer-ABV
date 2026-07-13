@@ -2555,7 +2555,7 @@ void scanMusic()
 void scanRecordings()
 {
     recordings.clear();
-    static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR};
+    static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR, NOTES_DIR};
     bool fat_seen = false;
     for (const char* candidate : dirs) {
         FF_DIR fat_dir = {};
@@ -3177,7 +3177,7 @@ bool saveCapturedRecording(std::string* err = nullptr)
         return false;
     }
     const char* sd_dir = nullptr;
-    static const char* save_dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR};
+    static const char* save_dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR, NOTES_DIR};
     FRESULT fr = FR_NO_PATH;
     for (const char* candidate : save_dirs) {
         FF_DIR test_dir = {};

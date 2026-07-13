@@ -7,6 +7,7 @@
 - SD: Voice list and Files browser now also use read-only FatFS fallback; Voice list no longer creates recording dirs while browsing.
 - Voice/Files: Files, Notes, and Voice lists prefer FatFS directory reads; Voice saves WAV via FatFS write path instead of POSIX `fopen/fwrite`.
 - Files/Voice: Files root is now a virtual known-folder menu; Voice saves to an existing recording folder or `/CARDPTR` without attempting unsafe directory creation.
+- Voice: if recording folders are unavailable, WAV files can fall back to existing `/notes` so capture still works without unsafe mkdir.
 - Listen: selected-track marquee, `2`/`I` track info screen, original upload title display, cached file size/status, safe `2`/`P` MP3 sync probe, and zero-byte filtering in the FatFS fallback.
 - Time: timer presets for 1/5/10/20 minutes.
 - Dashboard: current time, Resume, routines progress, SD status, direct Listen/Read/Write shortcuts, and battery/low-voltage diagnostics.
