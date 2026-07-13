@@ -987,55 +987,46 @@ void scanFiles(const std::string& path)
     file_entries.clear();
     files_path = path.empty() ? std::string(MOUNT_POINT) : path;
     files_cursor = 0;
-    files_status = "OPEN FAIL";
-    DIR* dir = openSdDirWithRetry(files_path.c_str());
     files_status = "EMPTY";
     if (files_path != MOUNT_POINT) {
         file_entries.push_back({"..", "", true, 0});
-    } else {
-        struct stat cfg_st = {};
-        if (stat(CONFIG_DIR, &cfg_st) == 0 && S_ISDIR(cfg_st.st_mode)) {
-            file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
-        }
     }
-    if (dir) {
-        while (dirent* entry = readdir(dir)) {
-            std::string name = entry->d_name;
+    FF_DIR fat_dir = {};
+    FILINFO info = {};
+    if (f_opendir(&fat_dir, sdPathToFatPath(files_path).c_str()) == FR_OK) {
+        while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+            std::string name = info.fname;
             if (isHidden(name)) continue;
-            if (files_path == MOUNT_POINT && name == "CARDPTR") continue;
+            if (files_path == MOUNT_POINT && name == "CARDPTR") {
+                file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
+                continue;
+            }
             std::string full = files_path + "/" + name;
-            struct stat st = {};
-            if (stat(full.c_str(), &st) != 0) continue;
-            bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
-            file_entries.push_back({name, full, dir_flag, static_cast<size_t>(st.st_size)});
+            file_entries.push_back({name, full, (info.fattrib & AM_DIR) != 0, static_cast<size_t>(info.fsize)});
             if (file_entries.size() >= MAX_LIST_ENTRIES) break;
         }
-        closedir(dir);
-    }
-    const size_t before_fat = file_entries.size();
-    const bool root_only_transfer = files_path == MOUNT_POINT && before_fat == 1 && file_entries[0].path == CONFIG_DIR;
-    const bool subdir_only_parent = files_path != MOUNT_POINT && before_fat == 1;
-    if (!dir || root_only_transfer || subdir_only_parent) {
-        FF_DIR fat_dir = {};
-        FILINFO info = {};
-        if (f_opendir(&fat_dir, sdPathToFatPath(files_path).c_str()) == FR_OK) {
-            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
-                std::string name = info.fname;
+        f_closedir(&fat_dir);
+        files_status = "FAT OK";
+    } else {
+        DIR* dir = openSdDirWithRetry(files_path.c_str());
+        if (!dir) {
+            if (files_path == MOUNT_POINT) files_status = "NO SD";
+        } else {
+            while (dirent* entry = readdir(dir)) {
+                std::string name = entry->d_name;
                 if (isHidden(name)) continue;
                 if (files_path == MOUNT_POINT && name == "CARDPTR") {
-                    bool exists = false;
-                    for (const auto& e : file_entries) if (e.path == CONFIG_DIR) exists = true;
-                    if (!exists) file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
+                    file_entries.push_back({"TRANSFER", CONFIG_DIR, true, 0});
                     continue;
                 }
                 std::string full = files_path + "/" + name;
-                file_entries.push_back({name, full, (info.fattrib & AM_DIR) != 0, static_cast<size_t>(info.fsize)});
+                struct stat st = {};
+                if (stat(full.c_str(), &st) != 0) continue;
+                bool dir_flag = S_ISDIR(st.st_mode) || entry->d_type == DT_DIR;
+                file_entries.push_back({name, full, dir_flag, static_cast<size_t>(st.st_size)});
                 if (file_entries.size() >= MAX_LIST_ENTRIES) break;
             }
-            f_closedir(&fat_dir);
-            files_status = "FAT OK";
-        } else if (!dir && files_path == MOUNT_POINT) {
-            files_status = "NO SD";
+            closedir(dir);
         }
     }
     std::sort(file_entries.begin() + (files_path == MOUNT_POINT ? 0 : 1), file_entries.end(), [](const FileEntry& a, const FileEntry& b) {
@@ -1052,37 +1043,38 @@ std::string parentPath(const std::string& path)
     return path.substr(0, slash);
 }
 
-void writeLe16(FILE* f, uint16_t v)
+void putLe16(uint8_t* p, uint16_t v)
 {
-    uint8_t b[2] = {static_cast<uint8_t>(v & 0xFF), static_cast<uint8_t>((v >> 8) & 0xFF)};
-    fwrite(b, 1, 2, f);
+    p[0] = static_cast<uint8_t>(v & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFF);
 }
 
-void writeLe32(FILE* f, uint32_t v)
+void putLe32(uint8_t* p, uint32_t v)
 {
-    uint8_t b[4] = {static_cast<uint8_t>(v & 0xFF), static_cast<uint8_t>((v >> 8) & 0xFF),
-                    static_cast<uint8_t>((v >> 16) & 0xFF), static_cast<uint8_t>((v >> 24) & 0xFF)};
-    fwrite(b, 1, 4, f);
+    p[0] = static_cast<uint8_t>(v & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFF);
+    p[3] = static_cast<uint8_t>((v >> 24) & 0xFF);
 }
 
-void writeWavHeader(FILE* f, uint32_t samples, uint32_t sample_rate = REC_SAMPLE_RATE, uint16_t bits = 16)
+void buildWavHeader(uint8_t* h, uint32_t samples, uint32_t sample_rate, uint16_t bits)
 {
+    std::memset(h, 0, 44);
     const uint16_t bytes_per_sample = bits / 8;
     const uint32_t data_bytes = samples * bytes_per_sample;
     const uint32_t byte_rate = sample_rate * bytes_per_sample;
-    fseek(f, 0, SEEK_SET);
-    fwrite("RIFF", 1, 4, f);
-    writeLe32(f, 36 + data_bytes);
-    fwrite("WAVEfmt ", 1, 8, f);
-    writeLe32(f, 16);
-    writeLe16(f, 1);
-    writeLe16(f, 1);
-    writeLe32(f, sample_rate);
-    writeLe32(f, byte_rate);
-    writeLe16(f, bytes_per_sample);
-    writeLe16(f, bits);
-    fwrite("data", 1, 4, f);
-    writeLe32(f, data_bytes);
+    std::memcpy(h, "RIFF", 4);
+    putLe32(h + 4, 36 + data_bytes);
+    std::memcpy(h + 8, "WAVEfmt ", 8);
+    putLe32(h + 16, 16);
+    putLe16(h + 20, 1);
+    putLe16(h + 22, 1);
+    putLe32(h + 24, sample_rate);
+    putLe32(h + 28, byte_rate);
+    putLe16(h + 32, bytes_per_sample);
+    putLe16(h + 34, bits);
+    std::memcpy(h + 36, "data", 4);
+    putLe32(h + 40, data_bytes);
 }
 
 bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate,
@@ -1111,22 +1103,6 @@ bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate,
     if (sample_rate) *sample_rate = rate;
     if (bits_per_sample) *bits_per_sample = bits;
     return true;
-}
-
-bool ensureRecordingsDir(std::string* err = nullptr)
-{
-    std::string primary_err;
-    if (ensureSdDir(RECORDINGS_DIR, &primary_err)) {
-        recordings_dir = RECORDINGS_DIR;
-        return true;
-    }
-    std::string fallback_err;
-    if (ensureSdDir(RECORDINGS_FALLBACK_DIR, &fallback_err)) {
-        recordings_dir = RECORDINGS_FALLBACK_DIR;
-        return true;
-    }
-    if (err) *err = fallback_err.empty() ? primary_err : fallback_err;
-    return false;
 }
 
 std::string newRecordingNameFromMillis()
@@ -1245,8 +1221,24 @@ void refreshInboxManual()
 void scanNotes()
 {
     notes.clear();
-    DIR* dir = openSdDirWithRetry(NOTES_DIR);
-    if (dir) {
+    FF_DIR fat_dir = {};
+    FILINFO info = {};
+    if (f_opendir(&fat_dir, "0:/notes") == FR_OK) {
+        while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+            std::string name = info.fname;
+            if (isHidden(name) || !hasTextExt(name)) continue;
+            if (info.fattrib & AM_DIR) continue;
+            notes.push_back(name);
+            if (notes.size() >= MAX_LIST_ENTRIES) break;
+        }
+        f_closedir(&fat_dir);
+    } else {
+        DIR* dir = openSdDirWithRetry(NOTES_DIR);
+        if (!dir) {
+            const int total = 1;
+            notes_cursor = std::max(0, std::min(notes_cursor, total - 1));
+            return;
+        }
         while (dirent* entry = readdir(dir)) {
             std::string name = entry->d_name;
             if (isHidden(name) || !hasTextExt(name)) continue;
@@ -1255,20 +1247,6 @@ void scanNotes()
             if (notes.size() >= MAX_LIST_ENTRIES) break;
         }
         closedir(dir);
-    }
-    if (notes.empty()) {
-        FF_DIR fat_dir = {};
-        FILINFO info = {};
-        if (f_opendir(&fat_dir, "0:/notes") == FR_OK) {
-            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
-                std::string name = info.fname;
-                if (isHidden(name) || !hasTextExt(name)) continue;
-                if (info.fattrib & AM_DIR) continue;
-                notes.push_back(name);
-                if (notes.size() >= MAX_LIST_ENTRIES) break;
-            }
-            f_closedir(&fat_dir);
-        }
     }
     std::sort(notes.begin(), notes.end());
     const int total = static_cast<int>(notes.size()) + 1;
@@ -2566,33 +2544,35 @@ void scanMusic()
 void scanRecordings()
 {
     recordings.clear();
-    DIR* dir = openSdDirWithRetry(recordings_dir.c_str());
-    if (dir) {
-        while (dirent* entry = readdir(dir)) {
-            std::string name = entry->d_name;
+    static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR};
+    bool fat_seen = false;
+    for (const char* candidate : dirs) {
+        FF_DIR fat_dir = {};
+        FILINFO info = {};
+        if (f_opendir(&fat_dir, sdPathToFatPath(candidate).c_str()) != FR_OK) continue;
+        fat_seen = true;
+        recordings_dir = candidate;
+        while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+            std::string name = info.fname;
             if (isHidden(name) || !hasRecordingExt(name)) continue;
-            if (sdPathIsDir(recordings_dir + "/" + name)) continue;
+            if (info.fattrib & AM_DIR) continue;
             recordings.push_back(name);
             if (recordings.size() >= MAX_LIST_ENTRIES) break;
         }
-        closedir(dir);
+        f_closedir(&fat_dir);
+        if (!recordings.empty()) break;
     }
-    if (recordings.empty()) {
-        static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR};
-        for (const char* candidate : dirs) {
-            FF_DIR fat_dir = {};
-            FILINFO info = {};
-            if (f_opendir(&fat_dir, sdPathToFatPath(candidate).c_str()) != FR_OK) continue;
-            recordings_dir = candidate;
-            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
-                std::string name = info.fname;
+    if (!fat_seen) {
+        DIR* dir = openSdDirWithRetry(recordings_dir.c_str());
+        if (dir) {
+            while (dirent* entry = readdir(dir)) {
+                std::string name = entry->d_name;
                 if (isHidden(name) || !hasRecordingExt(name)) continue;
-                if (info.fattrib & AM_DIR) continue;
+                if (sdPathIsDir(recordings_dir + "/" + name)) continue;
                 recordings.push_back(name);
                 if (recordings.size() >= MAX_LIST_ENTRIES) break;
             }
-            f_closedir(&fat_dir);
-            if (!recordings.empty()) break;
+            closedir(dir);
         }
     }
     std::sort(recordings.begin(), recordings.end());
@@ -3181,8 +3161,25 @@ bool saveCapturedRecording(std::string* err = nullptr)
         if (err) *err = "empty";
         return false;
     }
-    if (!ensureRecordingsDir(err)) return false;
+    if (!initSd()) {
+        if (err) *err = "sd mount";
+        return false;
+    }
+    const char* sd_dir = RECORDINGS_DIR;
+    std::string fat_dir = sdPathToFatPath(sd_dir);
+    FRESULT fr = f_mkdir(fat_dir.c_str());
+    if (fr != FR_OK && fr != FR_EXIST) {
+        sd_dir = RECORDINGS_FALLBACK_DIR;
+        fat_dir = sdPathToFatPath(sd_dir);
+        fr = f_mkdir(fat_dir.c_str());
+        if (fr != FR_OK && fr != FR_EXIST) {
+            if (err) *err = "mkdir: " + std::to_string(static_cast<int>(fr));
+            return false;
+        }
+    }
+    recordings_dir = sd_dir;
     std::string path = recordings_dir + "/" + active_recording_name;
+    std::string fat_path = sdPathToFatPath(path);
     bool unique_path = false;
     for (int i = 0; i < 1000; ++i) {
         if (i > 0) {
@@ -3190,41 +3187,39 @@ bool saveCapturedRecording(std::string* err = nullptr)
             snprintf(buf, sizeof(buf), "REC%05lu.WAV", static_cast<unsigned long>(((M5.millis() / 100) + i) % 100000));
             active_recording_name = buf;
             path = recordings_dir + "/" + active_recording_name;
+            fat_path = sdPathToFatPath(path);
         }
-        struct stat st = {};
-        if (stat(path.c_str(), &st) != 0) { unique_path = true; break; }
+        FILINFO st = {};
+        if (f_stat(fat_path.c_str(), &st) == FR_NO_FILE) { unique_path = true; break; }
     }
     if (!unique_path) {
         if (err) *err = "record namespace full";
         return false;
     }
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f && recordings_dir != RECORDINGS_FALLBACK_DIR && ensureSdDir(RECORDINGS_FALLBACK_DIR, nullptr)) {
-        recordings_dir = RECORDINGS_FALLBACK_DIR;
-        path = recordings_dir + "/" + active_recording_name;
-        struct stat fallback_st = {};
-        if (stat(path.c_str(), &fallback_st) != 0) f = fopen(path.c_str(), "wb");
-    }
-    if (!f) {
-        if (err) {
-            *err = "open: ";
-            *err += std::strerror(errno);
-        }
+    FIL f = {};
+    fr = f_open(&f, fat_path.c_str(), FA_WRITE | FA_CREATE_NEW);
+    if (fr != FR_OK) {
+        if (err) *err = "open: " + std::to_string(static_cast<int>(fr));
         return false;
     }
-    writeWavHeader(f, rec_samples_written, rec_record_sample_rate, rec_record_bits);
+    uint8_t header[44] = {};
+    buildWavHeader(header, rec_samples_written, rec_record_sample_rate, rec_record_bits);
+    UINT wrote = 0;
     bool ok = true;
+    fr = f_write(&f, header, sizeof(header), &wrote);
+    if (fr != FR_OK || wrote != sizeof(header)) ok = false;
     size_t bytes_left = rec_samples_written * (rec_record_bits / 8);
     for (const auto& chunk : rec_capture_chunks) {
         if (!chunk.data || chunk.used == 0) continue;
         const size_t todo = std::min<size_t>(bytes_left, chunk.used);
         size_t wrote_total = 0;
         const uint8_t* base = chunk.data;
-        while (wrote_total < todo) {
+        while (ok && wrote_total < todo) {
             const size_t todo_now = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES * sizeof(int16_t), todo - wrote_total);
-            const size_t wrote = fwrite(base + wrote_total, 1, todo_now, f);
+            wrote = 0;
+            fr = f_write(&f, base + wrote_total, static_cast<UINT>(todo_now), &wrote);
             wrote_total += wrote;
-            if (wrote != todo_now) {
+            if (fr != FR_OK || wrote != todo_now) {
                 ok = false;
                 break;
             }
@@ -3235,13 +3230,11 @@ bool saveCapturedRecording(std::string* err = nullptr)
         if (bytes_left == 0) break;
     }
     if (bytes_left != 0) ok = false;
-    if (!flushAndClose(f)) ok = false;
+    if (f_sync(&f) != FR_OK) ok = false;
+    if (f_close(&f) != FR_OK) ok = false;
     if (!ok) {
-        if (err) {
-            *err = "save: ";
-            *err += errno ? std::strerror(errno) : "short write";
-        }
-        unlink(path.c_str());
+        if (err) *err = "save: " + std::to_string(static_cast<int>(fr));
+        f_unlink(fat_path.c_str());
         return false;
     }
     return true;

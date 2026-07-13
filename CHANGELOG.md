@@ -5,6 +5,7 @@
 - Listen: MAX volume label, shuffle fallback key, resilient restart after Settings, and heap preflight that reuses existing audio buffers.
 - SD: manual reprobe now clears stale card state; Read/Write lists use read-only FatFS fallback like Listen, avoiding false empty Books/Notes after VFS instability.
 - SD: Voice list and Files browser now also use read-only FatFS fallback; Voice list no longer creates recording dirs while browsing.
+- Voice/Files: Files, Notes, and Voice lists prefer FatFS directory reads; Voice saves WAV via FatFS write path instead of POSIX `fopen/fwrite`.
 - Listen: selected-track marquee, `2`/`I` track info screen, original upload title display, cached file size/status, safe `2`/`P` MP3 sync probe, and zero-byte filtering in the FatFS fallback.
 - Time: timer presets for 1/5/10/20 minutes.
 - Dashboard: current time, Resume, routines progress, SD status, direct Listen/Read/Write shortcuts, and battery/low-voltage diagnostics.
