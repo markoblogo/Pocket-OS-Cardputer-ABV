@@ -19,4 +19,5 @@ idf_component_register(
         fatfs
         nvs_flash
         sdmmc
+        spiffs
 )

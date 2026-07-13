@@ -22,6 +22,7 @@
 #include <esp_heap_caps.h>
 #include <esp_netif.h>
 #include <esp_random.h>
+#include <esp_spiffs.h>
 #include <esp_vfs_fat.h>
 #include <esp_wifi.h>
 #include <ff.h>
@@ -47,6 +48,8 @@ constexpr const char* INBOX_DIR = "/sdcard/inbox";
 constexpr const char* INBOX_FILE = "/sdcard/inbox/INBOX.TXT";
 constexpr const char* RECORDINGS_DIR = "/sdcard/rec";
 constexpr const char* RECORDINGS_FALLBACK_DIR = "/sdcard/RECS";
+constexpr const char* RECORDINGS_LEGACY_DIR = "/sdcard/REC";
+constexpr const char* RECORDINGS_COMPAT_DIR = "/sdcard/recordings";
 constexpr const char* HABITS_DIR = "/sdcard/habits";
 constexpr const char* HABITS_FILE = "/sdcard/habits/HABITS.TXT";
 constexpr const char* HABIT_LOG_FILE = "/sdcard/habits/LOG.TXT";
@@ -54,6 +57,8 @@ constexpr const char* HABIT_LOG_TMP_FILE = "/sdcard/habits/LOG.NEW";
 constexpr const char* HABIT_STATE_FILE = "/sdcard/habits/STATE.TXT";
 constexpr const char* CONFIG_DIR = "/sdcard/CARDPTR";
 constexpr const char* CONFIG_FILE = "/sdcard/CARDPTR/CONFIG.TXT";
+constexpr const char* VOICE_STORE_DIR = "/voice";
+constexpr const char* VOICE_STORE_LABEL = "voice";
 constexpr const char* READER_STATE_FILE = "/sdcard/CARDPTR/READER.TXT";
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 135;
@@ -211,7 +216,7 @@ SoundMode sound_mode = SoundMode::Mid;
 TimeoutMode timeout_mode = TimeoutMode::Normal;
 bool power_save = false;
 std::string config_status = "RAM";
-std::string recordings_dir = RECORDINGS_DIR;
+std::string recordings_dir = VOICE_STORE_DIR;
 int selected_track = 0;
 std::string override_music_path;
 std::string music_scan_status = "NOT SCANNED";
@@ -257,14 +262,16 @@ int decoded_chunks = 0;
 int music_underruns = 0;
 
 constexpr int REC_SAMPLE_RATE = 16000;
-constexpr int REC_RECORD_SAMPLE_RATE = 8000;
+// 4 kHz / 8-bit keeps a full 20-second voice note in ~80 KB. The Cardputer
+// cannot reliably reserve the ~160 KB required by 8 kHz alongside the UI.
+constexpr int REC_RECORD_SAMPLE_RATE = 4000;
 constexpr uint16_t REC_RECORD_BITS = 8;
 constexpr uint32_t REC_RECORD_SECONDS = 20;
 constexpr size_t REC_BUFFER_SAMPLES = 1024;
 constexpr uint32_t REC_MIN_SECONDS = 1;
 constexpr uint32_t REC_STOP_GRACE_MS = 120;
-constexpr size_t REC_SAVE_CHUNK_SAMPLES = 2048;
-constexpr size_t REC_CAPTURE_CHUNK_SAMPLES = 1024;
+constexpr size_t REC_SAVE_CHUNK_SAMPLES = 256;
+constexpr size_t REC_CAPTURE_CHUNK_BYTES = 8192;
 FILE* rec_play_file = nullptr;
 std::vector<int16_t> rec_buffer;
 std::vector<int16_t> rec_play_all;
@@ -293,6 +300,8 @@ uint16_t rec_play_bits = 16;
 std::vector<uint8_t> rec_u8_buffer;
 std::vector<uint8_t> rec_play_u8_buffer;
 bool rec_auto_stopped = false;
+bool rec_save_pending = false;
+uint32_t rec_save_due_ms = 0;
 uint32_t rec_stopped_ms = 0;
 uint32_t rec_mic_chunks = 0;
 size_t rec_last_take = 0;
@@ -353,8 +362,10 @@ std::string random_result = "READY";
 std::vector<std::string> random_history;
 
 bool initSd();
+bool initVoiceStorage();
 bool ensureConnectionWriteDir(char* err, size_t err_len);
 void clearCaptureChunks();
+bool prepareCaptureChunks();
 bool appendCaptureChunk(const void* data, size_t byte_count);
 uint32_t elapsedClockSeconds();
 void formatHMS(uint32_t total, char* out, size_t out_len);
@@ -369,13 +380,39 @@ bool flushAndClose(FILE* f)
 
 bool manualSdReprobe()
 {
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     if (sd_card) {
         esp_vfs_fat_sdcard_unmount(MOUNT_POINT, sd_card);
     }
     sd_card = nullptr;
     sd_ready = false;
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // A VFS-only remount is insufficient when the Cardputer SD controller is
+    // stuck: physically reinserting the card recovers it.  Fully release the
+    // SPI host so the next mount sends a clean card-init sequence.
+    if (spi_ready) {
+        const esp_err_t free_result = spi_bus_free(static_cast<spi_host_device_t>(host.slot));
+        if (free_result == ESP_OK) {
+            spi_ready = false;
+        } else {
+            return false;
+        }
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
     return initSd();
+}
+
+bool initVoiceStorage()
+{
+    static bool initialized = false;
+    if (initialized) return true;
+    esp_vfs_spiffs_conf_t conf = {};
+    conf.base_path = VOICE_STORE_DIR;
+    conf.partition_label = VOICE_STORE_LABEL;
+    conf.max_files = 8;
+    conf.format_if_mount_failed = true;
+    if (esp_vfs_spiffs_register(&conf) != ESP_OK) return false;
+    initialized = true;
+    return true;
 }
 
 void clearCaptureChunks()
@@ -394,39 +431,46 @@ void clearCaptureChunks()
     rec_capture_bytes_written = 0;
 }
 
+bool prepareCaptureChunks()
+{
+    if (rec_capture_byte_capacity == 0) return false;
+    const size_t chunk_count = (rec_capture_byte_capacity + REC_CAPTURE_CHUNK_BYTES - 1) / REC_CAPTURE_CHUNK_BYTES;
+    rec_capture_chunks.reserve(chunk_count);
+    size_t remaining = rec_capture_byte_capacity;
+    while (remaining > 0) {
+        const size_t wanted = std::min(remaining, REC_CAPTURE_CHUNK_BYTES);
+        uint8_t* block = static_cast<uint8_t*>(heap_caps_malloc(wanted, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (!block) block = static_cast<uint8_t*>(heap_caps_malloc(wanted, MALLOC_CAP_8BIT));
+        if (!block) {
+            clearCaptureChunks();
+            return false;
+        }
+        rec_capture_chunks.push_back({block, 0, wanted});
+        remaining -= wanted;
+    }
+    return true;
+}
+
 bool appendCaptureChunk(const void* data, size_t byte_count)
 {
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
     size_t offset = 0;
     while (byte_count > 0) {
-        if (!rec_capture_chunks.empty() && rec_capture_chunks.back().used < rec_capture_chunks.back().capacity) {
-            RecCaptureChunk& chunk = rec_capture_chunks.back();
-            const size_t room = chunk.capacity - chunk.used;
-            const size_t n = std::min<size_t>(room, byte_count);
-            std::memcpy(chunk.data + chunk.used, bytes + offset, n);
-            chunk.used += n;
-            offset += n;
-            byte_count -= n;
-            rec_capture_bytes_written += n;
-            continue;
+        RecCaptureChunk* target = nullptr;
+        for (auto& chunk : rec_capture_chunks) {
+            if (chunk.used < chunk.capacity) {
+                target = &chunk;
+                break;
+            }
         }
-
-        const size_t room = rec_capture_byte_capacity > rec_capture_bytes_written
-                                ? rec_capture_byte_capacity - rec_capture_bytes_written
-                                : 0;
-        if (room == 0) return false;
-        const size_t wanted = std::min<size_t>(REC_CAPTURE_CHUNK_SAMPLES * sizeof(int16_t), room);
-        if (wanted == 0) return false;
-        uint8_t* block = static_cast<uint8_t*>(heap_caps_malloc(wanted, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        if (!block) {
-            block = static_cast<uint8_t*>(heap_caps_malloc(wanted, MALLOC_CAP_8BIT));
-            if (!block) return false;
-        }
-        RecCaptureChunk chunk;
-        chunk.data = block;
-        chunk.used = 0;
-        chunk.capacity = wanted;
-        rec_capture_chunks.push_back(chunk);
+        if (!target) return false;
+        const size_t room = target->capacity - target->used;
+        const size_t n = std::min(room, byte_count);
+        std::memcpy(target->data + target->used, bytes + offset, n);
+        target->used += n;
+        offset += n;
+        byte_count -= n;
+        rec_capture_bytes_written += n;
     }
     return true;
 }
@@ -1106,7 +1150,9 @@ bool readWavHeader(FILE* f, uint32_t* data_offset, uint32_t* sample_rate,
     const uint16_t channels = h[22] | (h[23] << 8);
     const uint32_t rate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
     const uint16_t bits = h[34] | (h[35] << 8);
-    if (audio_format != 1 || channels != 1 || (bits != 8 && bits != 16) || rate < 8000 || rate > 48000) {
+    // Voice captures are intentionally compact 4 kHz mono PCM.  Keep the
+    // generic WAV reader compatible with those internal Voice recordings.
+    if (audio_format != 1 || channels != 1 || (bits != 8 && bits != 16) || rate < 4000 || rate > 48000) {
         if (err) *err = "wav must be pcm mono 8/16";
         return false;
     }
@@ -1124,34 +1170,46 @@ std::string newRecordingNameFromMillis()
 }
 
 
-void scanBooks()
+void scanTextDir(const char* vfs_path, const char* fat_path, std::vector<std::string>* out)
 {
-    books.clear();
-    DIR* dir = openSdDirWithRetry(BOOKS_DIR);
-    if (dir) {
+    auto collect_posix = [&](DIR* dir) {
+        int raw = 0;
+        errno = 0;
         while (dirent* entry = readdir(dir)) {
+            ++raw;
             std::string name = entry->d_name;
             if (isHidden(name) || !hasTextExt(name)) continue;
-            if (sdPathIsDir(std::string(BOOKS_DIR) + "/" + name)) continue;
-            books.push_back(name);
-            if (books.size() >= MAX_LIST_ENTRIES) break;
+            if (sdPathIsDir(std::string(vfs_path) + "/" + name)) continue;
+            out->push_back(name);
+            if (out->size() >= MAX_LIST_ENTRIES) break;
         }
         closedir(dir);
-    }
-    if (books.empty()) {
-        FF_DIR fat_dir = {};
-        FILINFO info = {};
-        if (f_opendir(&fat_dir, "0:/books") == FR_OK) {
-            while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
-                std::string name = info.fname;
-                if (isHidden(name) || !hasTextExt(name)) continue;
-                if (info.fattrib & AM_DIR) continue;
-                books.push_back(name);
-                if (books.size() >= MAX_LIST_ENTRIES) break;
-            }
-            f_closedir(&fat_dir);
+        return raw;
+    };
+
+    out->clear();
+    DIR* dir = openSdDirWithRetry(vfs_path);
+    if (dir) collect_posix(dir);
+    if (!out->empty()) return;
+
+    // Bypass the POSIX VFS adapter as a final read-only fallback.
+    FF_DIR fat_dir = {};
+    FILINFO info = {};
+    if (f_opendir(&fat_dir, fat_path) == FR_OK) {
+        while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
+            std::string name = info.fname;
+            if (isHidden(name) || !hasTextExt(name)) continue;
+            if (info.fattrib & AM_DIR) continue;
+            out->push_back(name);
+            if (out->size() >= MAX_LIST_ENTRIES) break;
         }
+        f_closedir(&fat_dir);
     }
+}
+
+void scanBooks()
+{
+    scanTextDir(BOOKS_DIR, "0:/books", &books);
     std::sort(books.begin(), books.end());
     if (selected_book >= static_cast<int>(books.size())) selected_book = std::max(0, static_cast<int>(books.size()) - 1);
     if (!last_reader_book.empty()) {
@@ -1231,34 +1289,7 @@ void refreshInboxManual()
 
 void scanNotes()
 {
-    notes.clear();
-    FF_DIR fat_dir = {};
-    FILINFO info = {};
-    if (f_opendir(&fat_dir, "0:/notes") == FR_OK) {
-        while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
-            std::string name = info.fname;
-            if (isHidden(name) || !hasTextExt(name)) continue;
-            if (info.fattrib & AM_DIR) continue;
-            notes.push_back(name);
-            if (notes.size() >= MAX_LIST_ENTRIES) break;
-        }
-        f_closedir(&fat_dir);
-    } else {
-        DIR* dir = openSdDirWithRetry(NOTES_DIR);
-        if (!dir) {
-            const int total = 1;
-            notes_cursor = std::max(0, std::min(notes_cursor, total - 1));
-            return;
-        }
-        while (dirent* entry = readdir(dir)) {
-            std::string name = entry->d_name;
-            if (isHidden(name) || !hasTextExt(name)) continue;
-            if (sdPathIsDir(std::string(NOTES_DIR) + "/" + name)) continue;
-            notes.push_back(name);
-            if (notes.size() >= MAX_LIST_ENTRIES) break;
-        }
-        closedir(dir);
-    }
+    scanTextDir(NOTES_DIR, "0:/notes", &notes);
     std::sort(notes.begin(), notes.end());
     const int total = static_cast<int>(notes.size()) + 1;
     notes_cursor = std::max(0, std::min(notes_cursor, total - 1));
@@ -2555,37 +2586,18 @@ void scanMusic()
 void scanRecordings()
 {
     recordings.clear();
-    static const char* dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR, NOTES_DIR};
-    bool fat_seen = false;
-    for (const char* candidate : dirs) {
-        FF_DIR fat_dir = {};
-        FILINFO info = {};
-        if (f_opendir(&fat_dir, sdPathToFatPath(candidate).c_str()) != FR_OK) continue;
-        fat_seen = true;
-        recordings_dir = candidate;
-        while (f_readdir(&fat_dir, &info) == FR_OK && info.fname[0]) {
-            std::string name = info.fname;
-            if (isHidden(name) || !hasRecordingExt(name)) continue;
-            if (info.fattrib & AM_DIR) continue;
-            recordings.push_back(name);
-            if (recordings.size() >= MAX_LIST_ENTRIES) break;
-        }
-        f_closedir(&fat_dir);
-        if (!recordings.empty()) break;
+    recordings_dir = VOICE_STORE_DIR;
+    if (!initVoiceStorage()) return;
+    DIR* dir = opendir(VOICE_STORE_DIR);
+    if (!dir) return;
+    while (dirent* entry = readdir(dir)) {
+        std::string name = entry->d_name;
+        if (isHidden(name) || !hasRecordingExt(name)) continue;
+        if (sdPathIsDir(std::string(VOICE_STORE_DIR) + "/" + name)) continue;
+        recordings.push_back(name);
+        if (recordings.size() >= MAX_LIST_ENTRIES) break;
     }
-    if (!fat_seen) {
-        DIR* dir = openSdDirWithRetry(recordings_dir.c_str());
-        if (dir) {
-            while (dirent* entry = readdir(dir)) {
-                std::string name = entry->d_name;
-                if (isHidden(name) || !hasRecordingExt(name)) continue;
-                if (sdPathIsDir(recordings_dir + "/" + name)) continue;
-                recordings.push_back(name);
-                if (recordings.size() >= MAX_LIST_ENTRIES) break;
-            }
-            closedir(dir);
-        }
-    }
+    closedir(dir);
     std::sort(recordings.begin(), recordings.end());
     if (selected_recording >= static_cast<int>(recordings.size())) selected_recording = std::max(0, static_cast<int>(recordings.size()) - 1);
     recorder_cursor = std::min(recorder_cursor, static_cast<int>(recordings.size()));
@@ -3129,6 +3141,10 @@ void updateAudio()
 bool startRecording(std::string* err = nullptr)
 {
     stopPlayback();
+    if (!initVoiceStorage()) {
+        if (err) *err = "voice storage";
+        return false;
+    }
     clearCaptureChunks();
     active_recording_name = newRecordingNameFromMillis();
     rec_samples_written = 0;
@@ -3136,11 +3152,13 @@ bool startRecording(std::string* err = nullptr)
     rec_write_error_text.clear();
     rec_started_ms = M5.millis();
     rec_auto_stopped = false;
+    rec_save_pending = false;
+    rec_save_due_ms = 0;
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_buffer.assign(REC_BUFFER_SAMPLES, 0);
-    // Cardputer ADV has no PSRAM. A single telephone-grade 8 kHz/8-bit mode
-    // keeps 20 seconds in ~160 KB RAM, then writes only after Mic.end().
+    // Cardputer ADV has no PSRAM. This voice-note profile reserves ~80 KB
+    // before Mic.begin(), then writes only after Mic.end().
     rec_requested_seconds = REC_RECORD_SECONDS;
     rec_target_seconds = REC_RECORD_SECONDS;
     rec_target_ms = REC_RECORD_SECONDS * 1000u;
@@ -3148,8 +3166,9 @@ bool startRecording(std::string* err = nullptr)
     rec_record_bits = REC_RECORD_BITS;
     rec_capture_capacity = static_cast<size_t>(REC_RECORD_SECONDS) * rec_record_sample_rate;
     rec_capture_byte_capacity = rec_capture_capacity * (rec_record_bits / 8);
-    if (rec_capture_capacity == 0) {
-        if (err) *err = "ram alloc 0";
+    rec_u8_buffer.assign(REC_BUFFER_SAMPLES, 0);
+    if (!prepareCaptureChunks()) {
+        if (err) *err = "ram unavailable";
         return false;
     }
 
@@ -3172,57 +3191,41 @@ bool saveCapturedRecording(std::string* err = nullptr)
         if (err) *err = "empty";
         return false;
     }
-    if (!initSd()) {
-        if (err) *err = "sd mount";
+    if (!initVoiceStorage()) {
+        if (err) *err = "voice storage";
         return false;
     }
-    const char* sd_dir = nullptr;
-    static const char* save_dirs[] = {RECORDINGS_DIR, RECORDINGS_FALLBACK_DIR, CONFIG_DIR, NOTES_DIR};
-    FRESULT fr = FR_NO_PATH;
-    for (const char* candidate : save_dirs) {
-        FF_DIR test_dir = {};
-        fr = f_opendir(&test_dir, sdPathToFatPath(candidate).c_str());
-        if (fr == FR_OK) {
-            f_closedir(&test_dir);
-            sd_dir = candidate;
-            break;
-        }
-    }
-    if (!sd_dir) {
-        if (err) *err = "no rec dir: " + std::to_string(static_cast<int>(fr));
-        return false;
-    }
-    recordings_dir = sd_dir;
-    std::string path = recordings_dir + "/" + active_recording_name;
-    std::string fat_path = sdPathToFatPath(path);
-    bool unique_path = false;
+    recordings_dir = VOICE_STORE_DIR;
+    FILE* f = nullptr;
+    std::string path;
+    int last_errno = ENOENT;
     for (int i = 0; i < 1000; ++i) {
         if (i > 0) {
             char buf[16];
             snprintf(buf, sizeof(buf), "REC%05lu.WAV", static_cast<unsigned long>(((M5.millis() / 100) + i) % 100000));
             active_recording_name = buf;
-            path = recordings_dir + "/" + active_recording_name;
-            fat_path = sdPathToFatPath(path);
         }
-        FILINFO st = {};
-        if (f_stat(fat_path.c_str(), &st) == FR_NO_FILE) { unique_path = true; break; }
+        path = recordings_dir + "/" + active_recording_name;
+        struct stat st = {};
+        if (stat(path.c_str(), &st) == 0) continue;
+        f = fopen(path.c_str(), "wb");
+        if (f) break;
+        last_errno = errno;
     }
-    if (!unique_path) {
-        if (err) *err = "record namespace full";
-        return false;
-    }
-    FIL f = {};
-    fr = f_open(&f, fat_path.c_str(), FA_WRITE | FA_CREATE_NEW);
-    if (fr != FR_OK) {
-        if (err) *err = "open: " + std::to_string(static_cast<int>(fr));
+    if (!f) {
+        if (err) *err = "open: " + std::to_string(last_errno);
         return false;
     }
     uint8_t header[44] = {};
     buildWavHeader(header, rec_samples_written, rec_record_sample_rate, rec_record_bits);
-    UINT wrote = 0;
     bool ok = true;
-    fr = f_write(&f, header, sizeof(header), &wrote);
-    if (fr != FR_OK || wrote != sizeof(header)) ok = false;
+    const char* failure_stage = "";
+    int failure_errno = 0;
+    if (fwrite(header, 1, sizeof(header), f) != sizeof(header)) {
+        ok = false;
+        failure_stage = "header";
+        failure_errno = errno;
+    }
     size_t bytes_left = rec_samples_written * (rec_record_bits / 8);
     for (const auto& chunk : rec_capture_chunks) {
         if (!chunk.data || chunk.used == 0) continue;
@@ -3231,54 +3234,53 @@ bool saveCapturedRecording(std::string* err = nullptr)
         const uint8_t* base = chunk.data;
         while (ok && wrote_total < todo) {
             const size_t todo_now = std::min<size_t>(REC_SAVE_CHUNK_SAMPLES * sizeof(int16_t), todo - wrote_total);
-            wrote = 0;
-            fr = f_write(&f, base + wrote_total, static_cast<UINT>(todo_now), &wrote);
+            const size_t wrote = fwrite(base + wrote_total, 1, todo_now, f);
             wrote_total += wrote;
-            if (fr != FR_OK || wrote != todo_now) {
+            if (wrote != todo_now) {
                 ok = false;
+                failure_stage = "write";
+                failure_errno = errno;
                 break;
             }
-            vTaskDelay(pdMS_TO_TICKS(1));
+            vTaskDelay(pdMS_TO_TICKS(2));
         }
         bytes_left -= todo;
         if (!ok) break;
         if (bytes_left == 0) break;
     }
-    if (bytes_left != 0) ok = false;
-    if (f_sync(&f) != FR_OK) ok = false;
-    if (f_close(&f) != FR_OK) ok = false;
+    if (bytes_left != 0 && ok) {
+        ok = false;
+        failure_stage = "short";
+    }
+    if (fflush(f) != 0) {
+        ok = false;
+        failure_stage = "flush";
+        failure_errno = errno;
+    }
+    if (fclose(f) != 0) {
+        ok = false;
+        failure_stage = "close";
+        failure_errno = errno;
+    }
     if (!ok) {
-        if (err) *err = "save: " + std::to_string(static_cast<int>(fr));
-        f_unlink(fat_path.c_str());
+        if (err) *err = std::string(failure_stage[0] ? failure_stage : "save") + ": " + std::to_string(failure_errno);
+        std::remove(path.c_str());
         return false;
     }
     return true;
 }
 
-void stopRecording(bool save)
+void finishRecordingStop(bool failed, const std::string& failed_text)
 {
-    rec_stopped_ms = M5.millis();
-    while (M5.Mic.isRecording()) {
-        M5.delay(1);
-    }
-    M5.Mic.end();
-    M5.delay(250);
-    bool failed = rec_write_error;
-    std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
-    if (save && !failed) {
-        std::string err;
-        bool ok = saveCapturedRecording(&err);
-        if (!ok) {
-            failed = true;
-            failed_text = err.empty() ? "save failed" : err;
-        }
-    }
     M5.Speaker.begin();
     applyVolume();
-    scanRecordings();
     if (failed) {
         showMessage("Record failed", failed_text, MessageReturn::Recorder);
     } else {
+        if (std::find(recordings.begin(), recordings.end(), active_recording_name) == recordings.end()) {
+            recordings.push_back(active_recording_name);
+            std::sort(recordings.begin(), recordings.end());
+        }
         auto it = std::find(recordings.begin(), recordings.end(), active_recording_name);
         if (it != recordings.end()) {
             recorder_cursor = static_cast<int>(std::distance(recordings.begin(), it)) + 1;
@@ -3294,7 +3296,9 @@ void stopRecording(bool save)
             snprintf(stop_line, sizeof(stop_line), "%s %ldms", rec_auto_stopped ? "AUTO" : "MAN", static_cast<long>(delta_ms));
         }
         std::string dur_line = std::string(rec_dur) + " sec\n" + std::string(stop_line);
-        appendInboxEvent("VOICE", active_recording_name);
+        // Do not write Inbox/SD state after a microphone session.  Voice data
+        // lives in the dedicated internal SPIFFS partition; an SD write here
+        // can destabilize the Cardputer SD mount after the mic codec closes.
         showMessage("Record saved", active_recording_name + "\n" + dur_line, MessageReturn::Recorder);
     }
     rec_write_error = false;
@@ -3302,6 +3306,8 @@ void stopRecording(bool save)
     rec_mic_chunks = 0;
     rec_last_take = 0;
     rec_auto_stopped = false;
+    rec_save_pending = false;
+    rec_save_due_ms = 0;
     rec_stopped_ms = 0;
     clearCaptureChunks();
     rec_capture_capacity = 0;
@@ -3312,9 +3318,41 @@ void stopRecording(bool save)
     blockInput(400);
 }
 
+void stopRecording(bool save)
+{
+    if (rec_save_pending) return;
+    rec_stopped_ms = M5.millis();
+    const uint32_t mic_stop_deadline = M5.millis() + 300;
+    while (M5.Mic.isRecording() && static_cast<int32_t>(M5.millis() - mic_stop_deadline) < 0) {
+        M5.update();
+        M5.delay(1);
+    }
+    M5.Mic.end();
+    bool failed = rec_write_error;
+    std::string failed_text = rec_write_error_text.empty() ? "write failed" : rec_write_error_text;
+    if (save && !failed) {
+        rec_save_pending = true;
+        rec_save_due_ms = M5.millis() + 500;
+        dirty = true;
+        return;
+    }
+    finishRecordingStop(failed, failed_text);
+}
+
 void updateRecording()
 {
     if (screen != Screen::RecorderRecording || rec_buffer.empty()) return;
+    if (rec_save_pending) {
+        if (static_cast<int32_t>(M5.millis() - rec_save_due_ms) < 0) {
+            dirty = true;
+            return;
+        }
+        rec_save_pending = false;
+        std::string err;
+        const bool ok = saveCapturedRecording(&err);
+        finishRecordingStop(!ok, ok ? "" : (err.empty() ? "save failed" : err));
+        return;
+    }
     if (rec_write_error) return;
     if (M5.Mic.record(rec_buffer.data(), rec_buffer.size(), rec_record_sample_rate)) {
         const size_t room = rec_capture_capacity > rec_samples_written ? rec_capture_capacity - rec_samples_written : 0;
@@ -4266,7 +4304,7 @@ void drawNotesList()
     if (notes.empty()) {
         canvas.setTextSize(1);
         canvas.setTextColor(uiDim(), uiBg());
-        canvas.setCursor(8, 104);
+        canvas.setCursor(8, 96);
         canvas.print("No notes yet");
     }
     canvas.setTextSize(1);
@@ -4601,7 +4639,13 @@ void drawRecorderRecording()
     canvas.setTextSize(2);
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
-    if (rec_write_error) {
+    if (rec_save_pending) {
+        canvas.print("SAVING");
+        canvas.setTextSize(1);
+        canvas.setCursor(8, 84);
+        const uint32_t remaining = rec_save_due_ms > M5.millis() ? rec_save_due_ms - M5.millis() : 0;
+        canvas.printf("SD SETTLE %lus", static_cast<unsigned long>((remaining + 999) / 1000));
+    } else if (rec_write_error) {
         canvas.print("WRITE ERR");
     } else {
         char pcm_dur[12];
@@ -6977,7 +7021,6 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::RecorderDeleteConfirm) {
         if (ev.key == Key::Ok) {
             if (!pending_delete_path.empty() && unlink(pending_delete_path.c_str()) == 0) {
-                manualSdReprobe();
                 scanRecordings();
                 showMessage("Rec deleted", pending_delete_name, MessageReturn::Recorder);
             } else {
