@@ -10,7 +10,7 @@
 - Files/Transfer: `/sdcard/CARDPTR` is shown as `TRANSFER`, unsupported files use `FILE INFO`, and Connections states list/download/small-upload limits on device and web root.
 - Dashboard: shows current Resume target plus last music, book, note, and recording context with clearer shortcut footer.
 - Settings/About: compact SD/BAT/Transfer password status and clearer build/About screen.
-- Inbox/Timeline: safe manual event viewer with detail screen and explicit `1 REFRESH`; queued events persist only when the user opens/refreshes Inbox, not as background SD writes.
+- Inbox/Timeline: safe RAM-only session event viewer with detail screen and explicit `1 REFRESH`; SD persistence is disabled after hardware SD instability.
 
 ## v0.2.0 - Release Baseline
 

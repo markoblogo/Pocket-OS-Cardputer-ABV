@@ -53,15 +53,15 @@ Next acceptance:
 
 ### 2.2 Universal Inbox
 
-- Implemented as safe manual Timeline MVP.
-- `/sdcard/inbox/INBOX.TXT` is append-only.
+- Implemented as safe RAM-only Timeline MVP.
+- `/sdcard/inbox/INBOX.TXT` persistence is postponed.
 - Voice saves, note saves, habit checks, reading opens, music plays, and timer events queue in RAM first.
-- Inbox writes are explicit only: open Inbox or press `1 REFRESH`.
+- Inbox view/refresh never touches SD.
 
 Acceptance:
 
-- Captured activity appears in a single file after manual refresh.
-- Inbox survives reboot.
+- Captured activity appears in the session Timeline after manual refresh.
+- Inbox does not survive reboot yet.
 - No background SD writes during Music/Reader/Recorder operation.
 
 ### 2.3 Context Resume / Dashboard

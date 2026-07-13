@@ -1177,63 +1177,21 @@ InboxEventView parseInboxEvent(const std::string& raw)
     return out;
 }
 
-void flushInboxEvents()
-{
-    // Inbox persistence is explicit, not a background SD write. This prevents
-    // a queued event from touching the shared filesystem during normal Music,
-    // Reader, or Recorder operation.
-    if (inbox_pending_events.empty() || !sd_ready || mp3_file || reader_stream_file || screen == Screen::RecorderRecording) return;
-    std::string ignored;
-    if (!ensureSdDir(INBOX_DIR, &ignored)) return;
-    FILE* f = fopen(INBOX_FILE, "ab");
-    if (!f) return;
-    size_t written = 0;
-    for (const std::string& event : inbox_pending_events) {
-        if (fprintf(f, "%s\n", event.c_str()) < 0) break;
-        ++written;
-    }
-    if (!flushAndClose(f)) return;
-    if (written) inbox_pending_events.erase(inbox_pending_events.begin(), inbox_pending_events.begin() + written);
-    inbox_flushed_last = static_cast<int>(written);
-}
-
 void scanInbox()
 {
     inbox_entries.clear();
-    if (!initSd()) {
-        inbox_cursor = 0;
-        return;
-    }
-    FILE* f = fopen(INBOX_FILE, "rb");
-    if (!f) {
-        inbox_cursor = 0;
-        return;
-    }
-    char line[128];
-    while (fgets(line, sizeof(line), f)) {
-        std::string entry(line);
-        while (!entry.empty() && (entry.back() == '\n' || entry.back() == '\r')) entry.pop_back();
-        if (entry.empty()) continue;
-        inbox_entries.push_back(entry);
-        if (inbox_entries.size() > 48) inbox_entries.erase(inbox_entries.begin());
-    }
-    fclose(f);
+    inbox_entries = inbox_pending_events;
     std::reverse(inbox_entries.begin(), inbox_entries.end());
     if (inbox_entries.empty()) inbox_cursor = 0;
     else inbox_cursor = std::max(0, std::min(inbox_cursor, static_cast<int>(inbox_entries.size()) - 1));
-    inbox_status = "READY";
+    inbox_status = "RAM ONLY";
 }
 
 void refreshInboxManual()
 {
-    // Manual only: this is the only Inbox path that persists queued events.
-    // Normal apps keep logging in RAM to avoid SD writes during audio/reader work.
+    // Manual refresh only copies RAM events to the visible Timeline. No SD I/O.
     inbox_flushed_last = 0;
-    flushInboxEvents();
     scanInbox();
-    if (!sd_ready) inbox_status = "NO SD";
-    else if (inbox_flushed_last > 0) inbox_status = "SAVED " + std::to_string(inbox_flushed_last);
-    else inbox_status = "READY";
 }
 
 void scanNotes()
@@ -3891,7 +3849,7 @@ void drawInboxList()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK DETAIL  1 REFRESH  GO BACK");
+    canvas.print("OK DETAIL  1 RAM REFRESH  GO BACK");
     canvas.pushSprite(0, 0);
 }
 
@@ -3933,7 +3891,7 @@ void drawInboxDetail()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 122);
-    canvas.print("OK LIST   1 REFRESH   GO BACK");
+    canvas.print("OK LIST   1 RAM REFRESH   GO");
     canvas.pushSprite(0, 0);
 }
 
