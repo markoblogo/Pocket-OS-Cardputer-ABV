@@ -36,7 +36,7 @@ Tested on real Cardputer ADV hardware.
 Stable baseline:
 
 - Boot: ABVx splash and large monochrome launcher.
-- Listen/Music: SD MP3 player with waveform, volume, next/prev, shuffle, MAX volume, double-buffered playback, sorted library, selected-title marquee, track info, safe MP3 probe, and safer bad-track handling.
+- Listen/Music: SD MP3 player with waveform, volume, next/prev, non-repeating shuffle, MAX volume, buffered playback, sorted library, Unicode-safe marquee/glyphs, track info/probe, and direct FatFS streaming.
 - Voice/Record: one RAM-first 20-second WAV voice-note mode stored in internal SPIFFS, with save/play/delete and waveform.
 - Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
@@ -46,9 +46,9 @@ Stable baseline:
 - Decide/Randomizer: `YES / NO / MB`.
 - Inbox/Timeline: persistent internal log of the latest 64 confirmed events; no SD access.
 - Dashboard/Settings: Resume dashboard, current context, battery/low-voltage diagnostics, Transfer password, theme, sound, timeout, power preset, SD reprobe, About.
-- Transfer/Connections: Wi-Fi AP list/download/small-file diagnostics; large media transfer still needs SD reader.
+- Transfer/Connections v3: Wi-Fi AP list/download plus staged, main-loop-owned upload.
 
-Postponed: browser, AI, Mac companion, long SD-streaming recorder, large Wi-Fi upload.
+Postponed: browser, AI, Mac companion, and Bluetooth transfer.
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
 Changes: [`CHANGELOG.md`](CHANGELOG.md)
@@ -85,7 +85,7 @@ One Button Capture from launcher:
 
 ## SD layout
 
-Use 8.3-safe filenames for now.
+Transfer APIs still prefer 8.3-safe destination names. Music displays UTF-8 long filenames and streams through direct FatFS, trying the short alias and original LFN. A malformed FAT directory name is reported as `Unsupported filename` and should be renamed on Mac.
 
 ```text
 /sdcard/music/A.MP3
@@ -121,13 +121,25 @@ curl "http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT"
 curl http://192.168.4.1/api/write-test
 ```
 
-Small upload only, max 64KB:
+Staged upload, up to 32 MB:
 
 ```sh
-python3 tools/cardputer_upload.py ./NOTE.TXT /notes/NOTE.TXT
+python3 tools/cardputer_upload.py ./BOOK.TXT /books/BOOK.TXT
+python3 tools/cardputer_upload.py ./track.mp3 /music/track.mp3
 ```
 
-Upload is intentionally limited to 64KB. Large MP3/book upload over Wi-Fi is unstable on Cardputer ADV and is disabled. Use an SD reader/hub for large files. `/cardputer` appears as `TRANSFER` in Files and can hold generic carry files.
+The CLI uses `upload-begin/chunk/finish/abort`. HTTP handlers copy one bounded chunk; only the firmware main loop writes `ABVXUP.TMP` to SD. Finish verifies and renames it atomically. Existing files are never overwritten. `/cardputer` appears as `TRANSFER` in Files.
+
+## Preparing a music library
+
+```sh
+python3 tools/prepare_music.py ~/Downloads/Music /Volumes/CARDPUTER/music
+python3 tools/prepare_music.py --in-place /Volumes/CARDPUTER/music
+```
+
+This conversion is optional: current firmware can open UTF-8 FAT long filenames directly. Use it when portable ASCII storage names are desirable.
+
+Optional preparation stores tracks as FAT-safe `M001.MP3`, `M002.MP3`, etc. Transliterated display titles are kept in `INDEX.TXT`. Native Cyrillic/Hebrew filenames can also be displayed and played directly. Shuffle walks one complete shuffled playlist before any track repeats.
 
 ## Build
 

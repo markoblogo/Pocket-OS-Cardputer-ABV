@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Added Connections v3 staged upload with bounded chunks, main-loop SD ownership, temporary-file verification, abort, timeout, and CLI recovery.
+- Added non-repeating Music shuffle cycles and FAT-safe library preparation for Cyrillic, Hebrew, and other Unicode filenames.
+- Enabled heap-backed FATFS long filenames and separated Music display names from playback paths: Cyrillic/Hebrew names are shown in full while decoding uses stable FAT short aliases.
+- Filtered 4 KB macOS AppleDouble MP3 sidecars exposed as non-hidden FAT aliases, preventing false `BAD MP3 / no mpeg sync` entries.
+- Added Unicode-safe Music marquee plus compact Cyrillic and Hebrew title glyphs with basic Hebrew RTL run handling.
+- Added per-track FAT alias-to-LFN fallback resolution, fixing Unicode files whose short alias is rejected by POSIX `stat`.
+- Removed POSIX `stat` as a playback gate; Probe and Playback now open alias/LFN candidates directly and determine size from the opened stream.
+- Replaced Music's POSIX `FILE*` input stream with direct FatFS `FIL` open/read/seek/size operations to support aliases rejected by the VFS adapter.
+- Replaced the technical FatFS `FR_INVALID_NAME` error with the user-facing `Unsupported filename`; malformed directory entries are skipped without destabilizing playback.
+
+## Unreleased
+
 - Persistence: introduced a tested POSIX event-log module with bounded 64-event history and temp-file replacement.
 - Inbox/Timeline: moved persistence from RAM-only state to internal SPIFFS; queued events are committed only from the main loop on Launcher/Inbox screens.
 - Voice: records and plays from internal SPIFFS and queues Timeline events without touching SD after microphone capture.
@@ -44,7 +56,7 @@ Hardware-tested baseline for ABVx Pocket OS on Cardputer ADV.
 ### Important Limits
 
 - Large Wi-Fi upload remains disabled; use SD reader/hub for MP3 libraries.
-- FATFS long filenames are not a reliability target yet; 8.3-safe names are preferred.
+- Transfer writes still prefer 8.3-safe names; Music reads now support UTF-8 long filenames.
 - Voice recording is intentionally limited to 20 seconds.
 - Agent, Browser, AI, Mac Companion, Bluetooth, GPS, and LoRa are not part of this baseline.
 

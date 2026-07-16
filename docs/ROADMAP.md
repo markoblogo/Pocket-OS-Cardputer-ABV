@@ -22,7 +22,7 @@ Status: v0.2.0 baseline is hardware-tested; the current checkpoint adds Dashboar
 Remaining work:
 
 - Continue smoke testing Music -> Record -> Reader -> Notes -> Files after SD operations.
-- Keep large Wi-Fi upload disabled until a separate transfer redesign is done.
+- Hardware-stress Connections v3 before treating large Wi-Fi upload as stable.
 - Keep release checkpoints small and hardware-test them before tagging public binaries.
 
 Acceptance:
@@ -124,15 +124,15 @@ Apps stay as implementation modules under Pocket OS actions.
 
 Goal: Cardputer as SD transfer device via Wi-Fi AP and later Mac Companion.
 
-Current rule: large upload is disabled.
+Connections v3 staged upload is implemented and awaiting hardware stress validation.
 
 Planned redesign:
 
 - Keep current list/download endpoints.
-- Replace direct large upload with explicit staged/chunked state machine.
-- Process SD writes from main loop, not HTTP handler.
+- Validate staged/chunked upload across TXT, books, MP3, and interrupted sessions.
+- Keep all SD writes in the main loop, never HTTP handlers.
 - Add phone-friendly web UI.
-- Keep 8.3 filename restriction until FATFS LFN is intentionally enabled.
+- FATFS LFN is enabled for UTF-8 Music reads; keep conservative 8.3 naming for transfer writes until staged upload is hardware-proven.
 
 Acceptance:
 

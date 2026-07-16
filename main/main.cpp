@@ -27,6 +27,7 @@
 #include <esp_vfs_fat.h>
 #include <esp_wifi.h>
 #include <ff.h>
+#include <freertos/semphr.h>
 #include <nvs_flash.h>
 #include <sdmmc_cmd.h>
 #include <minimp3.h>
@@ -75,9 +76,11 @@ constexpr bool AUDIO_SAFE_MONO = true;
 constexpr int AUDIO_SAFE_SHIFT = 2;
 constexpr size_t MAX_BOOK_BYTES = 128 * 1024;
 constexpr size_t READER_STREAM_READ_BYTES = 2048;
-constexpr size_t MAX_UPLOAD_BYTES = 64 * 1024;
+constexpr size_t MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 constexpr size_t MAX_DIRECT_UPLOAD_BYTES = 64 * 1024;
 constexpr size_t MAX_UPLOAD_CHUNK_BYTES = 2 * 1024;
+constexpr uint32_t UPLOAD_OP_TIMEOUT_MS = 15000;
+constexpr uint32_t UPLOAD_SESSION_TIMEOUT_MS = 45000;
 constexpr size_t MAX_LIST_ENTRIES = 256;
 constexpr size_t MAX_STATE_RECORDS = 256;
 constexpr size_t MAX_HABITS = 64;
@@ -106,6 +109,27 @@ char connection_ap_password[16] = "cardputer";
 volatile bool connection_upload_active = false;
 volatile int connection_upload_done = 0;
 volatile int connection_upload_total = 0;
+
+enum class ConnectionUploadOp { None, Begin, Chunk, Finish, Abort };
+SemaphoreHandle_t connection_upload_mutex = nullptr;
+SemaphoreHandle_t connection_upload_complete = nullptr;
+ConnectionUploadOp connection_pending_op = ConnectionUploadOp::None;
+bool connection_pending_done = false;
+bool connection_pending_ok = false;
+std::string connection_pending_api_path;
+std::string connection_pending_full_path;
+std::string connection_pending_original_name;
+std::string connection_pending_error;
+std::vector<uint8_t> connection_pending_chunk;
+size_t connection_pending_total = 0;
+size_t connection_pending_offset = 0;
+FILE* connection_upload_file = nullptr;
+bool connection_upload_session = false;
+std::string connection_upload_path;
+std::string connection_upload_original_name;
+std::string connection_upload_final_path;
+std::string connection_upload_part_path;
+uint32_t connection_upload_last_activity_ms = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
@@ -189,6 +213,7 @@ ResumeTarget last_resume_target = ResumeTarget::Music;
 
 std::vector<std::string> tracks;
 std::map<std::string, std::string> music_titles;
+std::map<std::string, std::string> music_physical_names;
 std::vector<std::string> books;
 std::vector<std::string> notes;
 std::vector<std::string> recordings;
@@ -239,6 +264,8 @@ int inbox_cursor = 0;
 int inbox_flushed_last = 0;
 int selected_recording = 0;
 bool shuffle_on = false;
+std::vector<int> shuffle_order;
+int shuffle_position = -1;
 VolumeMode volume_mode = VolumeMode::Mid;
 uint32_t last_input_ms = 0;
 bool display_off = false;
@@ -247,7 +274,8 @@ bool dirty = true;
 int battery_last_level = -1;
 int battery_last_mv = -1;
 
-FILE* mp3_file = nullptr;
+FIL mp3_fat_file = {};
+bool mp3_fat_open = false;
 mp3dec_t mp3_dec;
 std::vector<uint8_t> mp3_buf;
 size_t mp3_len = 0;
@@ -2561,11 +2589,143 @@ std::string musicDisplayName(const std::string& file)
     return file;
 }
 
-bool musicFileStat(const std::string& file, struct stat* out)
+bool musicStorageNameNeedsImport(const std::string& file)
+{
+    if (file.empty()) return true;
+    for (unsigned char c : file) {
+        // FATFS is configured for heap-backed LFN with an UTF-8 API. Non-ASCII
+        // bytes are therefore valid path data; only structurally unsafe names
+        // remain blocked from the playback path.
+        if (c < 32 || c == 127 || c == '/' || c == '\\') return true;
+    }
+    return false;
+}
+
+void shuffleIndices(std::vector<int>* values)
+{
+    if (!values) return;
+    for (size_t i = values->size(); i > 1; --i) {
+        const size_t j = static_cast<size_t>(esp_random()) % i;
+        std::swap((*values)[i - 1], (*values)[j]);
+    }
+}
+
+void beginShuffleFromCurrent()
+{
+    shuffle_order.clear();
+    shuffle_position = -1;
+    if (tracks.empty()) return;
+    selected_track = std::max(0, std::min(selected_track, static_cast<int>(tracks.size()) - 1));
+    shuffle_order.reserve(tracks.size());
+    shuffle_order.push_back(selected_track);
+    std::vector<int> remaining;
+    remaining.reserve(tracks.size() - 1);
+    for (int i = 0; i < static_cast<int>(tracks.size()); ++i) {
+        if (i != selected_track) remaining.push_back(i);
+    }
+    shuffleIndices(&remaining);
+    shuffle_order.insert(shuffle_order.end(), remaining.begin(), remaining.end());
+    shuffle_position = 0;
+}
+
+void beginNewShuffleCycle(int previous_track)
+{
+    shuffle_order.clear();
+    shuffle_order.reserve(tracks.size());
+    for (int i = 0; i < static_cast<int>(tracks.size()); ++i) shuffle_order.push_back(i);
+    shuffleIndices(&shuffle_order);
+    if (shuffle_order.size() > 1 && shuffle_order.front() == previous_track) {
+        std::swap(shuffle_order.front(), shuffle_order[1]);
+    }
+    shuffle_position = shuffle_order.empty() ? -1 : 0;
+}
+
+void setShuffleEnabled(bool enabled)
+{
+    shuffle_on = enabled;
+    if (shuffle_on) beginShuffleFromCurrent();
+    else {
+        shuffle_order.clear();
+        shuffle_position = -1;
+    }
+}
+
+void advanceTrackSelection(int delta)
+{
+    if (tracks.empty()) return;
+    if (!shuffle_on || tracks.size() == 1) {
+        selected_track = (selected_track + delta + tracks.size()) % tracks.size();
+        return;
+    }
+    if (shuffle_order.size() != tracks.size() || shuffle_position < 0 ||
+        shuffle_position >= static_cast<int>(shuffle_order.size()) ||
+        shuffle_order[shuffle_position] != selected_track) {
+        beginShuffleFromCurrent();
+    }
+    if (delta < 0) {
+        if (shuffle_position > 0) --shuffle_position;
+    } else if (shuffle_position + 1 < static_cast<int>(shuffle_order.size())) {
+        ++shuffle_position;
+    } else {
+        beginNewShuffleCycle(selected_track);
+    }
+    if (shuffle_position >= 0) selected_track = shuffle_order[shuffle_position];
+}
+
+bool resolveMusicFile(const std::string& file, std::string* resolved_path, struct stat* out)
 {
     if (file.empty() || !out) return false;
-    const std::string path = std::string(MUSIC_DIR) + "/" + file;
-    return stat(path.c_str(), out) == 0 && S_ISREG(out->st_mode);
+    const std::string alias_path = std::string(MUSIC_DIR) + "/" + file;
+    if (stat(alias_path.c_str(), out) == 0 && S_ISREG(out->st_mode)) {
+        if (resolved_path) *resolved_path = alias_path;
+        return true;
+    }
+    const auto physical = music_physical_names.find(file);
+    if (physical == music_physical_names.end() || physical->second.empty()) return false;
+    const std::string lfn_path = std::string(MUSIC_DIR) + "/" + physical->second;
+    if (stat(lfn_path.c_str(), out) != 0 || !S_ISREG(out->st_mode)) return false;
+    if (resolved_path) *resolved_path = lfn_path;
+    return true;
+}
+
+bool musicFileStat(const std::string& file, struct stat* out)
+{
+    return resolveMusicFile(file, nullptr, out);
+}
+
+FRESULT openFatMusicFile(const std::string& file, FIL* opened,
+                         std::string* resolved_path, std::string* err)
+{
+    if (file.empty() || !opened) {
+        if (err) *err = "empty filename";
+        return FR_INVALID_NAME;
+    }
+    const std::string alias_fat_path = std::string("0:/music/") + file;
+    FRESULT result = f_open(opened, alias_fat_path.c_str(), FA_READ);
+    if (result == FR_OK) {
+        if (resolved_path) *resolved_path = std::string(MUSIC_DIR) + "/" + file;
+        return FR_OK;
+    }
+    const FRESULT first_result = result;
+    const auto physical = music_physical_names.find(file);
+    if (physical != music_physical_names.end() && !physical->second.empty()) {
+        const std::string lfn_fat_path = std::string("0:/music/") + physical->second;
+        result = f_open(opened, lfn_fat_path.c_str(), FA_READ);
+        if (result == FR_OK) {
+            if (resolved_path) *resolved_path = std::string(MUSIC_DIR) + "/" + physical->second;
+            return FR_OK;
+        }
+    }
+    if (err) {
+        const FRESULT effective = result == FR_OK ? first_result : result;
+        if (effective == FR_INVALID_NAME) {
+            *err = "Unsupported filename";
+        } else {
+            *err = "fat open ";
+            *err += std::to_string(static_cast<int>(effective));
+        }
+    }
+    return result == FR_OK ? first_result : result;
 }
 
 std::string sortKey(std::string s)
@@ -2576,96 +2736,62 @@ std::string sortKey(std::string s)
 
 void scanMusic()
 {
-    music_scan_status = "MOUNT";
+    music_scan_status = "FAT SCAN";
     music_raw_entries = 0;
     music_mp3_entries = 0;
-    bool used_fatfs_fallback = false;
-    FRESULT fatfs_result = FR_OK;
-    DIR* dir = openSdDirWithRetry(MUSIC_DIR);
-    if (!dir) {
-        // Music is entered from an idle launcher, so a single controlled
-        // reprobe here is safe. Never do this from a shared background helper.
-        music_scan_status = "REPROBE";
-        if (!manualSdReprobe()) {
-            music_scan_status = "MOUNT FAIL";
-            return;
-        }
-        dir = openSdDirWithRetry(MUSIC_DIR);
-        if (!dir) {
-            music_scan_status = "DIR FAIL";
-            return;
-        }
-    }
+    loadMusicIndex();
+    music_physical_names.clear();
     std::vector<std::string> next_tracks;
     next_tracks.reserve(32);
-    auto collectMusicDir = [&](DIR* current) {
-        errno = 0;
-        while (dirent* entry = readdir(current)) {
+    auto collectMusicDir = [&]() {
+        FF_DIR fat_dir = {};
+        FILINFO info = {};
+        FRESULT result = f_opendir(&fat_dir, "0:/music");
+        if (result != FR_OK) return result;
+        while ((result = f_readdir(&fat_dir, &info)) == FR_OK && info.fname[0]) {
             ++music_raw_entries;
-            std::string name = entry->d_name;
-            if (isHidden(name) || !hasMp3Ext(name)) continue;
+            const std::string display_name = info.fname;
+            const std::string storage_name = info.altname[0] ? std::string(info.altname) : display_name;
+            if (isHidden(display_name) || isHidden(storage_name)) continue;
+            if (!hasMp3Ext(display_name) && !hasMp3Ext(storage_name)) continue;
+            // macOS AppleDouble sidecars can lose their leading "._" when
+            // exposed through a FAT short alias (for example WTHE~300.MP3).
+            // They are commonly 4096 bytes and contain no MPEG frames.
+            if ((info.fattrib & (AM_DIR | AM_HID | AM_SYS)) || info.fsize < 8192) continue;
             ++music_mp3_entries;
-            if (sdPathIsDir(std::string(MUSIC_DIR) + "/" + name)) continue;
-            next_tracks.push_back(name);
+            // Keep only the stable FAT short alias in the playback path. The
+            // long UTF-8 name is display metadata and never reaches stat/fopen.
+            next_tracks.push_back(storage_name);
+            if (display_name != storage_name) music_physical_names[storage_name] = display_name;
+            if (display_name != storage_name && music_titles.find(storage_name) == music_titles.end()) {
+                music_titles[storage_name] = display_name;
+            }
             if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
         }
-        const int read_errno = errno;
-        closedir(current);
-        return read_errno;
+        f_closedir(&fat_dir);
+        return result;
     };
 
-    int read_errno = collectMusicDir(dir);
-    if (music_raw_entries == 0) {
-        // A successful opendir followed by an empty readdir has occurred
-        // after transient Cardputer SD failures. Retry once while still in
-        // Music entry, before exposing a false 0/0 list to the user.
+    FRESULT fatfs_result = collectMusicDir();
+    if (fatfs_result != FR_OK || music_raw_entries == 0) {
         music_scan_status = "RETRY";
         if (manualSdReprobe()) {
             next_tracks.clear();
             music_raw_entries = 0;
             music_mp3_entries = 0;
-            DIR* retry_dir = openSdDirWithRetry(MUSIC_DIR);
-            if (retry_dir) read_errno = collectMusicDir(retry_dir);
+            fatfs_result = collectMusicDir();
         }
     }
-    if (music_raw_entries == 0) {
-        // FATFS fallback bypasses the POSIX VFS directory adapter. On the
-        // Cardputer SD stack the VFS layer can report end-of-directory while
-        // the mounted FAT volume still contains valid short-name entries.
-        FF_DIR fat_dir = {};
-        FILINFO info = {};
-        fatfs_result = f_opendir(&fat_dir, "0:/music");
-        if (fatfs_result == FR_OK) {
-            used_fatfs_fallback = true;
-            next_tracks.clear();
-            music_raw_entries = 0;
-            music_mp3_entries = 0;
-            while ((fatfs_result = f_readdir(&fat_dir, &info)) == FR_OK && info.fname[0]) {
-                ++music_raw_entries;
-                std::string name = info.fname;
-                if (isHidden(name) || !hasMp3Ext(name)) continue;
-                ++music_mp3_entries;
-                if (info.fattrib & AM_DIR) continue;
-                if (info.fsize == 0) continue;
-                next_tracks.push_back(name);
-                if (next_tracks.size() >= MAX_LIST_ENTRIES) break;
-            }
-            f_closedir(&fat_dir);
-        }
-    }
-    loadMusicIndex();
     std::sort(next_tracks.begin(), next_tracks.end(), [](const std::string& a, const std::string& b) {
         return sortKey(musicDisplayName(a)) < sortKey(musicDisplayName(b));
     });
     tracks.swap(next_tracks);
-    if (tracks.empty() && used_fatfs_fallback && fatfs_result != FR_OK) {
+    shuffle_order.clear();
+    shuffle_position = -1;
+    if (fatfs_result != FR_OK) {
         music_scan_status = "FAT " + std::to_string(static_cast<int>(fatfs_result));
-    } else if (tracks.empty() && read_errno != 0 && !used_fatfs_fallback) {
-        music_scan_status = "READ " + std::to_string(read_errno);
-    } else if (used_fatfs_fallback) {
-        music_scan_status = "FAT OK";
     } else {
-        music_scan_status = "OK";
+        music_scan_status = "FAT OK";
     }
     if (selected_track >= static_cast<int>(tracks.size())) selected_track = std::max(0, static_cast<int>(tracks.size()) - 1);
 }
@@ -2730,6 +2856,7 @@ void prepareMusicInfo()
     } else {
         music_info_status = "MISSING";
     }
+    if (musicStorageNameNeedsImport(music_info_file)) music_info_status = "IMPORT REQUIRED";
 }
 
 bool probeSelectedMusic(std::string* status)
@@ -2739,30 +2866,26 @@ bool probeSelectedMusic(std::string* status)
         if (status) *status = "BAD no track";
         return false;
     }
-    const std::string path = selectedPath();
-    struct stat st = {};
-    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        if (status) {
-            *status = "BAD stat ";
-            *status += std::strerror(errno);
-        }
+    std::string path;
+    std::string open_error;
+    FIL probe_file = {};
+    if (openFatMusicFile(tracks[selected_track], &probe_file, &path, &open_error) != FR_OK) {
+        if (status) *status = "BAD " + open_error;
         return false;
     }
-    if (st.st_size < 64) {
+    if (f_size(&probe_file) < 64) {
+        f_close(&probe_file);
         if (status) *status = "BAD small";
         return false;
     }
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) {
-        if (status) {
-            *status = "BAD open ";
-            *status += std::strerror(errno);
-        }
+    std::vector<uint8_t> probe(32768);
+    UINT n = 0;
+    const FRESULT read_result = f_read(&probe_file, probe.data(), probe.size(), &n);
+    f_close(&probe_file);
+    if (read_result != FR_OK) {
+        if (status) *status = "BAD fat read " + std::to_string(static_cast<int>(read_result));
         return false;
     }
-    std::vector<uint8_t> probe(32768);
-    size_t n = fread(probe.data(), 1, probe.size(), f);
-    fclose(f);
     if (n < 4) {
         if (status) *status = "BAD read";
         return false;
@@ -2856,9 +2979,9 @@ void stopPlayback()
     playing = false;
     music_autostart_pending = false;
     M5.Speaker.stop();
-    if (mp3_file) {
-        fclose(mp3_file);
-        mp3_file = nullptr;
+    if (mp3_fat_open) {
+        f_close(&mp3_fat_file);
+        mp3_fat_open = false;
     }
     mp3_len = 0;
     mp3_pos = 0;
@@ -2909,7 +3032,7 @@ void releaseTransientBuffersForVoice()
 
 bool refillInput()
 {
-    if (!mp3_file) return false;
+    if (!mp3_fat_open) return false;
     if (mp3_pos > 0 && (mp3_pos > mp3_buf.size() / 2 || mp3_len - mp3_pos < 8192)) {
         const size_t remain = mp3_len - mp3_pos;
         memmove(mp3_buf.data(), mp3_buf.data() + mp3_pos, remain);
@@ -2917,7 +3040,13 @@ bool refillInput()
         mp3_pos = 0;
     }
     while (!mp3_eof && mp3_len < mp3_buf.size()) {
-        const size_t n = fread(mp3_buf.data() + mp3_len, 1, mp3_buf.size() - mp3_len, mp3_file);
+        UINT n = 0;
+        const FRESULT result = f_read(&mp3_fat_file, mp3_buf.data() + mp3_len,
+                                      mp3_buf.size() - mp3_len, &n);
+        if (result != FR_OK) {
+            mp3_eof = true;
+            break;
+        }
         mp3_len += n;
         if (n == 0) mp3_eof = true;
     }
@@ -2942,17 +3071,21 @@ size_t findSync(size_t start)
     return std::string::npos;
 }
 
-bool seekPastId3(FILE* f, std::string* err = nullptr)
+bool seekPastId3(std::string* err = nullptr)
 {
     uint8_t header[10] = {};
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        if (err) *err = "seek failed";
+    if (f_lseek(&mp3_fat_file, 0) != FR_OK) {
+        if (err) *err = "fat seek failed";
         return false;
     }
-    const size_t n = fread(header, 1, sizeof(header), f);
+    UINT n = 0;
+    if (f_read(&mp3_fat_file, header, sizeof(header), &n) != FR_OK) {
+        if (err) *err = "fat read failed";
+        return false;
+    }
     if (n < sizeof(header) || std::memcmp(header, "ID3", 3) != 0) {
-        if (fseek(f, 0, SEEK_SET) != 0) {
-            if (err) *err = "seek failed";
+        if (f_lseek(&mp3_fat_file, 0) != FR_OK) {
+            if (err) *err = "fat seek failed";
             return false;
         }
         return true;
@@ -2968,12 +3101,8 @@ bool seekPastId3(FILE* f, std::string* err = nullptr)
                               (static_cast<uint32_t>(header[8]) << 7) |
                               static_cast<uint32_t>(header[9]);
     const long audio_offset = 10L + static_cast<long>(tag_size) + ((header[5] & 0x10) ? 10L : 0L);
-    if (fseek(f, 0, SEEK_END) != 0) {
-        if (err) *err = "size failed";
-        return false;
-    }
-    const long file_size = ftell(f);
-    if (file_size <= audio_offset || fseek(f, audio_offset, SEEK_SET) != 0) {
+    if (f_size(&mp3_fat_file) <= static_cast<FSIZE_t>(audio_offset) ||
+        f_lseek(&mp3_fat_file, static_cast<FSIZE_t>(audio_offset)) != FR_OK) {
         if (err) *err = "bad ID3 offset";
         return false;
     }
@@ -2989,31 +3118,35 @@ bool startPlaybackOnce(std::string* err = nullptr)
         if (err) *err = "no tracks";
         return false;
     }
-    std::string path = override_music_path.empty() ? selectedPath() : override_music_path;
-    struct stat st = {};
-    if (stat(path.c_str(), &st) != 0) {
-        if (err) {
-            *err = "stat failed: ";
-            *err += std::strerror(errno);
+    if (!hasMusicPlaybackHeap(err)) return false;
+    std::string path = override_music_path;
+    FRESULT open_result = FR_OK;
+    if (override_music_path.empty()) {
+        open_result = openFatMusicFile(tracks[selected_track], &mp3_fat_file, &path, err);
+    } else {
+        open_result = f_open(&mp3_fat_file, sdPathToFatPath(path).c_str(), FA_READ);
+    }
+    if (open_result != FR_OK) {
+        if (err && (override_music_path.size() > 0 || err->empty())) {
+            if (open_result == FR_INVALID_NAME) {
+                *err = "Unsupported filename";
+            } else {
+                *err = "fat open ";
+                *err += std::to_string(static_cast<int>(open_result));
+            }
         }
         return false;
     }
-    if (st.st_size < 64) {
+    mp3_fat_open = true;
+    if (f_size(&mp3_fat_file) < 64) {
+        f_close(&mp3_fat_file);
+        mp3_fat_open = false;
         if (err) *err = "file too small";
         return false;
     }
-    if (!hasMusicPlaybackHeap(err)) return false;
-    mp3_file = fopen(path.c_str(), "rb");
-    if (!mp3_file) {
-        if (err) {
-            *err = "open failed: ";
-            *err += std::strerror(errno);
-        }
-        return false;
-    }
-    if (!seekPastId3(mp3_file, err)) {
-        fclose(mp3_file);
-        mp3_file = nullptr;
+    if (!seekPastId3(err)) {
+        f_close(&mp3_fat_file);
+        mp3_fat_open = false;
         return false;
     }
     mp3dec_init(&mp3_dec);
@@ -3074,45 +3207,41 @@ bool startPlayback(std::string* err = nullptr)
     return false;
 }
 
+bool playNextAvailableTrack(int delta, std::string* err = nullptr);
+
 void nextTrack(int delta)
 {
     if (tracks.empty()) return;
-    if (shuffle_on && tracks.size() > 1) {
-        selected_track = esp_random() % tracks.size();
-    } else {
-        selected_track = (selected_track + delta + tracks.size()) % tracks.size();
-    }
+    advanceTrackSelection(delta);
     if (playing) {
         std::string err;
         const std::string path = selectedPath();
         if (!startPlayback(&err)) {
-            showMessage("BAD MP3", musicProblemBody(path, err), MessageReturn::Music);
-            blockInput(500);
+            if (!shuffle_on || !playNextAvailableTrack(delta, &err)) {
+                showMessage("BAD MP3", musicProblemBody(path, err), MessageReturn::Music);
+                blockInput(500);
+            }
         }
     }
     dirty = true;
 }
 
-bool playNextAvailableTrack(int delta, std::string* err = nullptr)
+bool playNextAvailableTrack(int delta, std::string* err)
 {
     if (tracks.empty()) {
         if (err) *err = "no tracks";
         return false;
     }
     const int original = selected_track;
+    const int original_shuffle_position = shuffle_position;
     for (size_t attempt = 0; attempt < tracks.size(); ++attempt) {
-        if (shuffle_on && tracks.size() > 1) {
-            int candidate = selected_track;
-            for (int i = 0; i < 4 && candidate == selected_track; ++i) candidate = esp_random() % tracks.size();
-            selected_track = candidate;
-        } else {
-            selected_track = (selected_track + delta + tracks.size()) % tracks.size();
-        }
+        advanceTrackSelection(delta);
         std::string local_err;
         if (startPlayback(&local_err)) return true;
         if (err && err->empty()) *err = tracks[selected_track] + ": " + local_err;
     }
     selected_track = original;
+    shuffle_position = original_shuffle_position;
     return false;
 }
 
@@ -3150,7 +3279,7 @@ int16_t safeAudioSample(int32_t v)
 
 bool decodeChunkInto(std::vector<int16_t>& out, std::string* err = nullptr)
 {
-    if (!playing || !mp3_file) {
+    if (!playing || !mp3_fat_open) {
         if (err) *err = "not playing";
         return false;
     }
@@ -4298,6 +4427,10 @@ void drawHabitsEdit()
     canvas.pushSprite(0, 0);
 }
 
+uint32_t nextUtf8Codepoint(const std::string& text, size_t& i);
+void drawMusicUtf8Line(int x, int y, const std::string& text, int max_cols,
+                       bool animate, uint16_t color, uint16_t background);
+
 void drawMusicList()
 {
     canvas.fillScreen(uiBg());
@@ -4324,11 +4457,17 @@ void drawMusicList()
         start = std::min(start, std::max(0, static_cast<int>(tracks.size()) - 3));
         int end = std::min(static_cast<int>(tracks.size()), start + 3);
         for (int i = start; i < end; ++i) {
-            canvas.setCursor(8, 38 + (i - start) * 24);
-            canvas.setTextColor(i == selected_track ? uiBg() : uiFg(), i == selected_track ? uiFg() : uiBg());
-            std::string label = musicDisplayName(tracks[i]);
-            if (i == selected_track) label = marqueeText(label, 13);
-            canvas.printf("%c %.13s", i == selected_track ? '>' : ' ', label.c_str());
+            const int y = 38 + (i - start) * 24;
+            const bool selected = i == selected_track;
+            const uint16_t fg = selected ? uiBg() : uiFg();
+            const uint16_t bg = selected ? uiFg() : uiBg();
+            if (selected) canvas.fillRect(4, y - 2, SCREEN_W - 8, 22, bg);
+            const char marker = i == selected_track ? '>' : (musicStorageNameNeedsImport(tracks[i]) ? '!' : ' ');
+            canvas.setTextSize(2);
+            canvas.setTextColor(fg, bg);
+            canvas.setCursor(8, y);
+            canvas.print(marker);
+            drawMusicUtf8Line(28, y, musicDisplayName(tracks[i]), 16, selected, fg, bg);
         }
     }
     canvas.setTextSize(1);
@@ -4350,8 +4489,7 @@ void drawMusicInfo()
         canvas.setCursor(8, 42);
         canvas.println("No track");
     } else {
-        canvas.setCursor(8, 36);
-        canvas.printf("%.14s", marqueeText(music_info_title, 14).c_str());
+        drawMusicUtf8Line(8, 36, music_info_title, 18, true, uiFg(), uiBg());
         canvas.setTextSize(1);
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 62);
@@ -4378,9 +4516,8 @@ void drawMusicPlaying()
     canvas.setTextColor(uiFg(), uiBg());
     canvas.setCursor(8, 8);
     canvas.println("LISTENING");
-    canvas.setCursor(8, 34);
     std::string play_label = !override_music_path.empty() ? baseName(override_music_path) : (tracks.empty() ? "" : musicDisplayName(tracks[selected_track]));
-    canvas.printf("%.14s", marqueeText(play_label, 14).c_str());
+    drawMusicUtf8Line(8, 34, play_label, 18, true, uiFg(), uiBg());
     canvas.setCursor(8, 58);
     canvas.setTextColor(uiAccent(), uiBg());
     canvas.printf("VOL:%s", volumeName());
@@ -4546,6 +4683,62 @@ const char** cyrillicBitmap(uint32_t cp)
     }
 }
 
+bool isHebrewCodepoint(uint32_t cp)
+{
+    return cp >= 0x05D0 && cp <= 0x05EA;
+}
+
+const char** hebrewBitmap(uint32_t cp)
+{
+    static const char* Alef[]  = {"10001","01010","00100","01010","10001","10001","00001"};
+    static const char* Bet[]   = {"11110","00001","00001","11111","10001","10001","11111"};
+    static const char* Gimel[] = {"00011","00001","00001","00001","00001","10001","01110"};
+    static const char* Dalet[] = {"11111","00001","00001","00001","00001","00001","00001"};
+    static const char* He[]    = {"11111","00001","00001","10001","10001","10001","10001"};
+    static const char* Vav[]   = {"00111","00001","00001","00001","00001","00001","00001"};
+    static const char* Zayin[] = {"11111","00010","00100","00100","00100","00100","00100"};
+    static const char* Het[]   = {"11111","10001","10001","10001","10001","10001","10001"};
+    static const char* Tet[]   = {"11111","10001","10101","10101","10001","10001","01110"};
+    static const char* Yod[]   = {"00111","00001","00001","00000","00000","00000","00000"};
+    static const char* Kaf[]   = {"11111","00001","00001","00001","00001","00001","11111"};
+    static const char* Lamed[] = {"00100","00100","11100","10100","10100","10010","10001"};
+    static const char* Mem[]   = {"11111","10001","10101","10101","10101","10001","10001"};
+    static const char* Nun[]   = {"00111","00001","00001","00001","00001","00001","00111"};
+    static const char* Samekh[]= {"11111","10001","10001","10001","10001","10001","11111"};
+    static const char* Ayin[]  = {"10001","10001","01001","00101","00011","00001","00001"};
+    static const char* Pe[]    = {"11111","10001","10101","00001","00001","00001","11111"};
+    static const char* Tsadi[] = {"10001","01001","00101","00011","00001","10001","01110"};
+    static const char* Qof[]   = {"11111","10001","10001","10001","10101","00101","00111"};
+    static const char* Resh[]  = {"11111","00001","00001","00001","00001","00001","00001"};
+    static const char* Shin[]  = {"10101","10101","10101","10101","10001","10001","11111"};
+    static const char* Tav[]   = {"11111","10001","10001","10001","10001","10001","10001"};
+    switch (cp) {
+        case 0x05D0: return Alef;
+        case 0x05D1: return Bet;
+        case 0x05D2: return Gimel;
+        case 0x05D3: return Dalet;
+        case 0x05D4: return He;
+        case 0x05D5: return Vav;
+        case 0x05D6: return Zayin;
+        case 0x05D7: return Het;
+        case 0x05D8: return Tet;
+        case 0x05D9: return Yod;
+        case 0x05DA: case 0x05DB: return Kaf;
+        case 0x05DC: return Lamed;
+        case 0x05DD: case 0x05DE: return Mem;
+        case 0x05DF: case 0x05E0: return Nun;
+        case 0x05E1: return Samekh;
+        case 0x05E2: return Ayin;
+        case 0x05E3: case 0x05E4: return Pe;
+        case 0x05E5: case 0x05E6: return Tsadi;
+        case 0x05E7: return Qof;
+        case 0x05E8: return Resh;
+        case 0x05E9: return Shin;
+        case 0x05EA: return Tav;
+        default: return nullptr;
+    }
+}
+
 void drawBitmapGlyph(int x, int y, int scale, const char** rows, uint16_t color)
 {
     int dot = std::max(1, scale - 1);
@@ -4579,6 +4772,60 @@ void drawMixedTextLine(int x, int y, const std::string& text, int scale = 2)
             cx += 6 * scale;
         }
         if (i == before) ++i;
+        if (cx > SCREEN_W - 8) break;
+    }
+}
+
+void drawMusicUtf8Line(int x, int y, const std::string& text, int max_cols,
+                       bool animate, uint16_t color, uint16_t background)
+{
+    std::vector<uint32_t> glyphs;
+    glyphs.reserve(text.size());
+    for (size_t i = 0; i < text.size();) glyphs.push_back(nextUtf8Codepoint(text, i));
+
+    // The canvas is left-to-right. Reverse only contiguous Hebrew runs so a
+    // title such as "שלום.mp3" keeps its Latin extension in the right order.
+    for (size_t begin = 0; begin < glyphs.size();) {
+        if (!isHebrewCodepoint(glyphs[begin])) { ++begin; continue; }
+        size_t end = begin + 1;
+        while (end < glyphs.size() && isHebrewCodepoint(glyphs[end])) ++end;
+        std::reverse(glyphs.begin() + begin, glyphs.begin() + end);
+        begin = end;
+    }
+
+    if (max_cols <= 0) return;
+    std::vector<uint32_t> visible;
+    visible.reserve(max_cols);
+    if (glyphs.size() <= static_cast<size_t>(max_cols)) {
+        visible = glyphs;
+    } else if (animate) {
+        std::vector<uint32_t> loop = glyphs;
+        loop.insert(loop.end(), 3, static_cast<uint32_t>(' '));
+        const size_t offset = (M5.millis() / 180) % loop.size();
+        for (int col = 0; col < max_cols; ++col) visible.push_back(loop[(offset + col) % loop.size()]);
+    } else {
+        visible.assign(glyphs.begin(), glyphs.begin() + max_cols);
+    }
+
+    constexpr int scale = 2;
+    int cx = x;
+    canvas.setTextSize(scale);
+    canvas.setTextColor(color, background);
+    for (uint32_t cp : visible) {
+        if (cp == ' ') {
+            cx += 6 * scale;
+            continue;
+        }
+        const char** bitmap = cyrillicBitmap(cp);
+        if (!bitmap) bitmap = hebrewBitmap(cp);
+        if (bitmap) {
+            drawBitmapGlyph(cx, y + 2, scale, bitmap, color);
+        } else {
+            char ascii[2] = {static_cast<char>(cp < 128 ? cp : '?'), 0};
+            canvas.setCursor(cx, y);
+            canvas.print(ascii);
+        }
+        cx += 6 * scale;
         if (cx > SCREEN_W - 8) break;
     }
 }
@@ -5434,7 +5681,6 @@ bool getRequestPath(httpd_req_t* req, std::string* api_path, const char* fallbac
     return true;
 }
 
-#if 0  // Staged uploader query helpers retained only with its disabled code.
 bool getQueryValue(httpd_req_t* req, const char* key, char* out, size_t out_len)
 {
     char query[224] = {};
@@ -5452,7 +5698,6 @@ bool getQueryUint(httpd_req_t* req, const char* key, size_t* out)
     *out = static_cast<size_t>(parsed);
     return true;
 }
-#endif
 
 bool isAllowedApiPath(const std::string& path)
 {
@@ -5647,7 +5892,6 @@ void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, h
     httpd_resp_send_err(req, code, reason);
 }
 
-#if 0  // Removed staged uploader: cross-task shared state was not race-safe.
 void cleanupUploadSession(bool remove_partial)
 {
     if (connection_upload_file) {
@@ -5655,8 +5899,8 @@ void cleanupUploadSession(bool remove_partial)
         fclose(connection_upload_file);
         connection_upload_file = nullptr;
     }
-    if (remove_partial && !connection_upload_full_path.empty()) {
-        unlink(connection_upload_full_path.c_str());
+    if (remove_partial && !connection_upload_part_path.empty()) {
+        unlink(connection_upload_part_path.c_str());
     }
     connection_upload_active = false;
     connection_upload_done = 0;
@@ -5664,7 +5908,9 @@ void cleanupUploadSession(bool remove_partial)
     connection_upload_session = false;
     connection_upload_path.clear();
     connection_upload_original_name.clear();
-    connection_upload_full_path.clear();
+    connection_upload_final_path.clear();
+    connection_upload_part_path.clear();
+    connection_upload_last_activity_ms = 0;
 }
 
 void resetUploadSession(bool remove_partial)
@@ -5684,60 +5930,114 @@ void resetUploadSession(bool remove_partial)
 
 bool queueUploadOp(ConnectionUploadOp op, const char* endpoint, uint32_t timeout_ms = 15000)
 {
-    if (connection_pending_op != ConnectionUploadOp::None) {
+    if (!connection_upload_mutex) connection_upload_mutex = xSemaphoreCreateMutex();
+    if (!connection_upload_complete) connection_upload_complete = xSemaphoreCreateBinary();
+    if (!connection_upload_mutex || !connection_upload_complete) {
+        connection_pending_error = "sync alloc";
+        return false;
+    }
+    if (xSemaphoreTake(connection_upload_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
         connection_pending_error = "busy";
         return false;
     }
+    if (connection_pending_op != ConnectionUploadOp::None) {
+        xSemaphoreGive(connection_upload_mutex);
+        connection_pending_error = "busy";
+        return false;
+    }
+    while (xSemaphoreTake(connection_upload_complete, 0) == pdTRUE) {}
     connection_pending_done = false;
     connection_pending_ok = false;
     connection_pending_error.clear();
     connection_pending_op = op;
+    xSemaphoreGive(connection_upload_mutex);
     connection_dirty = true;
     dirty = true;
-    const uint32_t start = M5.millis();
-    while (!connection_pending_done && M5.millis() - start < timeout_ms) {
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-    if (!connection_pending_done) {
-        connection_pending_op = ConnectionUploadOp::None;
+    if (xSemaphoreTake(connection_upload_complete, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
         connection_pending_error = "timeout";
         setConnectionStatus(endpoint, "timeout");
         return false;
     }
-    bool ok = connection_pending_ok;
+    if (xSemaphoreTake(connection_upload_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        connection_pending_error = "result busy";
+        return false;
+    }
+    const bool ok = connection_pending_ok;
     connection_pending_op = ConnectionUploadOp::None;
+    xSemaphoreGive(connection_upload_mutex);
     setConnectionStatus(endpoint, ok ? "none" : connection_pending_error.c_str());
     return ok;
 }
 
 void processConnectionUploadOps()
 {
+    if (!connection_upload_mutex || xSemaphoreTake(connection_upload_mutex, 0) != pdTRUE) return;
     ConnectionUploadOp op = connection_pending_op;
-    if (op == ConnectionUploadOp::None || connection_pending_done) return;
+    if (op == ConnectionUploadOp::None || connection_pending_done) {
+        if (connection_upload_session && connection_upload_last_activity_ms &&
+            M5.millis() - connection_upload_last_activity_ms > UPLOAD_SESSION_TIMEOUT_MS) {
+            cleanupUploadSession(true);
+            setConnectionStatus("upload-timeout", "aborted");
+        }
+        xSemaphoreGive(connection_upload_mutex);
+        return;
+    }
     bool ok = true;
     std::string err;
 
     if (op == ConnectionUploadOp::Begin) {
         cleanupUploadSession(true);
-        FILE* f = fopen(connection_pending_full_path.c_str(), "wb");
-        if (!f) {
+        char path_err[64] = {};
+        std::string stored_api;
+        std::string original_name;
+        std::string parent_api;
+        std::string final_path;
+        if (!resolveUploadApiPath(connection_pending_api_path, &stored_api, &original_name, path_err, sizeof(path_err)) ||
+            !prepareUploadPath(stored_api, &final_path, &parent_api, path_err, sizeof(path_err))) {
             ok = false;
-            err = "open ";
-            err += std::strerror(errno);
+            err = path_err[0] ? path_err : "bad path";
         } else {
-            connection_upload_file = f;
-            connection_upload_full_path = connection_pending_full_path;
-            connection_upload_path = connection_pending_api_path;
-            connection_upload_original_name = connection_pending_original_name;
-            connection_upload_session = true;
-            connection_upload_done = 0;
-            connection_upload_total = static_cast<int>(connection_pending_total);
-            connection_upload_active = false;
+            connection_pending_api_path = stored_api;
+            connection_pending_full_path = final_path;
+            connection_pending_original_name = original_name;
+            struct stat target = {};
+            if (stat(connection_pending_full_path.c_str(), &target) == 0) {
+                ok = false;
+                err = "exists";
+            }
+        }
+        if (ok) {
+            const size_t slash = connection_pending_full_path.find_last_of('/');
+            connection_upload_part_path = connection_pending_full_path.substr(0, slash + 1) + "ABVXUP.TMP";
+            unlink(connection_upload_part_path.c_str());
+            FILE* f = fopen(connection_upload_part_path.c_str(), "wb");
+            if (!f) {
+                ok = false;
+                err = "open part ";
+                err += std::strerror(errno);
+            } else {
+                connection_upload_file = f;
+                connection_upload_final_path = connection_pending_full_path;
+                connection_upload_path = connection_pending_api_path;
+                connection_upload_original_name = connection_pending_original_name;
+                connection_upload_session = true;
+                connection_upload_done = 0;
+                connection_upload_total = static_cast<int>(connection_pending_total);
+                connection_upload_active = true;
+                connection_upload_last_activity_ms = M5.millis();
+            }
         }
     } else if (op == ConnectionUploadOp::Chunk) {
         if (!connection_upload_session || !connection_upload_file || connection_upload_path != connection_pending_api_path) {
             ok = false;
             err = "no session";
+        } else if (connection_pending_total != static_cast<size_t>(connection_upload_total)) {
+            ok = false;
+            err = "total mismatch";
+        } else if (connection_pending_offset + connection_pending_chunk.size() == static_cast<size_t>(connection_upload_done)) {
+            // Idempotent acknowledgement: the client may retry when the HTTP
+            // response was lost after this exact chunk was already written.
+            connection_upload_last_activity_ms = M5.millis();
         } else if (connection_pending_offset != static_cast<size_t>(connection_upload_done)) {
             ok = false;
             err = "offset mismatch";
@@ -5749,7 +6049,8 @@ void processConnectionUploadOps()
                 err += std::strerror(errno);
             } else {
                 connection_upload_done += static_cast<int>(wrote);
-                if (connection_upload_done % (32 * 1024) == 0 && fflush(connection_upload_file) != 0) {
+                connection_upload_last_activity_ms = M5.millis();
+                if (connection_upload_done % (64 * 1024) == 0 && fflush(connection_upload_file) != 0) {
                     ok = false;
                     err = "flush ";
                     err += std::strerror(errno);
@@ -5757,10 +6058,20 @@ void processConnectionUploadOps()
             }
         }
     } else if (op == ConnectionUploadOp::Finish) {
+        if (!connection_upload_session || connection_upload_path != connection_pending_api_path ||
+            static_cast<size_t>(connection_upload_done) != connection_pending_total) {
+            ok = false;
+            err = "size mismatch";
+        }
         if (connection_upload_file) {
             if (fflush(connection_upload_file) != 0) {
                 ok = false;
                 err = "flush ";
+                err += std::strerror(errno);
+            }
+            if (ok && fsync(fileno(connection_upload_file)) != 0) {
+                ok = false;
+                err = "sync ";
                 err += std::strerror(errno);
             }
             if (fclose(connection_upload_file) != 0) {
@@ -5772,10 +6083,15 @@ void processConnectionUploadOps()
         }
         if (ok) {
             struct stat st = {};
-            if (stat(connection_upload_full_path.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != connection_pending_total) {
+            if (stat(connection_upload_part_path.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != connection_pending_total) {
                 ok = false;
                 err = "size mismatch";
             }
+        }
+        if (ok && rename(connection_upload_part_path.c_str(), connection_upload_final_path.c_str()) != 0) {
+            ok = false;
+            err = "rename ";
+            err += std::strerror(errno);
         }
         if (ok && !connection_upload_original_name.empty()) {
             appendMusicIndex(baseName(connection_upload_path), connection_upload_original_name);
@@ -5787,7 +6103,9 @@ void processConnectionUploadOps()
             connection_upload_session = false;
             connection_upload_path.clear();
             connection_upload_original_name.clear();
-            connection_upload_full_path.clear();
+            connection_upload_final_path.clear();
+            connection_upload_part_path.clear();
+            connection_upload_last_activity_ms = 0;
         }
     } else if (op == ConnectionUploadOp::Abort) {
         cleanupUploadSession(true);
@@ -5802,8 +6120,9 @@ void processConnectionUploadOps()
     connection_pending_done = true;
     connection_dirty = true;
     dirty = true;
+    xSemaphoreGive(connection_upload_mutex);
+    xSemaphoreGive(connection_upload_complete);
 }
-#endif
 
 bool ensureConnectionWriteDir(char* err, size_t err_len)
 {
@@ -5832,9 +6151,8 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
     httpd_resp_set_type(req, "text/html");
     const char* body =
         "<!doctype html><html><body>"
-        "<h1>ABVx Connections</h1>"
-        "<p>Wi-Fi AP transfer MVP: list and download are stable. Upload is limited to small files.</p>"
-        "<p><b>Large MP3/books:</b> use SD reader for now.</p>"
+        "<h1>ABVx Connections v3</h1>"
+        "<p>List/download and staged upload are available.</p>"
         "<ul>"
         "<li><a href=\"/api/ping\">/api/ping</a></li>"
         "<li><a href=\"/api/status\">/api/status</a></li>"
@@ -5844,12 +6162,11 @@ esp_err_t connectionRootHandler(httpd_req_t* req)
         "<li><a href=\"/api/list?path=/notes\">/api/list?path=/notes</a></li>"
         "<li><a href=\"/api/list?path=/rec\">/api/list?path=/rec</a></li>"
         "</ul>"
-        "<p><a href=\"/api/write-test\">/api/write-test</a></p>"
         "<h2>Safe commands</h2>"
         "<pre>curl http://192.168.4.1/api/ping\n"
         "curl \"http://192.168.4.1/api/list?path=/music\"\n"
         "curl \"http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT\"</pre>"
-        "<p>Small upload: POST raw body to /api/upload?path=/books/B1.TXT, max 64KB.</p>"
+        "<p>Upload with tools/cardputer_upload.py. Files are written to ABVXUP.TMP and renamed only after verification.</p>"
         "<p>Use /cardputer as generic transfer folder. It appears as TRANSFER in Files.</p>"
         "<p>8.3 names are safest. No overwrite. Delete later.</p>"
         "</body></html>";
@@ -5868,14 +6185,21 @@ esp_err_t connectionStatusHandler(httpd_req_t* req)
 {
     ++connection_req_count;
     setConnectionStatus("/api/status", "none");
-    char body[192];
+    char upload_path[96] = "-";
+    const char* upload_state = connection_upload_session ? "OPEN" : "IDLE";
+    if (connection_upload_mutex && xSemaphoreTake(connection_upload_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (!connection_upload_path.empty()) snprintf(upload_path, sizeof(upload_path), "%s", connection_upload_path.c_str());
+        if (connection_pending_op != ConnectionUploadOp::None) upload_state = "BUSY";
+        xSemaphoreGive(connection_upload_mutex);
+    }
+    char body[320];
     snprintf(body, sizeof(body),
-             "OK STATUS\nap=%s\nhttp=%s\nreq=%d\nlast=%s\nerr=%s\n",
+             "OK STATUS\nap=%s\nhttp=%s\nreq=%d\nlast=%s\nerr=%s\nupload=%s\npath=%s\ndone=%d\ntotal=%d\n",
              connection_wifi_on ? "ON" : "OFF",
              connection_http_on ? "ON" : "OFF",
              connection_req_count,
-             connection_last_endpoint,
-             connection_last_error);
+             connection_last_endpoint, connection_last_error,
+             upload_state, upload_path, connection_upload_done, connection_upload_total);
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, body);
 }
@@ -6006,6 +6330,9 @@ esp_err_t connectionDownloadHandler(httpd_req_t* req)
 esp_err_t connectionWriteTestHandler(httpd_req_t* req)
 {
     ++connection_req_count;
+    sendHttpError(req, "/api/write-test", "disabled; use staged upload");
+    return ESP_OK;
+#if 0
     const char* endpoint = "/api/write-test";
     char err[64] = {};
     if (!ensureConnectionWriteDir(err, sizeof(err))) {
@@ -6035,12 +6362,16 @@ esp_err_t connectionWriteTestHandler(httpd_req_t* req)
     setConnectionStatus(endpoint, "none");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK WRITE\npath=/cardputer/WTEST.TXT\n");
+#endif
 }
 
 esp_err_t connectionUploadHandler(httpd_req_t* req)
 {
     ++connection_req_count;
     const char* endpoint = "/api/upload";
+    sendHttpError(req, endpoint, "use upload-begin/chunk/finish");
+    return ESP_OK;
+#if 0
     std::string api_path;
     if (!getRequestPath(req, &api_path, nullptr)) {
         sendHttpError(req, endpoint, "missing path");
@@ -6137,9 +6468,9 @@ esp_err_t connectionUploadHandler(httpd_req_t* req)
     char reply[192];
     snprintf(reply, sizeof(reply), "OK UPLOAD\npath=%s\nstored=%s\nsize=%d\n", api_path.c_str(), stored_api.c_str(), req->content_len);
     return httpd_resp_sendstr(req, reply);
+#endif
 }
 
-#if 0  // Kept out of the release surface; small uploads use /api/upload.
 esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
 {
     ++connection_req_count;
@@ -6154,29 +6485,9 @@ esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "bad size");
         return ESP_OK;
     }
-    char err[64] = {};
-    std::string stored_api, original_name;
-    if (!resolveUploadApiPath(api_path, &stored_api, &original_name, err, sizeof(err))) {
-        sendHttpError(req, endpoint, err[0] ? err : "bad path");
-        return ESP_OK;
-    }
-    std::string parent_api, full_path;
-    if (!prepareUploadPath(stored_api, &full_path, &parent_api, err, sizeof(err))) {
-        sendHttpError(req, endpoint, err[0] ? err : "bad path", HTTPD_500_INTERNAL_SERVER_ERROR);
-        return ESP_OK;
-    }
-    struct stat st = {};
-    if (stat(full_path.c_str(), &st) == 0) {
-        if (st.st_size == 0) {
-            unlink(full_path.c_str());
-        } else {
-            sendHttpError(req, endpoint, "exists");
-            return ESP_OK;
-        }
-    }
-    connection_pending_api_path = stored_api;
-    connection_pending_full_path = full_path;
-    connection_pending_original_name = original_name;
+    connection_pending_api_path = api_path;
+    connection_pending_full_path.clear();
+    connection_pending_original_name.clear();
     connection_pending_total = total;
     if (!queueUploadOp(ConnectionUploadOp::Begin, endpoint)) {
         sendHttpError(req, endpoint, connection_pending_error.empty() ? "begin failed" : connection_pending_error.c_str(), HTTPD_500_INTERNAL_SERVER_ERROR);
@@ -6185,7 +6496,7 @@ esp_err_t connectionUploadBeginHandler(httpd_req_t* req)
     setConnectionStatus(endpoint, "begin");
     httpd_resp_set_type(req, "text/plain");
     char reply[192];
-    snprintf(reply, sizeof(reply), "OK BEGIN\npath=%s\nstored=%s\n", api_path.c_str(), stored_api.c_str());
+    snprintf(reply, sizeof(reply), "OK BEGIN\npath=%s\nstored=%s\n", api_path.c_str(), connection_pending_api_path.c_str());
     return httpd_resp_sendstr(req, reply);
 }
 
@@ -6202,10 +6513,6 @@ esp_err_t connectionUploadChunkHandler(httpd_req_t* req)
     if (req->content_len <= 0 || static_cast<size_t>(req->content_len) > MAX_UPLOAD_CHUNK_BYTES ||
         total == 0 || total > MAX_UPLOAD_BYTES || offset + static_cast<size_t>(req->content_len) > total) {
         sendHttpError(req, endpoint, "bad chunk");
-        return ESP_OK;
-    }
-    if (!connection_upload_session || connection_upload_path != api_path) {
-        sendHttpError(req, endpoint, "no session");
         return ESP_OK;
     }
     char err[64] = {};
@@ -6261,10 +6568,6 @@ esp_err_t connectionUploadFinishHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "missing args");
         return ESP_OK;
     }
-    if (!connection_upload_session || connection_upload_path != api_path) {
-        sendHttpError(req, endpoint, "no session");
-        return ESP_OK;
-    }
     connection_pending_api_path = api_path;
     connection_pending_total = total;
     if (!queueUploadOp(ConnectionUploadOp::Finish, endpoint)) {
@@ -6285,17 +6588,15 @@ esp_err_t connectionUploadAbortHandler(httpd_req_t* req)
         sendHttpError(req, endpoint, "missing path");
         return ESP_OK;
     }
-    if (!connection_upload_session || connection_upload_path != api_path) {
-        sendHttpError(req, endpoint, "no session");
+    connection_pending_api_path = api_path;
+    if (!queueUploadOp(ConnectionUploadOp::Abort, endpoint, 5000)) {
+        sendHttpError(req, endpoint, connection_pending_error.empty() ? "abort failed" : connection_pending_error.c_str(), HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
-    connection_pending_api_path = api_path;
-    queueUploadOp(ConnectionUploadOp::Abort, endpoint, 5000);
     setConnectionStatus(endpoint, "aborted");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK ABORT\n");
 }
-#endif
 
 bool ensureConnectionStack(char* err, size_t err_len)
 {
@@ -6378,6 +6679,10 @@ bool startConnectionHttp(char* err, size_t err_len)
     if (!reg("/api/write-test", HTTP_GET, connectionWriteTestHandler)) return false;
     if (!reg("/api/write-test", HTTP_POST, connectionWriteTestHandler)) return false;
     if (!reg("/api/upload", HTTP_POST, connectionUploadHandler)) return false;
+    if (!reg("/api/upload-begin", HTTP_POST, connectionUploadBeginHandler)) return false;
+    if (!reg("/api/upload-chunk", HTTP_POST, connectionUploadChunkHandler)) return false;
+    if (!reg("/api/upload-finish", HTTP_POST, connectionUploadFinishHandler)) return false;
+    if (!reg("/api/upload-abort", HTTP_POST, connectionUploadAbortHandler)) return false;
     connection_http_on = true;
     return true;
 }
@@ -6389,6 +6694,12 @@ bool startConnections(char* err, size_t err_len)
     // less likely to be the first mount attempt from the HTTP server task.
     initSd();
     if (!ensureConnectionStack(err, err_len)) return false;
+    if (!connection_upload_mutex) connection_upload_mutex = xSemaphoreCreateMutex();
+    if (!connection_upload_complete) connection_upload_complete = xSemaphoreCreateBinary();
+    if (!connection_upload_mutex || !connection_upload_complete) {
+        snprintf(err, err_len, "upload sync alloc");
+        return false;
+    }
 
     wifi_config_t ap_config = {};
     const char* ssid = "ABVX-Cardputer";
@@ -6424,9 +6735,16 @@ bool startConnections(char* err, size_t err_len)
 
 void stopConnections()
 {
-    connection_upload_active = false;
-    connection_upload_done = 0;
-    connection_upload_total = 0;
+    if (connection_upload_mutex && xSemaphoreTake(connection_upload_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        cleanupUploadSession(true);
+        if (connection_pending_op != ConnectionUploadOp::None && !connection_pending_done) {
+            connection_pending_error = "connections stopped";
+            connection_pending_ok = false;
+            connection_pending_done = true;
+            xSemaphoreGive(connection_upload_complete);
+        }
+        xSemaphoreGive(connection_upload_mutex);
+    }
     if (connection_httpd) {
         httpd_stop(connection_httpd);
         connection_httpd = nullptr;
@@ -6469,7 +6787,7 @@ void drawConnections()
         if (connection_upload_active) {
             canvas.printf("UPLOAD %d/%d", connection_upload_done, connection_upload_total);
         } else {
-            canvas.print("SMALL UPLOAD ONLY");
+            canvas.print("STAGED UPLOAD READY");
         }
         canvas.setTextColor(uiDim(), uiBg());
         canvas.setCursor(8, 122);
@@ -6489,7 +6807,7 @@ void drawConnections()
     canvas.setTextSize(1);
     canvas.setTextColor(uiDim(), uiBg());
     canvas.setCursor(8, 106);
-    canvas.print("Small upload only");
+    canvas.print("Staged upload v3");
     canvas.setCursor(8, 122);
     canvas.print("OK START         GO BACK");
     canvas.pushSprite(0, 0);
@@ -6869,7 +7187,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Down && !tracks.empty()) selected_track = std::min(static_cast<int>(tracks.size()) - 1, selected_track + 1);
         else if (ev.key == Key::Left) nextTrack(-1);
         else if (ev.key == Key::Right) nextTrack(1);
-        else if (isMusicShuffleKey(ev)) shuffle_on = !shuffle_on;
+        else if (isMusicShuffleKey(ev)) setShuffleEnabled(!shuffle_on);
         else if (isMusicInfoKey(ev)) {
             if (!tracks.empty()) {
                 prepareMusicInfo();
@@ -6931,7 +7249,7 @@ void handleKey(KeyEvent ev)
         else if (ev.key == Key::Right) nextTrack(1);
         else if (ev.key == Key::Up) { volume_mode = static_cast<VolumeMode>(std::min(2, static_cast<int>(volume_mode) + 1)); applyVolume(); }
         else if (ev.key == Key::Down) { volume_mode = static_cast<VolumeMode>(std::max(0, static_cast<int>(volume_mode) - 1)); applyVolume(); }
-        else if (isMusicShuffleKey(ev)) shuffle_on = !shuffle_on;
+        else if (isMusicShuffleKey(ev)) setShuffleEnabled(!shuffle_on);
         dirty = true;
         return;
     }
@@ -7646,6 +7964,7 @@ extern "C" void app_main(void)
         KeyEvent ev = pollKey();
         handleKey(ev);
         processPersistence();
+        processConnectionUploadOps();
         if (connection_dirty) {
             connection_dirty = false;
             dirty = true;
@@ -7657,7 +7976,7 @@ extern "C" void app_main(void)
         }
         if (!display_off && now - marquee_last_frame_ms >= 180) {
             if (screen == Screen::MusicList ||
-                screen == Screen::MusicInfo ||
+                screen == Screen::MusicInfo || screen == Screen::MusicPlaying ||
                 screen == Screen::ReaderList || screen == Screen::NotesList ||
                 screen == Screen::RecorderList || screen == Screen::FilesList) {
                 marquee_last_frame_ms = now;

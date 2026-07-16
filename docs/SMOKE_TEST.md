@@ -18,6 +18,11 @@ Use this checklist after flashing a release checkpoint.
 4. Up/Down changes volume.
 5. Left/Right changes track.
 6. `1` or `S` toggles shuffle.
+7. In shuffle mode, play/skip through the full library and confirm no track repeats before the cycle completes.
+8. Cyrillic and Hebrew physical filenames open and play directly; `prepare_music.py` remains an optional ASCII-normalization tool.
+9. macOS `._*.MP3` sidecars and their 4 KB FAT aliases do not appear in the Music list.
+10. Cyrillic/Hebrew titles render as glyphs rather than squares in Music List, Track Info, and Listening; long titles marquee without broken UTF-8 characters.
+11. A malformed FAT name shows `Unsupported filename`; Music remains responsive and shuffle continues with the next playable track.
 7. `2` or `I` opens `TRACK INFO`.
 8. `2` or `P` inside Track Info runs the safe probe.
 
@@ -55,4 +60,4 @@ Use this checklist after flashing a release checkpoint.
 4. `http://192.168.4.1/api/ping` returns `ping ok`.
 5. `/api/list?path=/music` lists files.
 6. `/api/download?path=/notes/NOTE0001.TXT` downloads when the file exists.
-7. Large upload remains out of scope; use SD reader for media.
+7. Connections v3: upload TXT, 500-900 KB book, 5-10 MB MP3, then interrupt one upload; verify AP and SD remain available after every case.

@@ -52,6 +52,7 @@ Do not rewrite stable apps immediately. Add Pocket OS features as a layer over t
 Storage ownership is explicit:
 
 - SD stores bulk user content: music, books, and external notes.
+- Music owns a direct FatFS `FIL` read stream instead of POSIX VFS `FILE*`; this avoids alias/LFN `stat`, seek, and open incompatibilities observed on Cardputer SD media.
 - Internal SPIFFS stores short critical writes: Voice recordings and Inbox/Timeline.
 - Input, HTTP, decoder, microphone, and speaker handlers do not write persistent state directly.
 - Persistence requests are queued and committed from the main loop on safe idle screens.
@@ -149,11 +150,11 @@ Current scope:
 
 - Wi-Fi AP diagnostics;
 - ping/status/list/download/write-test;
-- small upload only.
+- staged upload through a bounded HTTP-to-main-loop handoff.
 
-Large upload is disabled because MP3-sized Wi-Fi writes caused SD instability.
+Direct HTTP-task SD writes remain disabled. Connections v3 writes a temporary file only from the main loop and atomically renames it after size verification.
 
-Future transfer should be redesigned as a staged/chunked state machine and tested separately. Bluetooth transfer is postponed/R&D.
+The staged/chunked state machine requires hardware stress validation. Bluetooth transfer remains postponed/R&D.
 
 ## Recorder
 

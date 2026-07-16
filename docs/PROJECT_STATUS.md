@@ -7,7 +7,7 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 ## Working hardware-verified features
 
 - Launcher/Dashboard: large monochrome launcher, Resume, current time, routines progress, current context, and battery/low-voltage diagnostics.
-- Music: MP3 files from `/sdcard/music`, smoother buffered 16 kHz mono playback, waveform, MAX volume, shuffle, prev/next, sorted library, track info/probe, and bad-track screen.
+- Music: buffered 16 kHz mono MP3 playback, waveform, MAX volume, non-repeating shuffle cycles, Unicode title glyphs/marquee, track info/probe, and direct FatFS streaming through short alias/LFN candidates.
 - Record: one hardware-verified 20-second 8 kHz/8-bit WAV mode, RAM-first capture, waveform, playback, delete confirmation.
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
@@ -16,7 +16,7 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Habits: larger routines list, daily checks, manual next-day rollover, rename, confirmed disable, restore disabled habits, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD/BAT/Transfer password status, SD reprobe, About.
-- Transfer/Connections: temporary Wi-Fi AP with fixed password `cardputer`, ping/status/list/download/write-test, and 64 KB small-file upload limit. It is not yet a full SD flash-drive replacement.
+- Transfer/Connections v3: Wi-Fi AP with fixed password `cardputer`, ping/status/list/download and staged upload up to 32 MB; hardware stress validation is pending.
 
 ## Product reframing
 
@@ -31,9 +31,8 @@ The apps are no longer the top-level product idea. They are implementation modul
 
 ## Safety decisions
 
-- Large Wi-Fi upload is disabled at 64KB. It caused SD I/O instability during MP3-sized transfers.
-- Music upload should use SD reader/hub until the transfer stack is redesigned.
-- FATFS long filename support is not treated as reliable yet; use 8.3 names.
+- Large Wi-Fi upload now uses a bounded RAM slot and main-loop `.TMP` writes. Treat it as test-stage until TXT/book/MP3/interruption hardware checks pass.
+- Music displays heap-backed UTF-8 FAT long names and streams files through direct FatFS. Malformed FAT names remain unsupported and require host-side rename; transfer destinations still prefer 8.3 names.
 - Agent is hidden/postponed until it becomes more than a duplicate launcher.
 - Browser, AI, and Mac Companion are planned but must not destabilize offline apps.
 
@@ -44,7 +43,7 @@ The apps are no longer the top-level product idea. They are implementation modul
 - Clock resets after full power-off until time sync exists.
 - Notes editor is LAT/plain text only; Cyrillic files are view-only.
 - Reader Cyrillic is custom/best-effort; French/Ukrainian polish is postponed.
-- Connections is useful for diagnostics/list/download/small files, not large media sync.
+- Connections v3 is ready for controlled large-transfer hardware testing.
 - Voice and Inbox use the dedicated internal SPIFFS partition. SD remains the bulk user-content store.
 - Inbox/Timeline persists the newest 64 confirmed events and writes only from the main loop on safe idle screens.
 
@@ -52,4 +51,4 @@ The apps are no longer the top-level product idea. They are implementation modul
 
 Architecture decisions are tracked in `docs/ARCHITECTURE_DECISIONS.md`.
 
-Key decisions: Pocket OS action-first framing, AI online-only, no standalone Agent for now, Browser prepared-first, Mac Companion handles heavy conversion/sync, and large Wi-Fi upload remains disabled.
+Key decisions: Pocket OS action-first framing, AI online-only, no standalone Agent for now, Browser prepared-first, Mac Companion handles heavy conversion/sync, and Connections v3 large upload remains test-stage until hardware stress validation.
