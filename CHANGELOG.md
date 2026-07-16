@@ -11,6 +11,8 @@
 - Removed POSIX `stat` as a playback gate; Probe and Playback now open alias/LFN candidates directly and determine size from the opened stream.
 - Replaced Music's POSIX `FILE*` input stream with direct FatFS `FIL` open/read/seek/size operations to support aliases rejected by the VFS adapter.
 - Replaced the technical FatFS `FR_INVALID_NAME` error with the user-facing `Unsupported filename`; malformed directory entries are skipped without destabilizing playback.
+- Music list navigation now wraps from the first track to the last with Up, and from the last to the first with Down.
+- Launcher navigation now wraps between its first and last entries in both directions.
 
 ## Unreleased
 

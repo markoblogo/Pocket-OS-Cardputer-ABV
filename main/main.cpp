@@ -7124,8 +7124,8 @@ void handleKey(KeyEvent ev)
     if (handleOneButtonCapture(ev)) return;
 
     if (screen == Screen::Launcher) {
-        if (ev.key == Key::Up) { launcher_index = std::max(0, launcher_index - 1); pulseUi(); }
-        else if (ev.key == Key::Down) { launcher_index = std::min(10, launcher_index + 1); pulseUi(); }
+        if (ev.key == Key::Up) { launcher_index = (launcher_index + 10) % 11; pulseUi(); }
+        else if (ev.key == Key::Down) { launcher_index = (launcher_index + 1) % 11; pulseUi(); }
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
         else if (ev.key == Key::Two) resumeContext();
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
@@ -7183,8 +7183,12 @@ void handleKey(KeyEvent ev)
     }
 
     if (screen == Screen::MusicList) {
-        if (ev.key == Key::Up && !tracks.empty()) selected_track = std::max(0, selected_track - 1);
-        else if (ev.key == Key::Down && !tracks.empty()) selected_track = std::min(static_cast<int>(tracks.size()) - 1, selected_track + 1);
+        if (ev.key == Key::Up && !tracks.empty()) {
+            selected_track = (selected_track - 1 + static_cast<int>(tracks.size())) % static_cast<int>(tracks.size());
+        }
+        else if (ev.key == Key::Down && !tracks.empty()) {
+            selected_track = (selected_track + 1) % static_cast<int>(tracks.size());
+        }
         else if (ev.key == Key::Left) nextTrack(-1);
         else if (ev.key == Key::Right) nextTrack(1);
         else if (isMusicShuffleKey(ev)) setShuffleEnabled(!shuffle_on);

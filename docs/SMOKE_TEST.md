@@ -23,6 +23,8 @@ Use this checklist after flashing a release checkpoint.
 9. macOS `._*.MP3` sidecars and their 4 KB FAT aliases do not appear in the Music list.
 10. Cyrillic/Hebrew titles render as glyphs rather than squares in Music List, Track Info, and Listening; long titles marquee without broken UTF-8 characters.
 11. A malformed FAT name shows `Unsupported filename`; Music remains responsive and shuffle continues with the next playable track.
+12. In Music List, Up on the first track wraps to the last track and Down wraps back to the first.
+13. In Launcher, Up on the first app wraps to the last app and Down wraps back to the first.
 7. `2` or `I` opens `TRACK INFO`.
 8. `2` or `P` inside Track Info runs the safe probe.
 
