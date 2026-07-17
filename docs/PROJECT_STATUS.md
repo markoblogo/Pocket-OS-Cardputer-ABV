@@ -12,7 +12,7 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
 - Files: SD browser, `TRANSFER` folder for `/sdcard/CARDPTR`, known file opening, unsupported file info, delete confirmation.
-- Time: manual clock, stopwatch with fractions, timer presets, alarm sound.
+- Time: manual clock, stopwatch with fractions, timer presets, alarm sound, and queued Connections time sync with a Mac CLI.
 - Habits: larger routines list, daily checks, manual next-day rollover, rename, confirmed disable, restore disabled habits, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD/BAT/Transfer password status, SD reprobe, About.
@@ -40,7 +40,7 @@ The apps are no longer the top-level product idea. They are implementation modul
 
 - Recorder is RAM-first because Cardputer ADV has no PSRAM and live SD writes during microphone capture are unsafe.
 - Battery percentage is an estimate from Cardputer/M5 power readings; low or unstable samples may show diagnostic voltage instead of a false percentage.
-- Clock resets after full power-off until time sync exists.
+- Clock resets after full power-off; manual Mac sync is available through Connections, while persistent RTC/NTP is not.
 - Notes editor is LAT/plain text only; Cyrillic files are view-only.
 - Reader Cyrillic is custom/best-effort; French/Ukrainian polish is postponed.
 - Connections v3 is ready for controlled large-transfer hardware testing.

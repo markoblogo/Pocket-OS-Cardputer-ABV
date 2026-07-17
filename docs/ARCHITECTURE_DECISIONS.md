@@ -216,9 +216,12 @@ Current firmware keeps:
 
 Future sync sources:
 
-- Mac Companion;
+- implemented now: Mac CLI through `POST /api/time-sync`, queued and applied by the firmware main loop;
+- future Mac Companion UI;
 - phone/web companion;
 - NTP over Wi-Fi later.
+
+The protocol sends Unix epoch seconds and an explicit UTC offset. The HTTP server never mutates clock state directly. Full power-off loses the clock and requires another synchronization.
 
 ## Files
 

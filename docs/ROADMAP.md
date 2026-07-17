@@ -118,7 +118,7 @@ Apps stay as implementation modules under Pocket OS actions.
 5. Time/Habits polish
    - Timer presets.
    - Durable daily history, rename/disable/restore, streaks, and 7D/30D/365D summaries.
-   - Future date/time sync hook.
+   - Mac CLI date/time sync implemented; Companion UI and NTP remain future work.
 
 ## Phase 4: Connections / Transfer
 

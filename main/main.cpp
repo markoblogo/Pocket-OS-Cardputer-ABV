@@ -11,6 +11,7 @@
 #include <map>
 #include <string>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <vector>
 
@@ -109,6 +110,13 @@ char connection_ap_password[16] = "cardputer";
 volatile bool connection_upload_active = false;
 volatile int connection_upload_done = 0;
 volatile int connection_upload_total = 0;
+portMUX_TYPE connection_time_mux = portMUX_INITIALIZER_UNLOCKED;
+volatile bool connection_time_sync_pending = false;
+uint64_t connection_time_pending_epoch = 0;
+int connection_time_pending_offset_min = 0;
+uint64_t connection_time_last_epoch = 0;
+int connection_time_last_offset_min = 0;
+bool connection_time_sync_applied = false;
 
 enum class ConnectionUploadOp { None, Begin, Chunk, Finish, Abort };
 SemaphoreHandle_t connection_upload_mutex = nullptr;
@@ -402,6 +410,38 @@ bool prepareCaptureChunks();
 bool appendCaptureChunk(const void* data, size_t byte_count);
 uint32_t elapsedClockSeconds();
 void formatHMS(uint32_t total, char* out, size_t out_len);
+
+void processConnectionTimeSync()
+{
+    uint64_t epoch = 0;
+    int offset_min = 0;
+    bool pending = false;
+    portENTER_CRITICAL(&connection_time_mux);
+    if (connection_time_sync_pending) {
+        epoch = connection_time_pending_epoch;
+        offset_min = connection_time_pending_offset_min;
+        connection_time_sync_pending = false;
+        pending = true;
+    }
+    portEXIT_CRITICAL(&connection_time_mux);
+    if (!pending) return;
+
+    timeval tv = {};
+    tv.tv_sec = static_cast<time_t>(epoch);
+    settimeofday(&tv, nullptr);
+    int64_t local_epoch = static_cast<int64_t>(epoch) + static_cast<int64_t>(offset_min) * 60;
+    int64_t day_seconds = local_epoch % 86400;
+    if (day_seconds < 0) day_seconds += 86400;
+    clock_seconds = static_cast<int>(day_seconds);
+    clock_base_ms = M5.millis();
+    portENTER_CRITICAL(&connection_time_mux);
+    connection_time_last_epoch = epoch;
+    connection_time_last_offset_min = offset_min;
+    connection_time_sync_applied = true;
+    portEXIT_CRITICAL(&connection_time_mux);
+    connection_dirty = true;
+    dirty = true;
+}
 bool flushAndClose(FILE* f)
 {
     if (!f) return false;
@@ -6181,6 +6221,66 @@ esp_err_t connectionPingHandler(httpd_req_t* req)
     return httpd_resp_sendstr(req, "OK PING\n");
 }
 
+bool getSignedQueryInt(httpd_req_t* req, const char* key, int* out)
+{
+    if (!out) return false;
+    size_t query_len = httpd_req_get_url_query_len(req);
+    if (query_len == 0 || query_len > 192) return false;
+    char query[193] = {};
+    char value[24] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, key, value, sizeof(value)) != ESP_OK) return false;
+    char* end = nullptr;
+    errno = 0;
+    long parsed = std::strtol(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' || parsed < -100000L || parsed > 100000L) return false;
+    *out = static_cast<int>(parsed);
+    return true;
+}
+
+bool getQueryEpoch(httpd_req_t* req, uint64_t* out)
+{
+    if (!out) return false;
+    size_t query_len = httpd_req_get_url_query_len(req);
+    if (query_len == 0 || query_len > 192) return false;
+    char query[193] = {};
+    char value[24] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "epoch", value, sizeof(value)) != ESP_OK) return false;
+    char* end = nullptr;
+    errno = 0;
+    unsigned long long parsed = std::strtoull(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0') return false;
+    *out = static_cast<uint64_t>(parsed);
+    return true;
+}
+
+esp_err_t connectionTimeSyncHandler(httpd_req_t* req)
+{
+    ++connection_req_count;
+    const char* endpoint = "/api/time-sync";
+    uint64_t epoch = 0;
+    int offset_min = 0;
+    // Accepted range: 2020-01-01 through 2100-01-01.
+    if (!getQueryEpoch(req, &epoch) || !getSignedQueryInt(req, "offset", &offset_min) ||
+        epoch < 1577836800ULL || epoch > 4102444800ULL || offset_min < -720 || offset_min > 840) {
+        sendHttpError(req, endpoint, "bad epoch/offset");
+        return ESP_OK;
+    }
+    portENTER_CRITICAL(&connection_time_mux);
+    connection_time_pending_epoch = epoch;
+    connection_time_pending_offset_min = offset_min;
+    connection_time_sync_pending = true;
+    portEXIT_CRITICAL(&connection_time_mux);
+    setConnectionStatus(endpoint, "queued");
+    connection_dirty = true;
+    httpd_resp_set_type(req, "text/plain");
+    char body[128];
+    snprintf(body, sizeof(body), "OK TIME QUEUED\nepoch=%llu\noffset=%d\n",
+             static_cast<unsigned long long>(epoch), offset_min);
+    return httpd_resp_sendstr(req, body);
+}
+
 esp_err_t connectionStatusHandler(httpd_req_t* req)
 {
     ++connection_req_count;
@@ -6192,14 +6292,27 @@ esp_err_t connectionStatusHandler(httpd_req_t* req)
         if (connection_pending_op != ConnectionUploadOp::None) upload_state = "BUSY";
         xSemaphoreGive(connection_upload_mutex);
     }
-    char body[320];
+    bool time_pending = false;
+    bool time_applied = false;
+    uint64_t time_epoch = 0;
+    int time_offset = 0;
+    portENTER_CRITICAL(&connection_time_mux);
+    time_pending = connection_time_sync_pending;
+    time_applied = connection_time_sync_applied;
+    time_epoch = connection_time_last_epoch;
+    time_offset = connection_time_last_offset_min;
+    portEXIT_CRITICAL(&connection_time_mux);
+    const char* time_state = time_pending ? "PENDING" : (time_applied ? "APPLIED" : "NONE");
+    char body[448];
     snprintf(body, sizeof(body),
-             "OK STATUS\nap=%s\nhttp=%s\nreq=%d\nlast=%s\nerr=%s\nupload=%s\npath=%s\ndone=%d\ntotal=%d\n",
+             "OK STATUS\nap=%s\nhttp=%s\nreq=%d\nlast=%s\nerr=%s\nupload=%s\npath=%s\ndone=%d\ntotal=%d\ntime=%s\nepoch=%llu\noffset=%d\nclock=%lu\n",
              connection_wifi_on ? "ON" : "OFF",
              connection_http_on ? "ON" : "OFF",
              connection_req_count,
              connection_last_endpoint, connection_last_error,
-             upload_state, upload_path, connection_upload_done, connection_upload_total);
+             upload_state, upload_path, connection_upload_done, connection_upload_total,
+             time_state, static_cast<unsigned long long>(time_epoch), time_offset,
+             static_cast<unsigned long>(elapsedClockSeconds() % 86400));
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, body);
 }
@@ -6674,6 +6787,7 @@ bool startConnectionHttp(char* err, size_t err_len)
     if (!reg("/", HTTP_GET, connectionRootHandler)) return false;
     if (!reg("/api/ping", HTTP_GET, connectionPingHandler)) return false;
     if (!reg("/api/status", HTTP_GET, connectionStatusHandler)) return false;
+    if (!reg("/api/time-sync", HTTP_POST, connectionTimeSyncHandler)) return false;
     if (!reg("/api/list", HTTP_GET, connectionListHandler)) return false;
     if (!reg("/api/download", HTTP_GET, connectionDownloadHandler)) return false;
     if (!reg("/api/write-test", HTTP_GET, connectionWriteTestHandler)) return false;
@@ -7969,6 +8083,7 @@ extern "C" void app_main(void)
         handleKey(ev);
         processPersistence();
         processConnectionUploadOps();
+        processConnectionTimeSync();
         if (connection_dirty) {
             connection_dirty = false;
             dirty = true;

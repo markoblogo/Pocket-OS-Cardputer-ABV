@@ -40,7 +40,7 @@ Stable baseline:
 - Voice/Record: one RAM-first 20-second WAV voice-note mode stored in internal SPIFFS, with save/play/delete and waveform.
 - Read/Reader: small and large TXT books, streaming reader, English/Russian display, `1W / 2W / LINE` speed reading, persistent bookmarks.
 - Write/Notes: LAT/plain text create/open/edit/delete. Cyrillic notes are view-only.
-- Time: manual clock, stopwatch, timer presets, alarm.
+- Time: manual clock, stopwatch, timer presets, alarm, and Connections-based Mac time sync.
 - Files: SD browser, `TRANSFER` folder, file opening, unsupported-file info, delete confirmation.
 - Routines/Habits: larger daily checklist, manual next day, manage screen, restore disabled habits, 7D/30D/365D stats.
 - Decide/Randomizer: `YES / NO / MB`.
@@ -120,6 +120,15 @@ curl "http://192.168.4.1/api/list?path=/music"
 curl "http://192.168.4.1/api/download?path=/notes/NOTE0001.TXT"
 curl http://192.168.4.1/api/write-test
 ```
+
+Clock sync from the connected Mac:
+
+```sh
+python3 tools/cardputer_time_sync.py sync
+python3 tools/cardputer_time_sync.py status
+```
+
+The CLI sends Unix time plus the Mac's current UTC offset. The HTTP handler only queues the update; the firmware main loop applies system time and the displayed clock. A full power-off still requires another sync.
 
 Staged upload, up to 32 MB:
 

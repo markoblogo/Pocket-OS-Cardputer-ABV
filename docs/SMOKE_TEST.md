@@ -63,3 +63,4 @@ Use this checklist after flashing a release checkpoint.
 5. `/api/list?path=/music` lists files.
 6. `/api/download?path=/notes/NOTE0001.TXT` downloads when the file exists.
 7. Connections v3: upload TXT, 500-900 KB book, 5-10 MB MP3, then interrupt one upload; verify AP and SD remain available after every case.
+8. Time sync: run `python3 tools/cardputer_time_sync.py sync`, confirm `OK TIME APPLIED`, then compare Time with the Mac clock.
