@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Added the dependency-free Mac Companion Core for direct-SD status/layout, validated MP3 import, UTF-8 book preparation, and clock sync.
+- Added EPUB spine and FB2 section conversion with title/author/chapter extraction into Reader-compatible UTF-8 TXT; PDF remains out of scope.
+- Defined the Mac Companion UI architecture: local-only service first, packaged macOS app later, with Device, Firmware, Books, Music, Files, and Time workflows.
+- Added Mac Companion UI v0.1 with automatic SD/USB status, drag/drop content import, time sync, firmware build, guarded flash, progress, and a local activity log.
 - Hardware-verified Connections time sync from macOS: queued Unix epoch plus UTC offset is applied by the firmware main loop while AP/HTTP stay active.
 - Added Connections v3 staged upload with bounded chunks, main-loop SD ownership, temporary-file verification, abort, timeout, and CLI recovery.
 - Added non-repeating Music shuffle cycles and FAT-safe library preparation for Cyrillic, Hebrew, and other Unicode filenames.

@@ -17,7 +17,9 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD/BAT/Transfer password status, SD reprobe, About.
 - Transfer/Connections v3: Wi-Fi AP with fixed password `cardputer`, ping/status/list/download and staged upload up to 32 MB; hardware stress validation is pending.
-- Mac Companion Core: dependency-free direct-SD status/init, MP3 validation/import, TXT encoding normalization/import, and unified clock sync command.
+- Mac Companion Core v0.2: dependency-free direct-SD status/init, MP3 validation/import, TXT/EPUB/FB2 conversion to Reader UTF-8, metadata index, and unified clock sync.
+- Companion product direction: replace routine Terminal work with a local Mac UI for device status, drag/drop content preparation, one-button build/flash, files, and time sync; package as `.app` after workflows stabilize.
+- Mac Companion UI v0.1: localhost-only dashboard with automatic SD/USB detection, drag/drop Books/Music, Time Sync, background Build, confirmed Flash, progress, and operation log.
 
 ## Product reframing
 

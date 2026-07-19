@@ -27,6 +27,7 @@ Architecture: [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md)
 Decisions: [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md)
 Decision receipts: [`docs/decision-receipts/README.md`](docs/decision-receipts/README.md)
 Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+Mac Companion: [`docs/MAC_COMPANION.md`](docs/MAC_COMPANION.md)
 
 ## Current status
 
@@ -50,7 +51,7 @@ Stable baseline:
 - Transfer/Connections v3: Wi-Fi AP list/download plus staged, main-loop-owned upload.
 - Mac Companion Core: direct-SD status/layout, validated MP3 import, TXT-to-UTF-8 book import, and clock sync.
 
-Postponed: Companion GUI/Wi-Fi transport, browser, AI, and Bluetooth transfer.
+Next desktop layer: local Companion UI and packaged macOS app over the existing conversion core. Postponed: Companion Wi-Fi transport, browser, AI, and Bluetooth transfer.
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
 Changes: [`CHANGELOG.md`](CHANGELOG.md)
@@ -160,11 +161,21 @@ The first Companion layer works directly with a mounted SD and uses only the Pyt
 python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER init
 python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER status
 python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER add-music ./track.mp3
-python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER add-book ./book.txt
+python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER add-book ./book.epub ./other.fb2
 python3 tools/abvx_companion.py sync-time
 ```
 
-When exactly one mounted volume already contains at least two ABVx folders, `--sd` may be omitted. Music is validated and stored as `Mxxx.MP3` with its original UTF-8 title in `INDEX.TXT`. TXT books are normalized from UTF-8, UTF-16, CP1251, or CP1252 to UTF-8 and stored as `Bxxxx.TXT`; `BOOKS.IDX` preserves the source title and encoding. Files are copied through temporary files and renamed only after flush.
+When exactly one mounted volume already contains at least two ABVx folders, `--sd` may be omitted. Music is validated and stored as `Mxxx.MP3` with its original UTF-8 title in `INDEX.TXT`. TXT, EPUB, and FB2 books are converted to Reader-compatible UTF-8 `Bxxxx.TXT`; EPUB follows its package spine, while FB2 follows body sections. `BOOKS.IDX` preserves title, source format, and author. PDF remains intentionally unsupported. Files are copied through temporary files and renamed only after flush.
+
+Launch the local Companion UI:
+
+```sh
+./tools/abvx_companion_app.py
+```
+
+Or open `tools/ABVx Companion.app` in Finder to launch it without Terminal.
+
+It opens `http://127.0.0.1:8765` and provides automatic SD/USB status, drag-and-drop Books and Music import, Time Sync, firmware Build, and guarded Flash. It binds only to localhost, uses a per-launch request token, and accepts only fixed operations. The current version uses the locally installed ESP-IDF 5.4.2 toolchain.
 
 ## Build
 

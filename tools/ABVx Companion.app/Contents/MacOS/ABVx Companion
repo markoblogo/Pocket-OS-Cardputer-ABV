@@ -1,0 +1,21 @@
+#!/bin/zsh
+set -eu
+URL="http://127.0.0.1:8765"
+if /usr/bin/curl -fsS "$URL/api/status" >/dev/null 2>&1; then
+  /usr/bin/open "$URL"
+  exit 0
+fi
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../../../.." && pwd)"
+RESOURCES="$HERE/../Resources"
+SUPPORT="$HOME/Library/Application Support/ABVx Companion"
+mkdir -p "$SUPPORT/companion_ui"
+cp "$RESOURCES/abvx_companion.py" "$SUPPORT/abvx_companion.py"
+cp "$RESOURCES/abvx_companion_app.py" "$SUPPORT/abvx_companion_app.py"
+cp "$RESOURCES/companion_ui/index.html" "$SUPPORT/companion_ui/index.html"
+PYTHON="/opt/homebrew/bin/python3"
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="$(command -v python3)"
+fi
+export ABVX_PROJECT_ROOT="$ROOT"
+exec "$PYTHON" "$SUPPORT/abvx_companion_app.py"
