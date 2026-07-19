@@ -25,6 +25,7 @@ Core ideas:
 
 Architecture: [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md)
 Decisions: [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md)
+Decision receipts: [`docs/decision-receipts/README.md`](docs/decision-receipts/README.md)
 Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ## Current status

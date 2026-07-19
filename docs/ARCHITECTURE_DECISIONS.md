@@ -17,6 +17,20 @@ Heavy work belongs outside the device:
 
 Cardputer should execute simple prepared formats reliably.
 
+## Decision receipts and hardware revalidation
+
+Material architecture, product, and hardware choices use `docs/decision-receipts/TEMPLATE.yaml` and are indexed in `docs/decision-receipts/README.md`.
+
+Each receipt records:
+
+- owner, stakes, reversibility, and deadline;
+- decision, rationale, and expected outcome;
+- source, build, and device-evidence references;
+- revisit date and one observable success criterion;
+- revalidation: `CONFIRMED`, `REVISED`, `REVERSED`, or `INCONCLUSIVE`.
+
+Build success is not device proof. Hardware-dependent decisions remain `INCONCLUSIVE` until the relevant Cardputer path is exercised on-device. `REVISED` and `REVERSED` preserve the original receipt and link a replacement. A receipt documents a choice; it does not authorize flashing, device writes, releases, or external actions.
+
 
 ## Pocket OS framing
 
