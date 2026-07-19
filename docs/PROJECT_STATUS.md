@@ -12,11 +12,12 @@ ABVx is an offline-first Cardputer ADV Pocket OS for fast capture, memory, readi
 - Reader: `.TXT` books from `/sdcard/books`, normal reading, speed mode, persistent bookmark state.
 - Notes: `.TXT` notes from `/sdcard/notes`, LAT/plain create/edit/delete, Cyrillic view-only.
 - Files: SD browser, `TRANSFER` folder for `/sdcard/CARDPTR`, known file opening, unsupported file info, delete confirmation.
-- Time: manual clock, stopwatch with fractions, timer presets, alarm sound, and queued Connections time sync with a Mac CLI.
+- Time: manual clock, stopwatch with fractions, timer presets, alarm sound, and hardware-verified Connections time sync with a Mac CLI.
 - Habits: larger routines list, daily checks, manual next-day rollover, rename, confirmed disable, restore disabled habits, streaks, and 7D/30D/365D summaries.
 - Randomizer: simple yes/no/maybe decision utility.
 - Settings: theme, sound, timeout, power preset, SD/BAT/Transfer password status, SD reprobe, About.
 - Transfer/Connections v3: Wi-Fi AP with fixed password `cardputer`, ping/status/list/download and staged upload up to 32 MB; hardware stress validation is pending.
+- Mac Companion Core: dependency-free direct-SD status/init, MP3 validation/import, TXT encoding normalization/import, and unified clock sync command.
 
 ## Product reframing
 
@@ -34,7 +35,7 @@ The apps are no longer the top-level product idea. They are implementation modul
 - Large Wi-Fi upload now uses a bounded RAM slot and main-loop `.TMP` writes. Treat it as test-stage until TXT/book/MP3/interruption hardware checks pass.
 - Music displays heap-backed UTF-8 FAT long names and streams files through direct FatFS. Malformed FAT names remain unsupported and require host-side rename; transfer destinations still prefer 8.3 names.
 - Agent is hidden/postponed until it becomes more than a duplicate launcher.
-- Browser, AI, and Mac Companion are planned but must not destabilize offline apps.
+- Browser, AI, Companion GUI, and Companion Wi-Fi transport are planned but must not destabilize offline apps.
 
 ## Known limitations
 

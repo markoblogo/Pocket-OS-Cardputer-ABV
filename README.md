@@ -48,8 +48,9 @@ Stable baseline:
 - Inbox/Timeline: persistent internal log of the latest 64 confirmed events; no SD access.
 - Dashboard/Settings: Resume dashboard, current context, battery/low-voltage diagnostics, Transfer password, theme, sound, timeout, power preset, SD reprobe, About.
 - Transfer/Connections v3: Wi-Fi AP list/download plus staged, main-loop-owned upload.
+- Mac Companion Core: direct-SD status/layout, validated MP3 import, TXT-to-UTF-8 book import, and clock sync.
 
-Postponed: browser, AI, Mac companion, and Bluetooth transfer.
+Postponed: Companion GUI/Wi-Fi transport, browser, AI, and Bluetooth transfer.
 
 Detailed status: [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
 Changes: [`CHANGELOG.md`](CHANGELOG.md)
@@ -150,6 +151,20 @@ python3 tools/prepare_music.py --in-place /Volumes/CARDPUTER/music
 This conversion is optional: current firmware can open UTF-8 FAT long filenames directly. Use it when portable ASCII storage names are desirable.
 
 Optional preparation stores tracks as FAT-safe `M001.MP3`, `M002.MP3`, etc. Transliterated display titles are kept in `INDEX.TXT`. Native Cyrillic/Hebrew filenames can also be displayed and played directly. Shuffle walks one complete shuffled playlist before any track repeats.
+
+## Mac Companion Core
+
+The first Companion layer works directly with a mounted SD and uses only the Python standard library:
+
+```sh
+python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER init
+python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER status
+python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER add-music ./track.mp3
+python3 tools/abvx_companion.py --sd /Volumes/CARDPUTER add-book ./book.txt
+python3 tools/abvx_companion.py sync-time
+```
+
+When exactly one mounted volume already contains at least two ABVx folders, `--sd` may be omitted. Music is validated and stored as `Mxxx.MP3` with its original UTF-8 title in `INDEX.TXT`. TXT books are normalized from UTF-8, UTF-16, CP1251, or CP1252 to UTF-8 and stored as `Bxxxx.TXT`; `BOOKS.IDX` preserves the source title and encoding. Files are copied through temporary files and renamed only after flush.
 
 ## Build
 
