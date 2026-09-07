@@ -129,10 +129,11 @@ dialog{border:1px solid #70423e;background:#101411;color:var(--text);padding:0;b
           <div class="actions" style="margin-top:12px">
             <button id="syncNotesBtn" class="btn">SYNC NOTES</button>
             <button id="syncVoiceBtn" class="btn">SYNC VOICE</button>
+            <button id="transcribeVoiceBtn" class="btn">TRANSCRIBE VOICE</button>
           </div>
           <div class="device-line" style="margin-top:10px; gap:10px;display:flex;align-items:center;flex-wrap:wrap;">
             <label><input type="checkbox" id="deleteNotesAfter"/> Delete notes from card after sync</label>
-            <label><input type="checkbox" id="deleteVoiceAfter"/> Delete voice from card after sync</label>
+            <span>Voice: connect Mac to ABVX-Cardputer Wi-Fi and open Transfer. Originals stay on the device.</span>
           </div>
         </article>
       </div>
@@ -507,7 +508,8 @@ function applyActionState() {
 
   const tracksReady = Boolean(latest.sd.ready);
   $("syncNotesBtn").disabled = busy || !tracksReady;
-  $("syncVoiceBtn").disabled = busy || !tracksReady;
+  $("syncVoiceBtn").disabled = busy;
+  $("transcribeVoiceBtn").disabled = busy;
   $("intentInput").disabled = busy;
   $("intentResolveBtn").disabled = busy;
   $("intentConfirmBtn").disabled = busy || !latest.job.pending_intent;
@@ -655,11 +657,17 @@ function setupSyncButtons() {
       toast(error.message, true);
     }
   };
+  $("transcribeVoiceBtn").onclick = async () => {
+    try {
+      const data = await api("/api/transcribe-voice", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+      toast(data.message); await refresh();
+    } catch (error) { toast(error.message, true); }
+  };
   $("syncVoiceBtn").onclick = async () => {
     try {
-      const data = await triggerSync("voice", { delete_after: $("deleteVoiceAfter").checked });
+      const data = await triggerSync("voice", { delete_after: false });
       await refresh();
-      log(data?.message || "Voice sync done");
+      log(data?.message || "Запрос выгрузки отправлен. Дождитесь результата операции.");
     } catch (error) {
       toast(error.message, true);
     }
@@ -781,3 +789,187 @@ setInterval(refresh, 2200);
 </script>
 </body>
 </html>
+
+<!-- Connection-first presentation. Existing operation handlers remain authoritative. -->
+<style>
+:root{--paper:#f5f5f0;--ink:#242923;--muted:#697067;--line:#dedfd7;--accent:#41663d}
+html,body{background:var(--paper)!important;color:var(--ink)!important;font-family:"Avenir Next",Avenir,sans-serif!important;margin:0;min-height:100%}
+body:before,body:after{display:none!important}
+body>*:not(#simpleCompanion):not(dialog):not(#toast):not(script):not(style){display:none!important}
+#simpleCompanion{max-width:980px;margin:auto;padding:36px 32px 24px;font-size:15px;line-height:1.5}
+#simpleCompanion *{box-sizing:border-box;letter-spacing:normal}
+.simple-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;gap:16px}
+.simple-head h1{font-size:24px;margin:0;font-weight:600;letter-spacing:-.6px!important}
+.simple-head small{color:var(--muted)}
+.connection{padding:22px 24px;border:1px solid var(--line);border-radius:14px;background:#fff;margin-bottom:24px}
+.connection h2{font-size:20px;margin:0 0 6px;font-weight:600}
+.connection p{margin:0;color:var(--muted);max-width:720px}
+.connection .connections{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;font-size:13px;color:var(--muted)}
+.simple-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.simple-panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;min-width:0}
+.simple-panel h2{font-size:19px;margin:0 0 8px;font-weight:600}
+.simple-panel p{color:var(--muted);font-size:13px;margin:0 0 18px;min-height:58px}
+#simpleCompanion .btn,#simpleConfirm .btn{font-family:inherit;font-size:13px;text-transform:none;background:#f3f4ef;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 14px;cursor:pointer;box-shadow:none;white-space:normal}
+#simpleCompanion .btn:hover,#simpleConfirm .btn:hover{background:#e9ede3;border-color:#acbba5}
+#simpleCompanion .btn:disabled,#simpleConfirm .btn:disabled{opacity:.45;cursor:not-allowed}
+#simpleCompanion .primary,#simpleConfirm .primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.simple-panel .btn{width:100%;margin-bottom:9px}
+#simpleCompanion .drop{display:block;min-height:0;text-align:center;padding:15px 10px;border:1px dashed #c7cebf;border-radius:8px;background:transparent;color:var(--muted);font-family:inherit;font-size:13px;cursor:pointer}
+#simpleCompanion .drop input{position:absolute;width:1px;height:1px;opacity:0}
+#simpleCompanion .drop.locked{opacity:.45;cursor:not-allowed}
+#simpleCompanion .drop b{display:block;font-family:inherit;font-size:13px;color:var(--ink)}
+#simpleCompanion .drop span{font-size:11px}
+#simpleCompanion .progress{margin-top:8px}
+.simple-help{font-size:12px;color:var(--muted);margin:12px 0 0!important;min-height:0!important}
+.simple-result{margin:24px 0;border-top:1px solid var(--line);padding-top:18px}
+.simple-result summary,#simpleCompanion>details>summary{cursor:pointer;color:var(--muted);font-size:13px}
+#simpleCompanion .terminal{margin-top:12px;background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:8px;font-size:12px;max-height:200px;min-height:70px;white-space:pre-wrap;overflow:auto;font-family:Menlo,monospace;padding:12px}
+.simple-job{margin-bottom:10px;font-size:14px}
+.simple-extra{margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#simpleCompanion .card{background:white;border:1px solid var(--line);box-shadow:none;border-radius:12px;padding:20px;color:var(--ink)}
+#simpleCompanion .card h2{font-family:inherit;font-size:18px;color:var(--ink)}
+#simpleCompanion .card p,#simpleCompanion .card .tiny{color:var(--muted)}
+#simpleCompanion .eyebrow,#simpleCompanion .card .eyebrow{display:none}
+#simpleCompanion select{max-width:100%;background:#fff;color:var(--ink);border:1px solid var(--line);padding:8px;border-radius:6px}
+#simpleCompanion .actions{display:flex;gap:8px;flex-wrap:wrap}
+#simpleCompanion footer{margin-top:28px;font-size:12px;color:var(--muted)}
+#simpleConfirm{width:min(520px,90vw);border:1px solid var(--line);border-radius:14px;background:var(--paper);color:var(--ink);padding:24px;font-family:"Avenir Next",Avenir,sans-serif}
+#simpleConfirm::backdrop{background:#18201855}
+#simpleConfirm .intent-result{color:var(--ink);background:#fff;border:1px solid var(--line);padding:14px;margin:16px 0;font-size:13px}
+#simpleConfirm h2{font-size:20px}
+#simpleConfirm .actions{display:flex;gap:10px}
+#toast{font-family:"Avenir Next",Avenir,sans-serif}
+@media(max-width:760px){#simpleCompanion{padding:24px 18px}.simple-grid{grid-template-columns:1fr}.simple-panel p{min-height:0}.simple-extra{grid-template-columns:1fr}.simple-head h1{font-size:22px}.connection{padding:18px}}
+</style>
+<script>
+(() => {
+  const el = id => document.getElementById(id);
+  const root = document.createElement('div'); root.id='simpleCompanion';
+  root.innerHTML=`<header class="simple-head"><div><h1>Cardputer Companion</h1><small>Музыка, книги и записи. Всё на вашем Mac.</small></div><div id="simpleRefresh"></div></header>
+  <section class="connection" aria-live="polite"><h2 id="simpleConnectionTitle">Подключите Cardputer</h2><p id="simpleConnectionHelp">Проверяем подключение…</p><div class="connections"><span id="simpleSD"></span><span id="simpleUSB"></span></div></section>
+  <div class="simple-grid">
+    <section class="simple-panel" id="simpleMusic"><h2>Музыка</h2><p>Обновите музыку из локальной папки или добавьте MP3. Для переноса нужна SD в кардридере.</p><button class="btn primary" id="simpleSyncMusic">Обновить музыку</button></section>
+    <section class="simple-panel" id="simpleBooks"><h2>Книги</h2><p>Перенесите книги на SD. EPUB, FB2 и TXT будут подготовлены для чтения на Cardputer.</p><button class="btn primary" id="simpleSyncBooks">Обновить книги</button></section>
+    <section class="simple-panel" id="simpleVoice"><h2>Записи</h2><p>Откройте Transfer на Cardputer и подключите Mac к его Wi-Fi. USB для выгрузки записей недостаточно.</p><div id="simpleVoiceActions"></div><p class="simple-help">Оригиналы остаются на устройстве. Для расшифровки нужен отдельно установленный локальный движок.</p></section>
+  </div>
+  <section class="simple-result"><div class="simple-job" id="simpleJob" role="status">Готов к работе</div><details id="simpleLog"><summary>Подробности последней операции</summary></details></section>
+  <details><summary>Дополнительно: прошивка, заметки и время</summary><div class="simple-extra" id="simpleExtra"></div></details>
+  <footer>Ничего не переносится и не прошивается автоматически. Перед отключением SD дождитесь завершения операции и извлеките диск в Finder.</footer>`;
+  document.body.append(root);
+  function move(id, target, label) {const node=el(id);if(!node)return;el(target).append(node);if(label)node.textContent=label;return node;}
+  move('refreshBtn','simpleRefresh','Обновить');
+  move('musicDrop','simpleMusic'); move('musicProgress','simpleMusic');
+  move('bookDrop','simpleBooks'); move('bookProgress','simpleBooks');
+  [['musicDrop','Добавить MP3','Выберите или перетащите файлы'],['bookDrop','Добавить книги','EPUB, FB2 или TXT']].forEach(([id,title,hint])=>{
+    const node=el(id),input=node.querySelector('input');node.replaceChildren();const b=document.createElement('b');b.textContent=title;const span=document.createElement('span');span.textContent=hint;node.append(b,span,input);
+    input.setAttribute('aria-label',title);
+  });
+  move('syncVoiceBtn','simpleVoiceActions','Сохранить записи на Mac');
+  move('transcribeVoiceBtn','simpleVoiceActions','Расшифровать на Mac');
+  move('terminal','simpleLog');
+  move('firmware','simpleExtra');
+  const firmware=el('firmware');firmware.querySelector('h2').textContent='Прошивка';
+  const fp=firmware.querySelector('p');if(fp)fp.textContent='Требует USB и среды сборки. Перед прошивкой сохраняются внутренние записи через Transfer Wi-Fi.';
+  el('buildBtn').textContent='Собрать';el('flashBtn').textContent='Прошить…';
+  const extras=document.createElement('section');extras.className='card';extras.id='simpleUtilities';extras.innerHTML='<h2>Другие действия</h2><p>Заметки сохраняются на Mac без удаления с карты. Синхронизация времени требует Transfer Wi-Fi.</p><div class="actions" id="simpleUtilityActions"></div>';el('simpleExtra').append(extras);
+  el('deleteNotesAfter').checked=false;
+  move('syncNotesBtn','simpleUtilityActions','Сохранить заметки');move('timeBtn','simpleUtilityActions','Установить время');
+  const dialog=document.createElement('dialog');dialog.id='simpleConfirm';dialog.innerHTML='<h2>Подтвердите перенос</h2><p>Будет использована настроенная локальная папка. Исходные файлы на Mac сохраняются.</p><div id="simpleIntentResult"></div><div class="actions" id="simpleIntentActions"></div>';document.body.append(dialog);
+  move('intentResult','simpleIntentResult');move('intentConfirmBtn','simpleIntentActions','Перенести');move('intentCancelBtn','simpleIntentActions','Отмена');
+  el('intentCancelBtn').addEventListener('click',()=>dialog.close());
+  dialog.addEventListener('cancel',()=>el('intentCancelBtn').click());
+  function sync(kind){el('intentInput').value=`sync ${kind} to sd`;el('intentResolveBtn').click();dialog.showModal();}
+  el('simpleSyncMusic').onclick=()=>sync('music');el('simpleSyncBooks').onclick=()=>sync('books');
+  let lastTerminal='';
+  let actualStatus=null;
+  const upstreamFetch=window.fetch.bind(window);
+  window.fetch=async (...args)=>{
+    const requestURL=String(args[0]?.url || args[0]);
+    const isStatus=requestURL.includes('/api/status');
+    try {
+      const response=await upstreamFetch(...args);
+      if(isStatus){
+        actualStatus=response.ok?await response.clone().json():null;
+      }
+      return response;
+    } catch(error){if(isStatus)actualStatus=null;throw error;}
+  };
+  function present(){
+    const ready=actualStatus?.sd?.ready===true;
+    const hasUSB=Boolean(actualStatus?.usb_ports?.length);
+    const state=String(actualStatus?.job?.state || 'UNKNOWN').toUpperCase();const running=state==='RUNNING';
+    el('simpleConnectionTitle').textContent=!actualStatus?'Проверяем подключение…':ready?'SD подключена':hasUSB?'Cardputer подключён по USB':'Подключите Cardputer';
+    el('simpleConnectionHelp').textContent=ready?'Можно переносить музыку и книги. Начните с нужного действия ниже.':'Для музыки и книг вставьте SD в кардридер Mac. Для записей откройте Transfer на Cardputer и подключитесь к его Wi-Fi.';
+    el('simpleSD').textContent=!actualStatus?'SD: проверка':ready?`SD: ${el('musicCount').textContent} треков · ${el('bookCount').textContent} книг`:'SD: не подключена';
+    el('simpleUSB').textContent=!actualStatus?'USB: проверка':hasUSB?'USB: обнаружен (для прошивки)':'USB: не обнаружен';
+    el('simpleSyncMusic').disabled=!ready||running;el('simpleSyncBooks').disabled=!ready||running;
+    el('simpleJob').textContent=!actualStatus?'Ожидаем ответ Companion…':running?'Идёт операция. Не отключайте устройство.':state.includes('FAIL')||state.includes('ERROR')?'Операция не завершена. Откройте подробности ниже.':state.includes('DONE')||state.includes('SUCCESS')?'Операция завершена.':'Готов к работе';
+    const output=el('terminal').textContent;if(output!==lastTerminal){if(lastTerminal||running)el('simpleLog').open=true;lastTerminal=output;}
+    if(running&&dialog.open)dialog.close();
+    if(/FAILED|ERROR/.test(state)) {
+      const detail=actualStatus?.job?.output || output;
+      if(/cardputer_time_sync|TIME ERROR/.test(detail)) el('simpleJob').textContent='[!] Время не установлено. Откройте Transfer и подключите Mac к Wi-Fi Cardputer.';
+      else if(/OFFLOAD VOICE/.test(detail)) el('simpleJob').textContent='[!] Записи не выгружены. Проверьте Transfer Wi-Fi и поддержку Voice API в прошивке.';
+    }
+  }
+  present();setInterval(present,750);
+})();
+</script>
+
+<style>
+/* Compact terminal palette; no opacity-based disabled labels. */
+:root{--paper:#101510;--ink:#eef4e8;--muted:#bac7b1;--line:#65745d;--accent:#c4f078;color-scheme:dark}
+html,body,#simpleCompanion,#simpleCompanion *,dialog,dialog *{font-family:Menlo,"DejaVu Sans Mono",monospace!important}
+#simpleCompanion{max-width:1040px;padding:16px 20px;font-size:12px;line-height:1.4}
+#simpleCompanion .simple-head{margin-bottom:12px;align-items:center}
+#simpleCompanion .simple-head h1{font-size:18px;letter-spacing:0!important}
+#simpleCompanion .simple-head h1:before{content:'> ';color:var(--accent)}
+#simpleCompanion .simple-head small{font-size:11px}
+#simpleCompanion .connection{padding:12px 14px;margin-bottom:12px;background:#171e16;border:1px solid var(--line);border-radius:0}
+#simpleCompanion .connection h2{font-size:14px;margin-bottom:4px}
+#simpleCompanion .connection h2:before{content:'[ ';color:var(--accent)}
+#simpleCompanion .connection h2:after{content:' ]';color:var(--accent)}
+#simpleCompanion .connection p{font-size:12px;max-width:none}
+#simpleCompanion .connection .connections{font-size:11px;margin-top:8px;gap:20px;color:var(--accent)}
+#simpleCompanion .simple-grid{gap:10px}
+#simpleCompanion .simple-panel,#simpleCompanion .card{padding:12px;background:#171e16;border:1px solid var(--line);border-radius:0;box-shadow:none}
+#simpleCompanion .simple-panel h2,#simpleCompanion .card h2{font-size:14px;margin:0 0 8px;color:var(--ink)}
+#simpleCompanion .simple-panel h2:before{content:'+ ';color:var(--accent)}
+#simpleCompanion .simple-panel p,#simpleCompanion .card p{font-size:11px;line-height:1.5;min-height:0;margin:0 0 10px;color:var(--muted)}
+#simpleCompanion .btn,#simpleConfirm .btn,dialog .btn{font-size:12px!important;min-height:30px;padding:6px 9px!important;border:1px solid #8b9d7e!important;border-radius:0!important;background:#263422!important;color:#eef4e8!important;opacity:1!important;box-shadow:none!important}
+#simpleCompanion .btn:hover:not(:disabled),dialog .btn:hover:not(:disabled){background:#354a2d!important}
+#simpleCompanion .btn.primary,dialog .btn.primary{background:#c4f078!important;border-color:#c4f078!important;color:#101510!important}
+#simpleCompanion .btn:disabled,dialog .btn:disabled{background:#1a2018!important;border:1px dashed #7b8871!important;color:#b7c2ac!important;opacity:1!important;cursor:not-allowed}
+#simpleCompanion .simple-panel .btn{margin-bottom:6px}
+#simpleCompanion .drop{padding:8px;min-height:0;border:1px dashed #819371;border-radius:0;background:#101510;color:#cbd8bf;opacity:1}
+#simpleCompanion .drop b{font-size:12px;color:#eef4e8}
+#simpleCompanion .drop span{font-size:10px;color:#bac7b1}
+#simpleCompanion .drop.locked{opacity:1;background:#1a2018;border-color:#6d7a63}
+#simpleCompanion .drop.locked b,#simpleCompanion .drop.locked span{color:#b7c2ac}
+#simpleCompanion .simple-help{font-size:10px!important;margin-top:8px!important}
+#simpleCompanion .simple-result{margin:12px 0;padding-top:10px}
+#simpleCompanion .simple-job{font-size:12px;margin-bottom:6px;color:#eef4e8}
+#simpleCompanion summary{font-size:11px!important;color:#cfddc2!important;padding:4px 0}
+#simpleCompanion .simple-extra{margin-top:8px;gap:10px}
+#simpleCompanion .card .badge,#simpleCompanion .card .tag,#simpleCompanion .card .chip{background:#263422;color:#c4f078;border-color:#8b9d7e}
+#simpleCompanion select{font-size:11px;color:#eef4e8;background:#101510;border:1px solid #8b9d7e;border-radius:0;padding:6px}
+#simpleCompanion .terminal{background:#0b100b;color:#e3efd8;border-color:#65745d;border-radius:0;font-size:11px;line-height:1.5;max-height:130px;min-height:0;padding:10px;overflow-wrap:anywhere}
+#simpleCompanion footer{margin-top:12px;font-size:10px;color:#bac7b1}
+#simpleConfirm,dialog{background:#171e16!important;color:#eef4e8!important;border:1px solid #8b9d7e!important;border-radius:0!important;box-shadow:none!important;padding:18px}
+#simpleConfirm p,dialog p,dialog code,dialog strong{color:#eef4e8!important}
+#simpleConfirm .intent-result{background:#101510;color:#eef4e8;border-color:#65745d;font-size:12px}
+#toast,#toast *{background:#182016!important;color:#f0f7e9!important;font-family:Menlo,monospace!important;font-size:12px!important;line-height:1.5!important;border-radius:0!important;opacity:1;overflow-wrap:anywhere;box-shadow:none!important}
+#toast{border:2px solid #edb27e!important;max-width:min(560px,calc(100vw - 32px));padding:12px!important}
+#simpleCompanion :focus-visible,dialog :focus-visible{outline:2px solid #e4f5a6!important;outline-offset:3px}
+@media(max-width:760px){#simpleCompanion{padding:12px}.simple-grid{grid-template-columns:1fr}#simpleCompanion .simple-panel{padding:10px}}
+</style>
+<script>
+(() => {
+  const toast=document.getElementById('toast');
+  if(toast)new MutationObserver(()=>{
+    const raw=toast.textContent;
+    if(/cardputer_time_sync|TIME ERROR/.test(raw))toast.textContent='[!] Не удалось установить время. Откройте Transfer на Cardputer, подключите Mac к его Wi-Fi и повторите. Технические подробности сохранены в журнале.';
+    else if(/192\.168\.4\.1|urlopen error|timed out/.test(raw))toast.textContent='[!] Cardputer не ответил по Wi-Fi. Проверьте сеть Mac и режим Transfer на устройстве. Технические подробности сохранены в журнале.';
+  }).observe(toast,{childList:true,subtree:true,characterData:true});
+})();
+</script>

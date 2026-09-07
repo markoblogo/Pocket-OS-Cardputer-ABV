@@ -4,40 +4,139 @@
 <dict>
 	<key>files</key>
 	<dict>
+		<key>Resources/ABVx.icns</key>
+		<data>
+		xeBo1e7IyfCqDbnJZ1b6V0O71ps=
+		</data>
+		<key>Resources/__pycache__/abvx_companion_app.cpython-314.pyc</key>
+		<data>
+		N5UGKV+HhjOqSvQxIzW/MywAx0k=
+		</data>
 		<key>Resources/abvx_companion.py</key>
 		<data>
-		t/Nh87NzAETOhxUb4jvmVoTyh/4=
+		H6ileHCgaf7il+rmpBJNxn1tbCQ=
 		</data>
 		<key>Resources/abvx_companion_app.py</key>
 		<data>
-		EJiKAFbccPJJZv7bGGon7gzDutQ=
+		89N/mJfKzLR2MZGezenl+rJi03M=
+		</data>
+		<key>Resources/cardputer_local_model.py</key>
+		<data>
+		g5+2FiCGZaGxuYU90MRuMlwf6Tc=
+		</data>
+		<key>Resources/cardputer_local_pipeline.py</key>
+		<data>
+		jsoLQzAVR8SQsHqtDAOooS0XMlY=
+		</data>
+		<key>Resources/cardputer_time_sync.py</key>
+		<data>
+		YUT3dEazBdPksRcfNwk3soywDGE=
+		</data>
+		<key>Resources/cardputer_upload.py</key>
+		<data>
+		+6TGCbvw8JQmnhOY4c3XH9ZylLw=
 		</data>
 		<key>Resources/companion_ui/index.html</key>
 		<data>
-		Mo5ajWOD2JFO0D0BefB6jv14EYo=
+		Tn0naSywZW7If3VewkHHLQvBdvQ=
+		</data>
+		<key>Resources/needle_intent_adapter.py</key>
+		<data>
+		tRQHvB7RqP4Gl1eYzUXQGwZllqs=
+		</data>
+		<key>Resources/prepare_music.py</key>
+		<data>
+		+t+RwEdlqYrkHQemT5h3+GnYfcc=
+		</data>
+		<key>Resources/voice_companion.py</key>
+		<data>
+		dQ0CzmGH4Z5zouZ/W0+wYyStLJI=
 		</data>
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>Resources/ABVx.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			lPgxwtXrHdl94Iio1xMk6xnuYd7pLVsltq3EQhJacag=
+			</data>
+		</dict>
+		<key>Resources/__pycache__/abvx_companion_app.cpython-314.pyc</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			oCsS9sWRRxKJ973c61syVug69dSgbmIu8zVBe5t4y4s=
+			</data>
+		</dict>
 		<key>Resources/abvx_companion.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			UFVuaDtVXCHFS/H4uVgUDXhu7S6NvbK3HL1AbqmFQQM=
+			TbwUARA6YOCssM4AuW8Ep0vSB0kfYSgXcdSUXKFBQIo=
 			</data>
 		</dict>
 		<key>Resources/abvx_companion_app.py</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			6+TXBCciNU3WuZO0RLtIYVlcbJon9D+UG8CQWyU2HcU=
+			VQN30FKu/5iJvHL+HsyPna9U5BwzW6JfLi5a/BOHyvc=
+			</data>
+		</dict>
+		<key>Resources/cardputer_local_model.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			vSxYZzhXN1TqPTFpLoRJ+xik9JyZ32OiayEE5Z8p2tc=
+			</data>
+		</dict>
+		<key>Resources/cardputer_local_pipeline.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			IKqhPbJuycuvckKeGSpknojGnqoZ/aNlI56ohHhxNVA=
+			</data>
+		</dict>
+		<key>Resources/cardputer_time_sync.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			9zzm1YvfoxsbL0dTtdii8caQVkzr8D4PfqA8hJh2vw4=
+			</data>
+		</dict>
+		<key>Resources/cardputer_upload.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			g6Hqhia/dRy8hDiVG7Hr9VNJa0ch0UOtd9P9bLfjHao=
 			</data>
 		</dict>
 		<key>Resources/companion_ui/index.html</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			h66hxymwfQsai6XteMg1yaJImqEBcFykP8TdZJV9sw4=
+			U/rQ32OeNAS3RixbuY+hhp0t3Qmv7VNVaRapytr8VC0=
+			</data>
+		</dict>
+		<key>Resources/needle_intent_adapter.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			B4yI9YjNUXr9QiZyV9P4PcjKgpXFwLZV88ZjI8JpBF0=
+			</data>
+		</dict>
+		<key>Resources/prepare_music.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			T8H9puaOKnVHnxzHfxM7l6iNW9jsFkEOr0D+LtqBcZQ=
+			</data>
+		</dict>
+		<key>Resources/voice_companion.py</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			QhgkB9/wMqT6ZkejemKy5SlJ1tdoblSCvJ/KmJfJGvw=
 			</data>
 		</dict>
 	</dict>

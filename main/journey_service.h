@@ -9,9 +9,10 @@ enum class JourneyStatus { Idle, WaitingForFix, Recording, Saved, Error };
 
 class JourneyService {
 public:
+    explicit JourneyService(const char* root = "/sdcard/journeys") : root_(root) {}
     bool start(uint32_t now_ms, const char** error = nullptr);
     void appendIfDue(const GnssFix& fix, uint32_t now_ms);
-    void stop();
+    void stop(uint32_t now_ms);
 
     bool active() const { return active_; }
     JourneyStatus status() const { return status_; }
@@ -25,6 +26,7 @@ public:
 private:
     void fail(const char* detail);
 
+    std::string root_;
     bool active_ = false;
     JourneyStatus status_ = JourneyStatus::Idle;
     std::string id_;
@@ -32,6 +34,7 @@ private:
     void* track_file_ = nullptr;
     uint32_t started_ms_ = 0;
     uint32_t last_log_ms_ = 0;
+    uint32_t stopped_ms_ = 0;
     uint32_t point_count_ = 0;
     double distance_m_ = 0.0;
     double last_latitude_ = 0.0;

@@ -29,6 +29,13 @@ bool loadEventLog(const char* path, std::vector<std::string>* events, std::strin
         return false;
     }
     events->clear();
+    const std::string backup = std::string(path) + ".BAK";
+    if (access(path, F_OK) != 0 && errno == ENOENT && access(backup.c_str(), F_OK) == 0) {
+        if (std::rename(backup.c_str(), path) != 0) {
+            setError(err, "recover");
+            return false;
+        }
+    }
     FILE* file = std::fopen(path, "rb");
     if (!file) {
         if (errno == ENOENT) return true;
@@ -87,17 +94,19 @@ bool mergeEventLog(const char* path, const char* temp_path,
         std::remove(temp_path);
         return false;
     }
-    // SPIFFS does not reliably replace an existing destination on rename.
-    // The complete, synced temp file is already available at this point.
-    if (std::remove(path) != 0 && errno != ENOENT) {
-        setError(err, "replace");
-        std::remove(temp_path);
+    // Keep the last committed generation through the SPIFFS rename gap.
+    const std::string backup = std::string(path) + ".BAK";
+    if (std::remove(backup.c_str()) != 0 && errno != ENOENT) {
+        setError(err, "backup remove");
+        return false;
+    }
+    if (std::rename(path, backup.c_str()) != 0 && errno != ENOENT) {
+        setError(err, "backup");
         return false;
     }
     if (std::rename(temp_path, path) != 0) {
         setError(err, "rename");
-        std::remove(temp_path);
-        return false;
+        return false; // Keep both backup and staged data for recovery.
     }
     return true;
 }

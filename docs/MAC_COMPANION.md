@@ -1,3 +1,11 @@
+# Current contract: 0.3.0-rc1
+
+See [Voice to text](VOICE_TO_TEXT.md), [Data safety](DATA_SAFETY.md) and
+[Installation](INSTALL.md) for the current implementation. Voice sync now reads
+internal SPIFFS through Transfer, not SD /rec. Import populates the Mac source
+library and uses safe index-last sync. Flash performs fresh verified Voice offload.
+The following design notes predate this candidate; superseded plans are historical.
+
 # ABVx Mac Companion
 
 The Companion is the desktop control surface for Pocket OS. Users should not need Terminal for routine device work.

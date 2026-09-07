@@ -10,6 +10,7 @@ idf_component_register(
         "assets"
         "lib/adafruit_tca8418"
     REQUIRES
+        mbedtls
         M5Unified
         minimp3
         esp_driver_spi

@@ -1,51 +1,18 @@
 #!/bin/zsh
 set -eu
-URL="http://127.0.0.1:8765"
-if /usr/bin/curl -fsS "$URL/api/status" >/dev/null 2>&1; then
-  /usr/bin/open "$URL"
-  exit 0
-fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
 RESOURCES="$HERE/../Resources"
 SUPPORT="$HOME/Library/Application Support/ABVx Companion"
 mkdir -p "$SUPPORT/companion_ui"
-if [[ -f "$ROOT/tools/abvx_companion.py" ]]; then
-  cp "$ROOT/tools/abvx_companion.py" "$SUPPORT/abvx_companion.py"
-else
-  cp "$RESOURCES/abvx_companion.py" "$SUPPORT/abvx_companion.py"
-fi
+SOURCE="$RESOURCES"
 if [[ -f "$ROOT/tools/abvx_companion_app.py" ]]; then
-  cp "$ROOT/tools/abvx_companion_app.py" "$SUPPORT/abvx_companion_app.py"
-else
-  cp "$RESOURCES/abvx_companion_app.py" "$SUPPORT/abvx_companion_app.py"
+  SOURCE="$ROOT/tools"
+  export ABVX_PROJECT_ROOT="${ABVX_PROJECT_ROOT:-$ROOT}"
 fi
-if [[ -f "$ROOT/tools/needle_intent_adapter.py" ]]; then
-  cp "$ROOT/tools/needle_intent_adapter.py" "$SUPPORT/needle_intent_adapter.py"
-elif [[ -f "$RESOURCES/needle_intent_adapter.py" ]]; then
-  cp "$RESOURCES/needle_intent_adapter.py" "$SUPPORT/needle_intent_adapter.py"
-fi
-if [[ -f "$ROOT/tools/companion_ui/index.html" ]]; then
-  cp "$ROOT/tools/companion_ui/index.html" "$SUPPORT/companion_ui/index.html"
-else
-  cp "$RESOURCES/companion_ui/index.html" "$SUPPORT/companion_ui/index.html"
-fi
+for file in "$SOURCE"/*.py; do cp "$file" "$SUPPORT/"; done
+cp "$SOURCE/companion_ui/index.html" "$SUPPORT/companion_ui/index.html"
 PYTHON="${ABVX_COMPANION_PYTHON:-}"
-if [[ -n "$PYTHON" && ! -x "$PYTHON" ]]; then
-  echo "ABVX_COMPANION_PYTHON is not executable: $PYTHON" >&2
-  exit 1
-fi
-if [[ -z "$PYTHON" && -x "$SUPPORT/.venv/bin/python3" ]]; then
-  PYTHON="$SUPPORT/.venv/bin/python3"
-fi
-if [[ -z "$PYTHON" && -x "$SUPPORT/.venv/bin/python" ]]; then
-  PYTHON="$SUPPORT/.venv/bin/python"
-fi
-if [[ -z "$PYTHON" ]]; then
-  PYTHON="/opt/homebrew/bin/python3"
-fi
-if [[ ! -x "$PYTHON" ]]; then
-  PYTHON="$(command -v python3)"
-fi
-export ABVX_PROJECT_ROOT="$ROOT"
+if [[ -z "$PYTHON" && -x "$SUPPORT/.venv/bin/python3" ]]; then PYTHON="$SUPPORT/.venv/bin/python3"; fi
+if [[ -z "$PYTHON" ]]; then PYTHON="$(command -v python3)"; fi
 exec "$PYTHON" "$SUPPORT/abvx_companion_app.py"

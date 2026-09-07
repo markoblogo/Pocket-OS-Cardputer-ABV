@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import abvx_companion as core
+import voice_companion
 from needle_intent_adapter import build_intent_adapter
 
 PROJECT_ROOT = Path(os.environ.get("ABVX_PROJECT_ROOT", Path(__file__).resolve().parent.parent)).expanduser().resolve()
@@ -77,7 +78,7 @@ def load_sync_state():
 
 def save_sync_state(state):
     data = json.dumps(state, ensure_ascii=False, indent=2)
-    BACKUP_STATE.write_text(data, encoding="utf-8")
+    core.atomic_replace_text(BACKUP_STATE, data)
 
 
 class AppState:
@@ -307,10 +308,16 @@ def time_sync_command(url="http://192.168.4.1"):
     return [sys.executable, str(script), "sync-time", "--url", url]
 
 
+def voice_command(action):
+    return [sys.executable, str(Path(__file__).with_name("voice_companion.py")), action, "--destination", str(BACKUP_VOICE)]
+
+
 def idf_command(action, port=None):
     export = shlex.quote(str(IDF_EXPORT))
     command = f"source {export} >/dev/null && idf.py build" if action == "build" else \
               f"source {export} >/dev/null && idf.py -p {shlex.quote(port)} flash"
+    if action == "flash":
+        command = shlex.join(voice_command("offload")) + " && " + command
     return ["/bin/zsh", "-lc", command]
 
 
@@ -439,7 +446,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._sync_notes(delete_after=bool(payload.get("delete_after", False)))
             elif route.path == "/api/sync-voice":
                 payload = validate_payload_json(self._read_json())
-                self._sync_voice(delete_after=bool(payload.get("delete_after", False)))
+                result = self._sync_voice(delete_after=payload.get("delete_after", False))
+                self._json(202, {"ok": True, **result})
+            elif route.path == "/api/transcribe-voice":
+                STATE.start("TRANSCRIBE VOICE", voice_command("transcribe"))
+                self._json(202, {"ok": True, "message": "Local transcription started; see job output"})
             elif route.path == "/api/time-sync":
                 payload = validate_payload_json(self._read_json())
                 if "url" in payload and not isinstance(payload["url"], str):
@@ -488,8 +499,7 @@ class Handler(BaseHTTPRequestHandler):
             STATE.start("SYNC BOOKS", pipeline_command("books"))
             return {"message": "Books sync started"}
         if intent == "sync_voice":
-            self._sync_voice(delete_after=arguments["delete_after"])
-            return {"message": "Voice sync complete"}
+            return self._sync_voice(delete_after=arguments["delete_after"])
         if intent == "prepare_browser_package":
             raise RuntimeError("browser package preparation is not implemented")
         raise RuntimeError(f"unsupported confirmed intent: {intent}")
@@ -503,6 +513,8 @@ class Handler(BaseHTTPRequestHandler):
         if not IMPORT_LOCK.acquire(blocking=False):
             raise RuntimeError("another import is running")
         try:
+            if STATE.snapshot()["state"] == "RUNNING":
+                raise RuntimeError("Wait for active operation")
             sd = core.resolve_sd(SD_OVERRIDE)
             if not sd.is_dir():
                 raise RuntimeError(f"SD is not a directory: {sd}")
@@ -520,7 +532,21 @@ class Handler(BaseHTTPRequestHandler):
                     if kind == "music":
                         STATE.set_sync_pending(TRACKS, last_file=filename)
                     try:
-                        core.add_books(sd, [str(source)]) if kind == "book" else core.add_music(sd, [str(source)])
+                        with core.storage_lock():
+                            source_dir = core.default_books_source(core.local_root()) if kind == "book" else core.default_music_source(core.local_root())
+                            source_dir.mkdir(parents=True, exist_ok=True)
+                            if kind == "music" and not core.has_mp3_sync(source):
+                                raise RuntimeError("MP3 validation failed")
+                            target = source_dir / filename
+                            if target.exists() and core.file_sha256(target) != core.file_sha256(source):
+                                raise RuntimeError("Source filename conflict; rename before importing")
+                            if not target.exists():
+                                core.atomic_copy(source, target)
+                            mirror = core.default_sd_mirror(core.local_root())
+                            section = "books" if kind == "book" else "music"
+                            if kind == "book": core.sync_books_mirror(source_dir, mirror)
+                            else: core.sync_music_mirror(source_dir, mirror)
+                            core.deploy_mirror_to_sd(sd, mirror, section)
                     except Exception:
                         if kind == "music":
                             STATE.set_sync_fail(TRACKS, last_file=filename)
@@ -537,7 +563,8 @@ class Handler(BaseHTTPRequestHandler):
             sd = core.resolve_sd(SD_OVERRIDE)
             if not sd.is_dir():
                 raise RuntimeError(f"SD is not a directory: {sd}")
-            core.pull_notes(sd, BACKUP_NOTES, delete_after=delete_after)
+            with core.storage_lock():
+                core.pull_notes(sd, BACKUP_NOTES, delete_after=delete_after)
             STATE.set_sync_done(NOTES, last_file="pull")
             self._json(200, {"ok": True, "message": "notes sync complete"})
         except Exception as exc:
@@ -545,17 +572,10 @@ class Handler(BaseHTTPRequestHandler):
             raise
 
     def _sync_voice(self, delete_after=False):
-        STATE.set_sync_pending(VOICE, last_file="pull")
-        try:
-            sd = core.resolve_sd(SD_OVERRIDE)
-            if not sd.is_dir():
-                raise RuntimeError(f"SD is not a directory: {sd}")
-            core.pull_recordings(sd, BACKUP_VOICE, delete_after=delete_after)
-            STATE.set_sync_done(VOICE, last_file="pull")
-            self._json(200, {"ok": True, "message": "voice sync complete"})
-        except Exception as exc:
-            STATE.set_sync_fail(VOICE, last_file="pull", last_error=str(exc))
-            raise
+        if delete_after is not False:
+            raise RuntimeError("Internal Voice originals are retained; deletion is device-only")
+        STATE.start("OFFLOAD VOICE", voice_command("offload"))
+        return {"message": "Verified internal Voice offload started; connect Mac to Cardputer Transfer Wi-Fi"}
 
     def log_message(self, format_string, *args):
         return

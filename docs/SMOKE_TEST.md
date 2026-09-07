@@ -91,3 +91,23 @@ Use this checklist after flashing a release checkpoint.
 6. `/api/download?path=/notes/NOTE0001.TXT` downloads when the file exists.
 7. Connections v3: upload TXT, 500-900 KB book, 5-10 MB MP3, then interrupt one upload; verify AP and SD remain available after every case.
 8. Time sync: run `python3 tools/cardputer_time_sync.py sync`, confirm `OK TIME APPLIED`, then compare Time with the Mac clock.
+
+## 0.3.0-rc1 acceptance (new checks; not yet hardware-proven)
+
+1. Preserve a private flash backup before migration. Boot the candidate and check About.
+2. Capture three Voice notes; open Transfer, join its displayed password from Mac,
+   offload without mounted SD. Compare device inventory/hash with local backups.
+   Repeat: copied=0. Do not delete the originals during acceptance.
+3. Run optional local ASR; assess actual 4 kHz notes in RU/UK/EN and noise. A failed
+   or empty transcription must leave WAV and allow retry. Record model/runtime/timing.
+4. On disposable test media, interrupt a sync after additions but before index
+   publication; previous indexed tracks must remain readable. Retry, check hashes,
+   index references and absence of superseded visible tracks. Test full card too.
+5. On disposable backed-up internal data, exercise power loss around Inbox
+   publication. Recover committed log from BAK; never auto-format non-empty SPIFFS.
+6. GNSS: UART bytes -> valid NMEA -> outdoor fix. Disconnect GNSS after fix: no
+   new stale-coordinate rows. Reconnect; resume fresh rows without bridging gap.
+7. Walk/run 20-30 minutes with Music; M/J transitions, auto next track, STOP, CSV
+   close, SD access. Record point count and distance against a known route.
+
+Only after these checks: stable tag, real device video and M5Burner catalog entry.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0-rc1 - 2026-09-07
+
+- Protect non-empty Voice storage from mount-error formatting; recover Inbox generations.
+- Validate sources first; hash/verify SD additions, publish indexes last, retain hidden recovery payloads.
+- Import through the Mac source library; serialize storage jobs across processes.
+- Export internal Voice over Transfer, verify host backups, add optional local Parakeet transcription.
+- Generate AP password on device; guard Companion Flash with fresh Voice offload.
+- Reject stale/invalid GNSS fixes, sample Journey every five seconds and check close errors.
+- Add host failure-path tests, CI, install guide, candidate release assets and workflow overview.
+- Hardware/real-speech gates remain open; this is not a stable hardware-certified release.
+
+
 ## Unreleased
 
 - Added the dependency-free Mac Companion Core for direct-SD status/layout, validated MP3 import, UTF-8 book preparation, and clock sync.

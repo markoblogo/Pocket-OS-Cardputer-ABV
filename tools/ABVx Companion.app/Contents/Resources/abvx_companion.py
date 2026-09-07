@@ -2,6 +2,10 @@
 """ABVx Mac Companion Core for direct SD preparation and clock sync."""
 
 import argparse
+import contextlib
+import fcntl
+import tempfile
+import re
 import hashlib
 import html.parser
 import os
@@ -53,6 +57,21 @@ INTENT_ARGUMENTS = {
     "sync_voice": {"delete_after": bool},
     "prepare_browser_package": {"profile": ("favorites",)},
 }
+
+@contextlib.contextmanager
+def storage_lock():
+    # Cross-process lock shared by CLI and packaged Companion.
+    lock_path = Path(tempfile.gettempdir()) / f"abvx-storage-{os.getuid()}.lock"
+    with lock_path.open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Another storage operation is running")
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
 
 def volume_score(path):
     return sum((path / name).is_dir() for name in LAYOUT)
@@ -398,7 +417,7 @@ def add_music(sd, sources):
     destination_dir.mkdir(parents=True, exist_ok=True)
     index_path = destination_dir / "INDEX.TXT"
     entries = read_index(index_path)
-    known_titles = {title.casefold() for title in entries.values()}
+    known_hashes = {file_sha256(p) for p in visible_files(destination_dir, ".mp3")}
     copied = 0
     for value in sources:
         source = Path(value).expanduser().resolve()
@@ -407,14 +426,15 @@ def add_music(sd, sources):
         if source.stat().st_size <= 0 or not has_mp3_sync(source):
             raise RuntimeError(f"MP3 validation failed: {source.name}")
         title = ascii_index_title(source.stem)
-        if title.casefold() in known_titles:
-            print(f"SKIP {source.name}: title already present")
+        digest = file_sha256(source)
+        if digest in known_hashes:
+            print(f"SKIP {source.name}: identical content already present")
             continue
         stored = next_numbered_name(destination_dir, "M", "MP3", 999)
         atomic_copy(source, destination_dir / stored)
         entries[stored] = title
         write_index(index_path, entries)
-        known_titles.add(title.casefold())
+        known_hashes.add(digest)
         copied += 1
         print(f"ADD MUSIC {source.name} -> {stored} | {title}")
     print(f"OK MUSIC copied={copied}")
@@ -432,33 +452,23 @@ def sync_music_mirror(source_dir, mirror_root):
     source_dir = Path(source_dir).expanduser().resolve()
     if not source_dir.is_dir():
         raise RuntimeError(f"music source not found: {source_dir}")
-    mirror_root = Path(mirror_root).expanduser().resolve()
-    ensure_layout(mirror_root)
-    mirror_music = mirror_root / "music"
-    removed = remove_visible_files(mirror_music)
-    copied = 0
-    files = sorted(path for path in source_dir.iterdir()
-                   if path.is_file() and not path.name.startswith(".") and path.suffix.lower() == ".mp3")
-    unique_files = []
-    seen_hashes = {}
-    duplicates = 0
-    for path in files:
-        digest = file_sha256(path)
-        original = seen_hashes.get(digest)
-        if original is not None:
-            duplicates += 1
-            print(f"SKIP DUPLICATE {path.name}: same content as {original.name}")
-            continue
-        seen_hashes[digest] = path
-        unique_files.append(path)
+    files = sorted(visible_files(source_dir, ".mp3"))
     if not files:
-        print(f"OK MUSIC MIRROR copied=0 removed={removed} duplicates={duplicates}")
-        return
-    index_path = mirror_music / "INDEX.TXT"
-    index_path.unlink(missing_ok=True)
-    add_music(mirror_root, [str(path) for path in unique_files])
-    copied = len(visible_files(mirror_music, ".mp3"))
-    print(f"OK MUSIC MIRROR copied={copied} removed={removed} duplicates={duplicates}")
+        raise RuntimeError("Empty music source; refusing to clear the library")
+    unique = {}
+    for path in files:
+        if not has_mp3_sync(path):
+            raise RuntimeError(f"MP3 validation failed: {path.name}")
+        digest = file_sha256(path)
+        if digest in unique:
+            print(f"SKIP DUPLICATE {path.name}: same content as {unique[digest].name}")
+        else:
+            unique[digest] = path
+    with tempfile.TemporaryDirectory(prefix="abvx-music-") as temp:
+        prepared = Path(temp)
+        add_music(prepared, unique.values())
+        deploy_mirror_to_sd(Path(mirror_root).expanduser().resolve(), prepared, "music")
+    print(f"OK MUSIC MIRROR scanned={len(files)} unique={len(unique)} duplicates={len(files)-len(unique)}")
 
 
 def decode_book(raw):
@@ -761,20 +771,14 @@ def sync_books_mirror(source_dir, mirror_root):
     source_dir = Path(source_dir).expanduser().resolve()
     if not source_dir.is_dir():
         raise RuntimeError(f"books source not found: {source_dir}")
-    mirror_root = Path(mirror_root).expanduser().resolve()
-    ensure_layout(mirror_root)
-    mirror_books = mirror_root / "books"
-    removed = remove_visible_files(mirror_books)
-    files = sorted(path for path in source_dir.iterdir()
-                   if path.is_file() and not path.name.startswith(".") and
-                   path.name != "README.txt" and path.suffix.lower() in (".txt", ".epub", ".fb2", ".html", ".htm"))
+    files = sorted(p for p in visible_files(source_dir) if p.name != "README.txt" and
+                   p.suffix.lower() in (".txt", ".epub", ".fb2", ".html", ".htm"))
     if not files:
-        print(f"OK BOOKS MIRROR copied=0 removed={removed}")
-        return
-    (mirror_books / "BOOKS.IDX").unlink(missing_ok=True)
-    add_books(mirror_root, [str(path) for path in files])
-    copied = len(visible_files(mirror_books, ".txt"))
-    print(f"OK BOOKS MIRROR copied={copied} removed={removed}")
+        raise RuntimeError("Empty books source; refusing to clear the library")
+    with tempfile.TemporaryDirectory(prefix="abvx-books-") as temp:
+        prepared = Path(temp)
+        add_books(prepared, files)
+        deploy_mirror_to_sd(Path(mirror_root).expanduser().resolve(), prepared, "books")
 
 
 def push_notes(sd, source_dir):
@@ -835,21 +839,82 @@ def pull_recordings(sd, destination_dir, delete_after=False):
 
 
 def deploy_mirror_to_sd(sd, mirror_root, section):
-    mirror_root = Path(mirror_root).expanduser().resolve()
-    source_dir = mirror_root / section
-    if not source_dir.is_dir():
-        raise RuntimeError(f"mirror section not found: {source_dir}")
-    destination_dir = sd / section
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    remove_visible_files(destination_dir)
+    """Publish an index only after every referenced file is durable and verified.
+
+    Existing payloads never change beneath the previous index. Unchanged bytes
+    keep their names; new bytes get unused 8.3 names. Old payloads are retained
+    until the next successful run, so INDEX.BAK remains usable for recovery.
+    """
+    if section not in ("music", "books"):
+        raise RuntimeError("Unsupported mirror section")
+    source_dir = Path(mirror_root).resolve() / section
+    destination = Path(sd).resolve() / section
+    index_name, suffix, prefix = ("INDEX.TXT", ".mp3", "M") if section == "music" else ("BOOKS.IDX", ".txt", "B")
+    source_index = source_dir / index_name
+    rows = []
+    for line in source_index.read_text(encoding="utf-8").splitlines():
+        name, sep, title = line.partition("|")
+        if not sep or not re.fullmatch(r"[A-Za-z0-9_]{1,8}\.[A-Za-z0-9]{1,3}", name) or Path(name).suffix.lower() != suffix:
+            raise RuntimeError("Invalid mirror index")
+        path = source_dir / name
+        if not path.is_file() or path.is_symlink():
+            raise RuntimeError(f"Missing mirror payload: {name}")
+        rows.append((path, title, file_sha256(path)))
+    if not rows:
+        raise RuntimeError("Empty mirror; refusing to clear destination")
+    destination.mkdir(parents=True, exist_ok=True)
+    index = destination / index_name
+    backup = destination / ("INDEX.BAK" if section == "music" else "BOOKS.BAK")
+    retired = destination / ".abvx-retired"
+    if not index.exists() and backup.exists():
+        for name in read_index(backup):
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,8}\.[A-Za-z0-9]{1,3}", name):
+                raise RuntimeError("Invalid recovery index")
+            if not (destination / name).exists() and (retired / name).is_file():
+                atomic_copy(retired / name, destination / name)
+        atomic_copy(backup, index)
+    old_rows = read_index(index)
+    existing = [p for p in visible_files(destination, suffix) if p.name != index_name and not p.is_symlink()]
+    by_hash = {}
+    for path in sorted(existing):
+        by_hash.setdefault(file_sha256(path), path.name)
+    additions = {digest: path for path, _, digest in rows if digest not in by_hash}
+    required = sum(p.stat().st_size for p in additions.values()) + source_index.stat().st_size * 3 + 65536
+    if shutil.disk_usage(destination).free < required:
+        raise RuntimeError("Not enough space for safe sync; old library preserved")
+    new_rows = {}
     copied = 0
-    for source in sorted(path for path in source_dir.iterdir() if path.is_file() and not path.name.startswith(".")):
-        destination = destination_dir / source.name
-        if destination.exists():
-            destination.unlink()
-        atomic_copy(source, destination)
-        copied += 1
-    print(f"OK DEPLOY {section} copied={copied}")
+    for source, title, digest in rows:
+        name = by_hash.get(digest)
+        if name is None:
+            name = next_numbered_name(destination, prefix, suffix[1:].upper(), 9999)
+            atomic_copy(source, destination / name)
+            if file_sha256(destination / name) != digest:
+                raise RuntimeError(f"Copy verification failed: {name}; old index preserved")
+            by_hash[digest] = name
+            copied += 1
+        new_rows[name] = title
+    content = "".join(f"{name}|{title}\n" for name, title in sorted(new_rows.items()))
+    previous = index.read_bytes() if index.exists() else None
+    def retire_old_payloads():
+        retired.mkdir(exist_ok=True)
+        for path in existing:
+            if path.name not in new_rows:
+                os.replace(path, retired / path.name)
+
+    if previous == content.encode("utf-8"):
+        retire_old_payloads()
+        print(f"OK DEPLOY {section} copied={copied} unchanged={len(new_rows)-copied} index=unchanged")
+        return
+    # Keep previous index and its payloads through this publication. Recovery
+    # after media removal uses the backup rather than an invented empty index.
+    if previous is not None:
+        atomic_replace_bytes(backup, previous)
+    atomic_replace_text(index, content)
+    if index.read_text(encoding="utf-8") != content:
+        raise RuntimeError("Index verification failed; recovery index retained")
+    retire_old_payloads()
+    print(f"OK DEPLOY {section} copied={copied} unchanged={len(new_rows)-copied} indexed={len(new_rows)} old_payloads=hidden-recovery")
 
 
 def maintenance_backup(sd, notes_dir, recordings_dir, delete_recordings=False):

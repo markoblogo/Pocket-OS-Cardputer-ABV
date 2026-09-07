@@ -118,7 +118,7 @@ def intent_preconditions(intent, status):
         "sync_time": {},
         "sync_music": {"sd_detected": context["sd_detected"]},
         "sync_books": {"sd_detected": context["sd_detected"]},
-        "sync_voice": {"sd_detected": context["sd_detected"], "voice_pending": context["voice_pending"]},
+        "sync_voice": {},
         "prepare_browser_package": {"browser_package_enabled": context["browser_package_enabled"]},
     }
     return mapping.get(intent, {})
@@ -229,10 +229,6 @@ class RuleBasedIntentAdapter(IntentAdapter):
         preconditions = intent_preconditions(intent, status)
         if intent in ("sync_music", "sync_books") and not preconditions.get("sd_detected"):
             payload = fallback_payload("missing_sd", confidence, "Mount the SD card, then use the sync panel.", "device")
-            payload["adapter"] = self.name
-            return payload
-        if intent == "sync_voice" and not preconditions.get("voice_pending"):
-            payload = fallback_payload("voice_empty", confidence, "No voice items are ready for sync in the current Companion context.", "guide")
             payload["adapter"] = self.name
             return payload
         if intent == "prepare_browser_package" and not preconditions.get("browser_package_enabled"):
@@ -445,9 +441,6 @@ class NeedleIntentAdapter(IntentAdapter):
             return result
         if intent in ("sync_music", "sync_books") and not preconditions.get("sd_detected"):
             result.update(fallback_payload("missing_sd", confidence, "Mount the SD card, then use the sync panel.", "device"))
-            return result
-        if intent == "sync_voice" and not preconditions.get("voice_pending"):
-            result.update(fallback_payload("voice_empty", confidence, "No voice items are ready for sync in the current Companion context.", "guide"))
             return result
         if intent == "prepare_browser_package" and not preconditions.get("browser_package_enabled"):
             result.update(fallback_payload("feature_disabled", confidence, "Browser package preparation is not enabled in this build.", "content"))

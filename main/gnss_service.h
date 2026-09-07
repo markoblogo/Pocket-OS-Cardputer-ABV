@@ -12,6 +12,7 @@ struct GnssFix {
     double speed_mps = 0.0;
     int satellites = 0;
     uint32_t last_sentence_ms = 0;
+    uint32_t last_fix_ms = 0;
     uint32_t sentence_count = 0;
     uint32_t byte_count = 0;
     uint32_t line_count = 0;
@@ -28,8 +29,9 @@ public:
     const GnssFix& fix() const { return fix_; }
     GnssStatus status(uint32_t now_ms) const;
 
-private:
     void parseSentence(char* line, uint32_t now_ms);
+
+private:
 
     bool ready_ = false;
     bool error_ = false;

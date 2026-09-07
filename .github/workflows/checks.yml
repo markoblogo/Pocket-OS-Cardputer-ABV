@@ -1,0 +1,31 @@
+name: Checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: sh tools/check_host.sh
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.4.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ADV firmware
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cardputer-adv-firmware
+          path: |
+            build/cardputer-abvx-minimal.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/flasher_args.json

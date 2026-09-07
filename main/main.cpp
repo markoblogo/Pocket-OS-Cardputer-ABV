@@ -25,6 +25,9 @@
 #include <esp_netif.h>
 #include <esp_random.h>
 #include <esp_spiffs.h>
+#include <esp_partition.h>
+#include <esp_mac.h>
+#include <mbedtls/sha256.h>
 #include "persistence.h"
 #include <esp_vfs_fat.h>
 #include <esp_wifi.h>
@@ -511,8 +514,21 @@ bool initVoiceStorage()
     conf.base_path = VOICE_STORE_DIR;
     conf.partition_label = VOICE_STORE_LABEL;
     conf.max_files = 8;
-    conf.format_if_mount_failed = true;
-    if (esp_vfs_spiffs_register(&conf) != ESP_OK) return false;
+    conf.format_if_mount_failed = false;
+    if (esp_vfs_spiffs_register(&conf) != ESP_OK) {
+        // First-use initialization is allowed only for a completely erased
+        // partition. Never format damaged or unrecognized user data.
+        const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+            ESP_PARTITION_SUBTYPE_DATA_SPIFFS, VOICE_STORE_LABEL);
+        if (!part) return false;
+        uint8_t block[256];
+        for (size_t offset = 0; offset < part->size; offset += sizeof(block)) {
+            if (esp_partition_read(part, offset, block, sizeof(block)) != ESP_OK) return false;
+            for (uint8_t byte : block) if (byte != 0xff) return false;
+        }
+        if (esp_spiffs_format(VOICE_STORE_LABEL) != ESP_OK ||
+            esp_vfs_spiffs_register(&conf) != ESP_OK) return false;
+    }
     initialized = true;
     return true;
 }
@@ -6772,6 +6788,104 @@ esp_err_t connectionListHandler(httpd_req_t* req)
     return ESP_OK;
 }
 
+// Read-only internal Voice export, available only in the explicit Transfer
+// screen. No SD dependency and no deletion endpoint. AP access is the boundary.
+bool voiceExportReady(httpd_req_t* req)
+{
+    if (screen != Screen::Connections) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_sendstr(req, "Open Transfer on device");
+        return false;
+    }
+    size_t total = 0, used = 0;
+    if (esp_spiffs_info(VOICE_STORE_LABEL, &total, &used) != ESP_OK) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_sendstr(req, "Internal Voice unavailable; no format attempted");
+        return false;
+    }
+    return true;
+}
+
+bool voiceNameValid(const std::string& name)
+{
+    if (name.size() != 12 || name.substr(0, 3) != "REC" || name.substr(8) != ".WAV") return false;
+    for (size_t i = 3; i < 8; ++i) if (name[i] < '0' || name[i] > '9') return false;
+    return true;
+}
+
+bool voiceDigest(const std::string& path, char* hex, size_t* size)
+{
+    FILE* file = fopen(path.c_str(), "rb");
+    if (!file) return false;
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    bool ok = mbedtls_sha256_starts(&ctx, 0) == 0;
+    uint8_t buffer[512], hash[32];
+    *size = 0;
+    while (ok) {
+        size_t got = fread(buffer, 1, sizeof(buffer), file);
+        *size += got;
+        if (got && mbedtls_sha256_update(&ctx, buffer, got) != 0) ok = false;
+        if (got < sizeof(buffer)) { if (ferror(file)) ok = false; break; }
+    }
+    if (ok) ok = mbedtls_sha256_finish(&ctx, hash) == 0;
+    mbedtls_sha256_free(&ctx);
+    fclose(file);
+    if (!ok) return false;
+    for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", hash[i]);
+    return true;
+}
+
+esp_err_t connectionVoiceListHandler(httpd_req_t* req)
+{
+    if (!voiceExportReady(req)) return ESP_OK;
+    DIR* dir = opendir(VOICE_STORE_DIR);
+    if (!dir) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Voice list failed"); return ESP_OK; }
+    uint8_t mac[6];
+    esp_efuse_mac_get_default(mac);
+    char line[256];
+    snprintf(line, sizeof(line), "{\"version\":1,\"device_id\":\"%02x%02x%02x%02x%02x%02x\",\"files\":[",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr_chunk(req, line);
+    bool first = true;
+    bool ok = true;
+    while (dirent* entry = readdir(dir)) {
+        const std::string name = entry->d_name;
+        if (!voiceNameValid(name)) continue;
+        char hash[65] = {}; size_t size = 0;
+        if (!voiceDigest(std::string(VOICE_STORE_DIR) + "/" + name, hash, &size)) { ok = false; break; }
+        snprintf(line, sizeof(line), "%s{\"name\":\"%s\",\"size\":%u,\"sha256\":\"%s\"}", first ? "" : ",", name.c_str(), unsigned(size), hash);
+        if (httpd_resp_sendstr_chunk(req, line) != ESP_OK) { ok = false; break; }
+        first = false;
+    }
+    closedir(dir);
+    if (!ok) return ESP_FAIL; // A partial inventory must never acknowledge backup.
+    httpd_resp_sendstr_chunk(req, "]}");
+    return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
+esp_err_t connectionVoiceDownloadHandler(httpd_req_t* req)
+{
+    if (!voiceExportReady(req)) return ESP_OK;
+    char query[64] = {}, name[24] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK || !voiceNameValid(name)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid recording name"); return ESP_OK;
+    }
+    FILE* file = fopen((std::string(VOICE_STORE_DIR) + "/" + name).c_str(), "rb");
+    if (!file) { httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Recording not found"); return ESP_OK; }
+    httpd_resp_set_type(req, "audio/wav");
+    char buffer[1024]; bool ok = true;
+    while (true) {
+        size_t got = fread(buffer, 1, sizeof(buffer), file);
+        if (got && httpd_resp_send_chunk(req, buffer, got) != ESP_OK) { ok = false; break; }
+        if (got < sizeof(buffer)) { if (ferror(file)) ok = false; break; }
+    }
+    fclose(file);
+    return ok ? httpd_resp_send_chunk(req, nullptr, 0) : ESP_FAIL;
+}
+
 esp_err_t connectionDownloadHandler(httpd_req_t* req)
 {
     ++connection_req_count;
@@ -7184,6 +7298,8 @@ bool startConnectionHttp(char* err, size_t err_len)
     if (!reg("/api/time-sync", HTTP_POST, connectionTimeSyncHandler)) return false;
     if (!reg("/api/list", HTTP_GET, connectionListHandler)) return false;
     if (!reg("/api/download", HTTP_GET, connectionDownloadHandler)) return false;
+    if (!reg("/api/voice/list", HTTP_GET, connectionVoiceListHandler)) return false;
+    if (!reg("/api/voice/download", HTTP_GET, connectionVoiceDownloadHandler)) return false;
     if (!reg("/api/activities", HTTP_GET, connectionActivitiesListHandler)) return false;
     if (!reg("/api/activity", HTTP_GET, connectionActivityHandler)) return false;
     if (!reg("/api/write-test", HTTP_GET, connectionWriteTestHandler)) return false;
@@ -7207,6 +7323,7 @@ bool startConnections(char* err, size_t err_len)
     // Mount SD before Wi-Fi starts. SD operations from HTTP handlers are then
     // less likely to be the first mount attempt from the HTTP server task.
     initSd();
+    initVoiceStorage();
     if (!ensureConnectionStack(err, err_len)) return false;
     if (!connection_upload_mutex) connection_upload_mutex = xSemaphoreCreateMutex();
     if (!connection_upload_complete) connection_upload_complete = xSemaphoreCreateBinary();
@@ -7217,7 +7334,8 @@ bool startConnections(char* err, size_t err_len)
 
     wifi_config_t ap_config = {};
     const char* ssid = "ABVX-Cardputer";
-    snprintf(connection_ap_password, sizeof(connection_ap_password), "cardputer");
+    if (std::strcmp(connection_ap_password, "cardputer") == 0)
+        snprintf(connection_ap_password, sizeof(connection_ap_password), "abvx%08lx", static_cast<unsigned long>(esp_random()));
     const char* pass = connection_ap_password;
     snprintf(reinterpret_cast<char*>(ap_config.ap.ssid), sizeof(ap_config.ap.ssid), "%s", ssid);
     snprintf(reinterpret_cast<char*>(ap_config.ap.password), sizeof(ap_config.ap.password), "%s", pass);
@@ -8613,7 +8731,7 @@ void handleKey(KeyEvent ev)
     if (screen == Screen::GnssLab) {
         if (ev.key == Key::Ok) {
             if (journey.active()) {
-                journey.stop();
+                journey.stop(M5.millis());
                 journey_notice.clear();
             }
             else {
@@ -8645,7 +8763,7 @@ void handleKey(KeyEvent ev)
 
     if (screen == Screen::Running) {
         if (ev.key == Key::Ok) {
-            journey.stop();
+            journey.stop(M5.millis());
             journey_notice.clear();
             screen = Screen::GnssLab;
             blockInput(300);

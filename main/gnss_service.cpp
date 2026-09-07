@@ -4,10 +4,14 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifndef ABVX_HOST_TEST
 #include <driver/uart.h>
+#endif
 
 namespace {
+#ifndef ABVX_HOST_TEST
 constexpr uart_port_t GNSS_UART = UART_NUM_1;
+#endif
 constexpr int GNSS_RX_PIN = 15;
 constexpr int GNSS_TX_PIN = 13;
 constexpr int GNSS_BAUD = 115200;
@@ -60,13 +64,13 @@ bool parseCoordinate(const char* value, const char* hemisphere, bool latitude, d
     if (!value || !hemisphere || !result || !value[0] || !hemisphere[0]) return false;
     char* end = nullptr;
     const double encoded = std::strtod(value, &end);
-    if (end == value || encoded < 0.0) return false;
+    if (end == value || *end || !std::isfinite(encoded) || encoded < 0.0 || encoded > 18000.0) return false;
     const int degrees = static_cast<int>(encoded / 100.0);
     const double minutes = encoded - degrees * 100.0;
     if (minutes < 0.0 || minutes >= 60.0) return false;
     double decimal = degrees + minutes / 60.0;
     if (latitude) {
-        if (degrees > 90 || (hemisphere[0] != 'N' && hemisphere[0] != 'S')) return false;
+        if (decimal > 90 || (hemisphere[0] != 'N' && hemisphere[0] != 'S')) return false;
         if (hemisphere[0] == 'S') decimal = -decimal;
     } else {
         if (degrees > 180 || (hemisphere[0] != 'E' && hemisphere[0] != 'W')) return false;
@@ -80,6 +84,7 @@ bool parseCoordinate(const char* value, const char* hemisphere, bool latitude, d
 bool GnssService::begin(const char** error)
 {
     if (ready_) return true;
+#ifndef ABVX_HOST_TEST
     uart_config_t config = {};
     config.baud_rate = GNSS_BAUD;
     config.data_bits = UART_DATA_8_BITS;
@@ -103,6 +108,9 @@ bool GnssService::begin(const char** error)
     }
     static constexpr char VERSION_QUERY[] = "$PCAS06,0*1B\r\n";
     uart_write_bytes(GNSS_UART, VERSION_QUERY, sizeof(VERSION_QUERY) - 1);
+#else
+    (void)error;
+#endif
     ready_ = true;
     return true;
 }
@@ -110,7 +118,8 @@ bool GnssService::begin(const char** error)
 void GnssService::poll(uint32_t now_ms)
 {
     if (!ready_) return;
-    char buffer[96];
+#ifndef ABVX_HOST_TEST
+    char buffer[512];
     const int received = uart_read_bytes(GNSS_UART, reinterpret_cast<uint8_t*>(buffer), sizeof(buffer), 0);
     if (received < 0) {
         error_ = true;
@@ -132,6 +141,8 @@ void GnssService::poll(uint32_t now_ms)
             line_len_ = 0;
         }
     }
+#endif
+    if (fix_.valid && now_ms - fix_.last_fix_ms > GNSS_STALE_MS) fix_.valid = false;
 }
 
 void GnssService::parseSentence(char* line, uint32_t now_ms)
@@ -155,6 +166,7 @@ void GnssService::parseSentence(char* line, uint32_t now_ms)
             parseCoordinate(fields[5], fields[6], false, &longitude);
         fix_.valid = valid;
         if (valid) {
+            fix_.last_fix_ms = now_ms;
             fix_.latitude = latitude;
             fix_.longitude = longitude;
             fix_.speed_mps = std::strtod(fields[7], nullptr) * 0.514444;
@@ -162,12 +174,14 @@ void GnssService::parseSentence(char* line, uint32_t now_ms)
     } else if (hasSuffix(fields[0], "GGA") && count >= 10) {
         const int quality = std::atoi(fields[6]);
         fix_.satellites = std::atoi(fields[7]);
+        fix_.valid = false;
         if (quality > 0) {
             double latitude = 0.0;
             double longitude = 0.0;
             if (parseCoordinate(fields[2], fields[3], true, &latitude) &&
                 parseCoordinate(fields[4], fields[5], false, &longitude)) {
                 fix_.valid = true;
+                fix_.last_fix_ms = now_ms;
                 fix_.latitude = latitude;
                 fix_.longitude = longitude;
                 fix_.altitude_m = std::strtod(fields[9], nullptr);
@@ -182,5 +196,6 @@ GnssStatus GnssService::status(uint32_t now_ms) const
     if (!ready_) return GnssStatus::Off;
     if (!fix_.seen) return GnssStatus::Searching;
     if (now_ms - fix_.last_sentence_ms > GNSS_STALE_MS) return GnssStatus::Stale;
+    if (fix_.valid && now_ms - fix_.last_fix_ms > GNSS_STALE_MS) return GnssStatus::Stale;
     return fix_.valid ? GnssStatus::Fix : GnssStatus::NoFix;
 }

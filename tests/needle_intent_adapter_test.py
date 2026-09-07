@@ -35,12 +35,12 @@ def test_rule_based_music_resolve_contract():
     assert resolved["adapter"] == "rule_based"
 
 
-def test_rule_based_voice_empty_fallback():
+def test_rule_based_voice_without_previous_backup():
     adapter = MODULE.build_intent_adapter("rule_based")
     resolved = adapter.resolve({"text": "sync voice", "context": {}}, _status(voice_count=0))
-    assert resolved["status"] == "fallback"
-    assert resolved["fallback_reason"] == "voice_empty"
-    assert resolved["target_section"] == "guide"
+    assert resolved["status"] == "ok"
+    assert resolved["intent"] == "sync_voice"
+    assert resolved["requires_confirmation"] is True
 
 
 def test_needle_stub_envelope():
@@ -95,7 +95,7 @@ def test_needle_runtime_envelope_with_fake_module():
 
 if __name__ == "__main__":
     test_rule_based_music_resolve_contract()
-    test_rule_based_voice_empty_fallback()
+    test_rule_based_voice_without_previous_backup()
     test_needle_stub_envelope()
     test_needle_runtime_envelope_with_fake_module()
     print("needle intent adapter test: OK")
