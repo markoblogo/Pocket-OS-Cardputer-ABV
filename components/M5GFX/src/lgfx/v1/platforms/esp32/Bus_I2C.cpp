@@ -21,8 +21,6 @@ Contributors:
 #include "Bus_I2C.hpp"
 #include "../../misc/pixelcopy.hpp"
 
-#include <soc/i2c_struct.h>
-
 namespace lgfx
 {
  inline namespace v1
@@ -98,32 +96,12 @@ namespace lgfx
 
   void Bus_I2C::wait(void)
   {
-#if I2C_NUM_MAX > 1
-    auto dev = (_cfg.i2c_port == 0) ? &I2C0 : &I2C1;
-#else
-    auto dev = &I2C0;
-#endif
-
-#if defined (CONFIG_IDF_TARGET_ESP32C3) || defined (CONFIG_IDF_TARGET_ESP32C6) || defined (CONFIG_IDF_TARGET_ESP32S3) || defined (CONFIG_IDF_TARGET_ESP32P4)
-    while (dev->sr.bus_busy) { taskYIELD(); }
-#else
-    while (dev->status_reg.bus_busy) { taskYIELD(); }
-#endif
+    lgfx::i2c::wait(_cfg.i2c_port);
   }
 
   bool Bus_I2C::busy(void) const
   {
-#if I2C_NUM_MAX > 1
-    auto dev = (_cfg.i2c_port == 0) ? &I2C0 : &I2C1;
-#else
-    auto dev = &I2C0;
-#endif
-
-#if defined (CONFIG_IDF_TARGET_ESP32C3) || defined (CONFIG_IDF_TARGET_ESP32C6) || defined (CONFIG_IDF_TARGET_ESP32S3) || defined (CONFIG_IDF_TARGET_ESP32P4)
-    return dev->sr.bus_busy;
-#else
-    return dev->status_reg.bus_busy;
-#endif
+    return lgfx::i2c::busy(_cfg.i2c_port);
   }
 
   void Bus_I2C::dc_control(bool dc)
