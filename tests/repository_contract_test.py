@@ -24,6 +24,7 @@ assert '"abvx%08lx"' in transfer_security, "Transfer password must be generated"
 smoke = read("docs/SMOKE_TEST.md")
 assert "Password is `cardputer`" not in smoke
 assert "generated password displayed on Cardputer" in smoke
+assert "Record release-gate results in `HARDWARE_ACCEPTANCE.md`" in smoke
 
 audit = read("AUDIT.md")
 assert "up to 32 MB" in audit
@@ -34,6 +35,9 @@ assert "one direct upload" not in audit
 readme = read("README.md")
 assert "release candidate" in readme
 assert "MIT License" in readme
+
+docs_index = read("docs/README.md")
+assert "physical-device evidence\nbelongs in `HARDWARE_ACCEPTANCE.md`" in docs_index
 
 packager = read("tools/package_companion.py")
 assert "root.glob('*.py')" not in packager, "developer utilities must not enter the app bundle"

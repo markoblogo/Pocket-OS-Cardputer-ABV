@@ -23,4 +23,5 @@
 - Vendored components retain upstream licenses. Update one dependency at a time
   and record its tag or commit in `docs/DEPENDENCIES.md`.
 - Current product truth is in `README.md`, `docs/PROJECT_STATUS.md`,
-  `docs/DATA_SAFETY.md`, and `docs/SMOKE_TEST.md`.
+  `docs/DATA_SAFETY.md`, and `docs/SMOKE_TEST.md`. Physical-device release
+  evidence is recorded only in `docs/HARDWARE_ACCEPTANCE.md`.
