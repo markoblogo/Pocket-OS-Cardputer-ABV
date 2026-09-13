@@ -404,6 +404,7 @@ namespace lgfx
         _write_reg16(0x00ab); // Publish the synchronization command to complete the coordinate read
         return 0;
       }
+      if (count > requested_count) count = requested_count;
       _wait_cycle = count ? 0 : 16;
 
       if (count)
@@ -427,6 +428,7 @@ namespace lgfx
           tp[0].y = (uint16_t)((readdata[2] << 4) | (readdata[3] & 0xf));
         }
       }
+      _write_reg16(0x00ab); // Complete a successful coordinate read too.
       return count;
     }
 
