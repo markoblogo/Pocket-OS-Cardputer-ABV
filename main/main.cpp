@@ -41,6 +41,7 @@
 #include "gnss_service.h"
 #include "journey_service.h"
 #include "lib/adafruit_tca8418/Adafruit_TCA8418.h"
+#include "transfer_security.h"
 
 namespace {
 constexpr gpio_num_t PIN_KEYBOARD_INT = GPIO_NUM_11;
@@ -7336,7 +7337,10 @@ bool startConnections(char* err, size_t err_len)
     wifi_config_t ap_config = {};
     const char* ssid = "ABVX-Cardputer";
     // A stopped Transfer session must not retain the previous admission secret.
-    snprintf(connection_ap_password, sizeof(connection_ap_password), "abvx%08lx", static_cast<unsigned long>(esp_random()));
+    if (!generateTransferPassword(connection_ap_password, sizeof(connection_ap_password), esp_random())) {
+        snprintf(err, err_len, "password alloc");
+        return false;
+    }
     const char* pass = connection_ap_password;
     snprintf(reinterpret_cast<char*>(ap_config.ap.ssid), sizeof(ap_config.ap.ssid), "%s", ssid);
     snprintf(reinterpret_cast<char*>(ap_config.ap.password), sizeof(ap_config.ap.password), "%s", pass);

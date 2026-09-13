@@ -17,7 +17,9 @@ assert changelog.count("## Unreleased") == 1, "CHANGELOG must have one Unrelease
 firmware = read("main/main.cpp")
 assert 'connection_ap_password[16] = "cardputer"' not in firmware
 assert 'strcmp(connection_ap_password, "cardputer")' not in firmware
-assert '"abvx%08lx"' in firmware, "Transfer password must be generated"
+
+transfer_security = read("main/transfer_security.cpp")
+assert '"abvx%08lx"' in transfer_security, "Transfer password must be generated"
 
 smoke = read("docs/SMOKE_TEST.md")
 assert "Password is `cardputer`" not in smoke
