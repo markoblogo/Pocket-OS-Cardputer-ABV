@@ -508,7 +508,7 @@ namespace lgfx
     ESP_LOGI(TAG, "i2c port:%d sda:%d scl:%d", _HDMI_Trans_config.i2c_port, _HDMI_Trans_config.pin_sda, _HDMI_Trans_config.pin_scl);
 
     HDMI_Trans driver(_HDMI_Trans_config);
-  
+
     auto result = driver.readChipID();
     ESP_LOGI(TAG, "Chip ID: %02x %02x %02x", result.id[0], result.id[1], result.id[2]);
     if (result.id[0] == result.id[1] && result.id[0] == result.id[2])
@@ -1315,7 +1315,8 @@ namespace lgfx
         uint32_t i = 0;
         while (w != (i = param->fp_skip(i, w, param)))
         {
-          auto dmabuf = _bus->getDMABuffer(wb + 1);
+          auto dmabuf = get_dma_buffer_checked(wb + 1);
+          if (!dmabuf) { return; }
           int32_t len = param->fp_copy(dmabuf, 0, w - i, param);
           _set_window(x + i, y, x + i + len - 1, y, cmd);
           _bus->writeBytes(dmabuf, len * bytes, false, true);

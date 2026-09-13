@@ -90,13 +90,24 @@ namespace lgfx
       bool use_lock = true;
       uint8_t dma_channel = LGFX_ESP32_SPI_DMA_CH;
 #if !defined (CONFIG_IDF_TARGET) || defined (CONFIG_IDF_TARGET_ESP32)
-      spi_host_device_t spi_host = VSPI_HOST;
+     #if defined (VSPI_HOST)
+       spi_host_device_t spi_host = VSPI_HOST;
+     #elif defined (SPI3_HOST)
+       spi_host_device_t spi_host = SPI3_HOST;
+     #else
+       spi_host_device_t spi_host = SPI2_HOST;
+     #endif
 #else
       spi_host_device_t spi_host = SPI2_HOST;
 #endif
     };
 
     constexpr Bus_SPI(void) = default;
+#if defined (ARDUINO) && (defined (CONFIG_IDF_TARGET_ESP32P4) \
+ || defined (CONFIG_IDF_TARGET_ESP32C5) || defined (CONFIG_IDF_TARGET_ESP32C6) \
+ || defined (CONFIG_IDF_TARGET_ESP32C61))
+    ~Bus_SPI(void) override;
+#endif
 
     const config_t& config(void) const { return _cfg; }
 
@@ -127,6 +138,7 @@ namespace lgfx
     void addDMAQueue(const uint8_t* data, uint32_t length) override;
     void execDMAQueue(void) override;
     uint8_t* getDMABuffer(uint32_t length) override { return _flip_buffer.getBuffer(length); }
+    bool reserveDMABuffer(uint32_t length) override { return _flip_buffer.reserve(length); }
 
     void beginRead(uint_fast8_t dummy_bits) override;
     void beginRead(void) override;
@@ -186,6 +198,10 @@ namespace lgfx
     volatile uint32_t* _spi_cmd_reg = nullptr;
     volatile uint32_t* _spi_user_reg = nullptr;
     volatile uint32_t* _spi_dma_out_link_reg = nullptr;
+    // P4 (AXI_DMA) と C5/C61 (AHB_DMA) はディスクリプタアドレスを OUT_LINK と別のレジスタへ書く;
+    #if defined (CONFIG_IDF_TARGET_ESP32P4) || defined (CONFIG_IDF_TARGET_ESP32C5) || defined (CONFIG_IDF_TARGET_ESP32C61)
+    volatile uint32_t* _spi_dma_out_link2_reg = nullptr;
+    #endif
     volatile uint32_t* _spi_dma_outstatus_reg = nullptr;
     volatile uint32_t* _clear_dma_reg = nullptr;
     uint32_t _last_freq_apb = 0;

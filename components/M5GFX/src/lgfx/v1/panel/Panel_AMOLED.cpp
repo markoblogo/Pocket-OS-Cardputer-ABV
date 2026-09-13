@@ -45,6 +45,10 @@ namespace lgfx
                 case 1: madctl = 0x60; break;
                 case 2: madctl = 0xc0; break;
                 case 3: madctl = 0xa0; break;
+                case 4: madctl = 0xc2; break;
+                case 5: madctl = 0x62; break;
+                case 6: madctl = 0x02; break;
+                case 7: madctl = 0xa2; break;
             }
 
             startWrite();
@@ -391,13 +395,6 @@ namespace lgfx
 
         void Panel_AMOLED::setWindow(uint_fast16_t xs, uint_fast16_t ys, uint_fast16_t xe, uint_fast16_t ye)
         {
-            // ESP_LOGD("Panel_AMOLED","setWindow %d %d %d %d", xs, ys, xe, ye);
-            uint16_t w = (xe-xs)+1;
-            if(xs%2!=0 || w%2!=0) { // Panel_AMOLED restriction: x and w must be divisible by 2
-                // ESP_LOGD("LGFX", "clip coords aren't aligned");
-                return;
-            }
-
             if (xs > xe || xe > _width-1) { return; }
             if (ys > ye || ye > _height-1) { return; }
 
@@ -406,6 +403,14 @@ namespace lgfx
             xe += _colstart;
             // Set limit
             if ((xe - xs) >= _width) { xs = 0; xe = _width - 1; }
+
+            // ESP_LOGD("Panel_AMOLED","setWindow %d %d %d %d", xs, ys, xe, ye);
+            uint16_t w = (xe-xs)+1;
+            if(xs%2!=0 || w%2!=0) { // Panel_AMOLED restriction: x and w must be divisible by 2
+                // ESP_LOGD("LGFX", "clip coords aren't aligned");
+                return;
+            }
+
 
             {
                 // Set Column Start Address (CASET)
@@ -576,7 +581,8 @@ namespace lgfx
                     else
                     {
                         size_t wb = w * bytes;
-                        auto buf = _bus->getDMABuffer(wb);
+                        auto buf = get_dma_buffer_checked(wb);
+                        if (!buf) { return; }
                         param->fp_copy(buf, 0, w, param);
                         setWindow(x, y, x + w - 1, y + h - 1);
                         write_bytes(buf, wb, true);
@@ -585,7 +591,8 @@ namespace lgfx
                         {
                             param->src_x = src_x;
                             param->src_y++;
-                            buf = _bus->getDMABuffer(wb);
+                            buf = get_dma_buffer_checked(wb);
+                            if (!buf) { return; }
                             param->fp_copy(buf, 0, w, param);
                             write_bytes(buf, wb, true);
                         }
@@ -601,7 +608,8 @@ namespace lgfx
                     uint32_t i = 0;
                     while (w != (i = param->fp_skip(i, w, param)))
                     {
-                        auto buf = _bus->getDMABuffer(wb);
+                        auto buf = get_dma_buffer_checked(wb);
+                        if (!buf) { return; }
                         int32_t len = param->fp_copy(buf, 0, w - i, param);
                         setWindow(x + i, y, x + i + len - 1, y);
                         write_bytes(buf, len * bytes, true);
@@ -617,7 +625,12 @@ namespace lgfx
 
         //----------------------------------------------------------------------------
 
-
+        Panel_AMOLED_Framebuffer::Panel_AMOLED_Framebuffer(Panel_AMOLED* panel)
+         : _panel(panel)
+        {
+            assert(_panel);
+            setTouch(_panel->getTouch());
+        }
 
         bool Panel_AMOLED_Framebuffer::init(bool use_reset)
         {
@@ -631,6 +644,20 @@ namespace lgfx
             return Panel_FrameBufferBase::init(false);
         }
 
+        void Panel_AMOLED_Framebuffer::setInvert(bool invert)
+        {
+            _panel->setInvert(invert);
+        }
+
+        void Panel_AMOLED_Framebuffer::setBrightness(uint8_t brightness)
+        {
+            _panel->setBrightness(brightness);
+        }
+
+        uint_fast8_t Panel_AMOLED_Framebuffer::getTouchRaw(touch_point_t* tp, uint_fast8_t count)
+        {
+            return _panel->getTouchRaw(tp, count);
+        }
 
         void Panel_AMOLED_Framebuffer::display(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h)
         {
@@ -664,6 +691,31 @@ namespace lgfx
             uint8_t* buf[2];
             buf[0] = bus->getDMABuffer(wb);
             buf[1] = bus->getDMABuffer(wb);
+
+            // getDMABuffer() returns nullptr when the DMA-capable internal heap
+            // cannot satisfy the per-line buffer (transient starvation under
+            // memory pressure). Skip this flush rather than memcpy into a null
+            // pointer; _range_mod stays dirty so the next display() retries once
+            // memory frees. Without this a null buffer faults (StoreProhibited).
+            // Log only the OOM edge and the recovery edge, not every frame.
+            if (!buf[0] || !buf[1])
+            {
+              if (!_dma_oom)
+              {
+                _dma_oom = true;
+#if defined ( ESP_LOGW )
+                ESP_LOGW("Panel_AMOLED", "DMA buffer alloc failed (%u bytes/line); deferring flush", (unsigned)wb);
+#endif
+              }
+              return;
+            }
+            if (_dma_oom)
+            {
+              _dma_oom = false;
+#if defined ( ESP_LOGI )
+              ESP_LOGI("Panel_AMOLED", "DMA buffer available; resuming flush");
+#endif
+            }
 
             _panel->start_qspi();
             int fbpos = ys * stride + (xs * bpp);
