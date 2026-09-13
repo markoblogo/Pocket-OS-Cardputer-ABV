@@ -22,3 +22,8 @@ Status: maintained reference for the current source tree.
 
 Moving vendored M5 libraries to ESP-IDF Component Manager is deferred until the
 same versions pass the physical-device matrix.
+
+Local M5GFX 0.2.28 corrections: extended named colors are encoded as RGB565;
+CST226 touch reports are clamped to caller capacity and successful coordinate
+reads send the controller synchronization acknowledgement. These paths are not
+used by Cardputer ADV, but remain safe for consumers of the vendored library.
