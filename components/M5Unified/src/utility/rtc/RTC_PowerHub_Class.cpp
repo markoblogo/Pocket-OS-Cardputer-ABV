@@ -116,7 +116,7 @@ namespace m5
 
       }
     }
-    if (date->date >= 0)
+    if (date && date->date >= 0)
     {
       irq_enable = true;
       buf[2] = date->date & 0x1f;
@@ -128,8 +128,8 @@ namespace m5
       bitOn(0xB0, irq_enable);
       bitOn(0xD3, irq_enable);
     } else {
-      bitOff(0xB0, irq_enable);
-      bitOff(0xD3, irq_enable);
+      bitOff(0xB0, 0x01);
+      bitOff(0xD3, 0x01);
     }
 
     return irq_enable;
@@ -150,6 +150,6 @@ namespace m5
   void RTC_PowerHub_Class::disableIRQ(void)
   {
     if (!_init) { return; }
-    bitOff(0xD3, 0); // disable alarm
+    bitOff(0xD3, 0x01); // disable alarm
   }
 }

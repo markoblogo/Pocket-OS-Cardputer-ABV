@@ -16,6 +16,10 @@ on M5GFX is removed because the matching M5GFX 0.2.28 source is already vendored
 as a local component. This prevents ESP-IDF from downloading and compiling a
 second copy; library source is otherwise taken from upstream tag 0.2.21.
 
+Additional M5Unified 0.2.21 corrections define and bound the public LED type
+accessor, reject out-of-range LED writes, accept time-only PowerHub alarms, and
+clear the PowerHub alarm-enable bit with the correct mask.
+
 ## Update procedure
 
 1. Update one firmware dependency per pull request and record its exact upstream
