@@ -11,7 +11,7 @@ evidence for every row. Never publish private recordings, tracks or credentials.
 | Boot/input/display | Cold boot, launcher navigation, text entry and every primary screen | Pending |
 | Music/Reader/SD | Unicode library, playback, navigation, bookmark and SD reprobe | Pending |
 | Voice | Three recordings, playback, verified Wi-Fi export, second export copies zero, originals retained | Pending |
-| Transfer | New displayed password after restart; direct and staged uploads; interrupted upload recovery | Pending |
+| Transfer | New displayed password after restart; staged small/large uploads; interrupted upload recovery | Pending |
 | Persistence | Inbox recovery across reboot and controlled power interruption without auto-format | Pending |
 | GNSS/Journey | UART/NMEA/outdoor fix, stale-fix rejection, reconnect without bridged points | Pending |
 | Endurance | Journey plus Music for 20-30 minutes; clean stop, closed CSV, plausible route distance | Pending |
