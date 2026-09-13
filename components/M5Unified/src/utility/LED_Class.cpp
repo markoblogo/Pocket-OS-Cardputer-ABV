@@ -32,6 +32,15 @@ namespace m5
     return count;
   }
 
+  LED_Base::led_type_t LED_Class::getLedType(size_t index) const
+  {
+    if (!_led_instance || index >= _led_instance->getCount())
+    {
+      return LED_Base::led_type_unknown;
+    }
+    return _led_instance->getLedType(index);
+  }
+
   RGBColor* LED_Class::getBuffer(void)
   {
     if (!begin()) { return nullptr; }
@@ -72,6 +81,7 @@ namespace m5
 
     int32_t len = static_cast<int32_t>(length);
     int32_t count = _led_instance->getCount();
+    if (index >= static_cast<size_t>(count) || len <= 0) { return; }
     if (len > count - (int32_t)index)
     {
       len = count - index;
