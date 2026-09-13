@@ -26,6 +26,8 @@ assert "generated password displayed on Cardputer" in smoke
 audit = read("AUDIT.md")
 assert "up to 32 MB" in audit
 assert "Large upload remains disabled" not in audit
+assert "Direct upload is limited" not in audit
+assert "one direct upload" not in audit
 
 readme = read("README.md")
 assert "release candidate" in readme
