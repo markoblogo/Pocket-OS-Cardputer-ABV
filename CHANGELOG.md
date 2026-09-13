@@ -5,6 +5,7 @@
 - Corrected Transfer, staged-upload, release-status, and hardware-acceptance documentation.
 - Added the MIT project license, security policy, dependency provenance, and contributor context.
 - Strengthened CI maintenance and release checks for the next candidate.
+- Extracted Transfer password generation into a bounded, host-tested module.
 
 ## 0.3.0-rc1 - 2026-09-07
 

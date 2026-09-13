@@ -4,6 +4,7 @@ idf_component_register(
         "gnss_service.cpp"
         "journey_service.cpp"
         "persistence.cpp"
+        "transfer_security.cpp"
         "lib/adafruit_tca8418/Adafruit_TCA8418.cpp"
     INCLUDE_DIRS
         "."

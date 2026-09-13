@@ -13,3 +13,6 @@ c++ -std=c++17 -Wall -Wextra -Werror -DABVX_HOST_TEST -I main tests/gnss_test.cp
 
 c++ -std=c++17 -Wall -Wextra -Werror -I main tests/journey_test.cpp main/journey_service.cpp -o "$work/journey"
 "$work/journey"
+
+c++ -std=c++17 -Wall -Wextra -Werror -I main tests/transfer_security_test.cpp main/transfer_security.cpp -o "$work/transfer_security"
+"$work/transfer_security"
