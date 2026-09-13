@@ -35,7 +35,9 @@ private:
 
     bool ready_ = false;
     bool error_ = false;
+#ifndef ABVX_HOST_TEST
     char line_[128] = {};
     size_t line_len_ = 0;
+#endif
     GnssFix fix_;
 };

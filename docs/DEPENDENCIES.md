@@ -4,7 +4,7 @@ Status: maintained reference for the current source tree.
 
 | Dependency | Current version | Source | Distribution boundary |
 | --- | --- | --- | --- |
-| ESP-IDF | 5.4.x (`dependencies.lock` records the exact build line) | https://github.com/espressif/esp-idf | Build toolchain; not vendored |
+| ESP-IDF | 5.4.4 | https://github.com/espressif/esp-idf | Build toolchain; not vendored |
 | M5Unified | 0.2.10 | https://github.com/m5stack/M5Unified | Vendored under `components/M5Unified`; preserve its license |
 | M5GFX | 0.2.15 | https://github.com/m5stack/M5GFX | Vendored under `components/M5GFX`; preserve its license |
 | minimp3 | vendored snapshot | https://github.com/lieff/minimp3 | Vendored under `components/minimp3`; preserve notices |

@@ -1020,6 +1020,7 @@ bool initSd()
         .allocation_unit_size = 16 * 1024,
         .disk_status_check_enable = false,
         .use_one_fat = false,
+        .rootdir_entries = 0,
     };
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = PIN_SD_CS;

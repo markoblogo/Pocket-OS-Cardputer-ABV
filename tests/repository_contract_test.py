@@ -33,4 +33,8 @@ readme = read("README.md")
 assert "release candidate" in readme
 assert "MIT License" in readme
 
+packager = read("tools/package_companion.py")
+assert "root.glob('*.py')" not in packager, "developer utilities must not enter the app bundle"
+assert "runtime_sources" in packager
+
 print("repository contract test: ok")
