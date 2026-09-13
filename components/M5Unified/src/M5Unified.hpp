@@ -37,10 +37,12 @@ namespace m5
     port_d_pin2,   port_d_txd = port_d_pin2,  port_b2_pin2 = port_d_pin2,
     port_e_pin1,   port_e_rxd = port_e_pin1,  port_c2_pin1 = port_e_pin1,
     port_e_pin2,   port_e_txd = port_e_pin2,  port_c2_pin2 = port_e_pin2,
-    sd_spi_sclk,
-    sd_spi_copi,   sd_spi_mosi = sd_spi_copi,
-    sd_spi_cipo,   sd_spi_miso = sd_spi_cipo,
-    sd_spi_cs,     sd_spi_ss  = sd_spi_cs,
+    sd_mmc_clk,    sd_spi_sclk = sd_mmc_clk,
+    sd_mmc_cmd,    sd_spi_copi = sd_mmc_cmd,  sd_spi_mosi = sd_mmc_cmd,
+    sd_mmc_d0,     sd_spi_cipo = sd_mmc_d0,  sd_spi_miso = sd_mmc_d0,
+    sd_mmc_d1,
+    sd_mmc_d2,
+    sd_mmc_d3,     sd_spi_cs   = sd_mmc_d3,  sd_spi_ss   = sd_mmc_d3,
     rgb_led,
     power_hold,
     mbus_pin1, mbus_pin2, mbus_pin3, mbus_pin4, mbus_pin5,
@@ -61,6 +63,7 @@ namespace m5
 #include "utility/Mic_Class.hpp"
 #include "utility/Touch_Class.hpp"
 #include "utility/Log_Class.hpp"
+#include "utility/LED_Class.hpp"
 #include "utility/IMU_Class.hpp"
 #include "utility/IOExpander_Base.hpp"
 
@@ -117,7 +120,8 @@ namespace m5
           uint16_t unit_glass2 : 1;
           uint16_t unit_rca : 1;
           uint16_t module_rca : 1;
-          uint16_t reserve : 7;
+          uint16_t unit_poep4_hdmi : 1;
+          uint16_t reserve : 6;
         } external_display;
         uint16_t external_display_value = 0xFFFF;
       };
@@ -162,7 +166,15 @@ namespace m5
 #elif defined (CONFIG_IDF_TARGET_ESP32C3)
                              = board_t::board_M5StampC3;
 #elif defined (CONFIG_IDF_TARGET_ESP32P4)
+#if defined (BOARD_ID) && BOARD_ID == 31
+                             = board_t::board_M5CoreP4X;
+#elif defined (BOARD_ID) && BOARD_ID == 35
+                             = board_t::board_M5Tab5X;
+#else
                              = board_t::board_M5Tab5;
+#endif
+#elif defined (CONFIG_IDF_TARGET_ESP32C5)
+                             = board_t::board_M5StampC5;
 #elif defined (CONFIG_IDF_TARGET_ESP32) || !defined (CONFIG_IDF_TARGET)
                              = board_t::board_M5AtomLite;
 #else
@@ -206,6 +218,9 @@ namespace m5
 #if defined ( __M5GFX_M5UNITLCD__ )
       M5UnitLCD::config_t unit_lcd;
 #endif
+#if defined ( __M5GFX_M5UNITPOEP4HDMI__ )
+      M5UnitPoEP4HDMI::config_t unit_poep4_hdmi;
+#endif
 #if defined ( __M5GFX_M5UNITRCA__ )
       M5UnitRCA::config_t unit_rca;
 #endif
@@ -219,6 +234,9 @@ namespace m5
     Power_Class Power;
     RTC_Class Rtc;
     Touch_Class Touch;
+    Speaker_Class Speaker;
+    Mic_Class Mic;
+    LED_Class Led;
 
 /*
   /// List of available buttons:
@@ -243,11 +261,10 @@ namespace m5
     /// for external I2C device (Port.A)
     I2C_Class& Ex_I2C = m5::Ex_I2C;
 
-    Speaker_Class Speaker;
-
-    Mic_Class Mic;
 
     static int8_t getPin(pin_name_t name) { return _get_pin_table[name]; }
+    static bool hasSD(void) { return getPin(pin_name_t::sd_mmc_clk) >= 0; }
+    static bool hasSDMMC(void) { return getPin(pin_name_t::sd_mmc_d1) >= 0; }
 
     Button_Class& getButton(size_t index) { return _buttons[index]; }
 
@@ -341,12 +358,19 @@ namespace m5
 
       auto brightness = Display.getBrightness();
       Display.setBrightness(0);
-      bool res = Display.init_without_reset(cfg.clear_display);
+      bool res = false;
+      if (cfg.clear_display) {
+        res = Display.init();
+      } else {
+        res = Display.init_without_reset(false);
+      }
       auto board = _check_boardtype(Display.getBoard());
+      // printf("auto detect board:%d\n",board);
       if (board == board_t::board_unknown) { board = cfg.fallback_board; }
       _board = board;
       _setup_pinmap(board);
       _setup_i2c(board);
+      _setup_led(board);
       if (res && getDisplayCount() == 0) {
         addDisplay(Display);
       }
@@ -354,9 +378,9 @@ namespace m5
 #if defined ( __M5GFX_M5ATOMDISPLAY__ )
       if (cfg.external_display.atom_display) {
 #if defined (CONFIG_IDF_TARGET_ESP32S3)
-        if (_board == board_t::board_M5AtomS3 || _board == board_t::board_M5AtomS3Lite || _board == board_t::board_M5AtomS3R || _board == board_t::board_M5AtomS3RCam || _board == board_t::board_M5AtomS3RExt || _board == board_t::board_M5AtomEchoS3R)
+        if (_board == board_t::board_M5AtomS3 || _board == board_t::board_M5AtomS3Lite || _board == board_t::board_M5AtomS3R || _board == board_t::board_M5AtomS3RCam || _board == board_t::board_M5AtomS3RExt || _board == board_t::board_M5AtomVoiceS3R)
 #elif !defined (CONFIG_IDF_TARGET) || defined (CONFIG_IDF_TARGET_ESP32)
-        if (_board == board_t::board_M5AtomLite || _board == board_t::board_M5AtomMatrix || _board == board_t::board_M5AtomEcho || _board == board_t::board_M5AtomPsram)
+        if (_board == board_t::board_M5AtomLite || _board == board_t::board_M5AtomMatrix || _board == board_t::board_M5AtomVoice || _board == board_t::board_M5AtomPsram)
 #else
         if (false)
 #endif
@@ -372,13 +396,26 @@ namespace m5
       _begin(cfg);
 
 
+      // Unit PoEP4 has no built-in LCD; attach its LT8912B HDMI output as a board display.
+#if defined ( __M5GFX_M5UNITPOEP4HDMI__ )
+      if (cfg.external_display.unit_poep4_hdmi && _board == board_t::board_M5UnitPoEP4 && getDisplayCount() == 0)
+      {
+        M5UnitPoEP4HDMI dsp(cfg.unit_poep4_hdmi);
+        dsp.setI2C(&In_I2C);
+        if (cfg.clear_display ? dsp.init() : dsp.init_without_reset(false)) {
+          addDisplay(dsp);
+        }
+      }
+#endif
+
       // Module Display / Unit OLED / Unit LCD is determined after _begin (because it must be after external power supply)
 #if defined ( __M5GFX_M5MODULEDISPLAY__ )
       if (cfg.external_display.module_display) {
 #if defined (CONFIG_IDF_TARGET_ESP32P4)
-        if (_board == board_t::board_M5Tab5)
+        if (_board == board_t::board_M5Tab5 || _board == board_t::board_M5Tab5X)
 #elif defined (CONFIG_IDF_TARGET_ESP32S3)
-        if (_board == board_t::board_M5StackCoreS3 || _board == board_t::board_M5StackCoreS3SE)
+        if (_board == board_t::board_M5StackCoreS3 || _board == board_t::board_M5StackCoreS3SE
+         || _board == board_t::board_M5StackChan)
 #elif !defined (CONFIG_IDF_TARGET) || defined (CONFIG_IDF_TARGET_ESP32)
         if (_board == board_t::board_M5Stack || _board == board_t::board_M5StackCore2 || _board == board_t::board_M5Tough)
 #else
@@ -393,8 +430,8 @@ namespace m5
       }
 #endif
 
-      // Speaker selection is performed after the Module Display has been determined.
-      _begin_spk(cfg);
+      // Audio selection is performed after the Module Display has been determined.
+      _begin_audio(cfg);
 
       update();
 
@@ -571,7 +608,7 @@ namespace m5
               || (!port_a_used && ( // ATOM does not allow video output via UnitRCA when PortA is used.
                    board == board_t::board_M5AtomLite
                 || board == board_t::board_M5AtomMatrix
-                || board == board_t::board_M5AtomEcho
+                || board == board_t::board_M5AtomVoice
                 || board == board_t::board_M5AtomPsram
                 || board == board_t::board_M5AtomU
               )))
@@ -601,6 +638,18 @@ namespace m5
     IOExpander_Base& getIOExpander(size_t idx) { return *_io_expander[idx & 1]; };
 
   private:
+    /// Power_Class needs to release the interrupt path of the wakeup pin before sleeping,
+    /// which requires knowledge of how the board is wired. That knowledge lives here.
+    friend class Power_Class;
+
+    /// Release every interrupt source that drives the wakeup pin of this board.
+    /// A touch panel keeps its INT asserted until the touch data is read, and an
+    /// interrupt expander only reports changes, so both have to be consumed.
+    /// Otherwise the wakeup pin stays asserted and no further event can wake the device.
+    /// @attention For internal use. Called from Power_Class immediately before sleeping.
+    /// @return false when clearing required communication with a device and it failed.
+    bool _clearWakeupInterrupt(void);
+
     static constexpr std::size_t BTNPWR_MIN_UPDATE_MSEC = 4;
 
     Button_Class _buttons[5];
@@ -617,26 +666,48 @@ namespace m5
     bool _use_pmic_button = false;
 
     void _begin(const config_t& cfg);
-    void _begin_spk(config_t& cfg);
+    void _begin_audio(config_t& cfg);
     bool _begin_rtc_imu(const config_t& cfg);
 
     board_t _check_boardtype(board_t);
     void _setup_i2c(board_t);
+    void _setup_led(board_t);
+    /// probe を始める前に一度だけ、デバイスの電源が安定するのを待つ。
+    static void _wait_i2c_device_power(void);
+
+    /// 指定ピンのバス上に、指定した 7bit アドレスのデバイスが居るかを調べる。
+    /// (M5GFX にも同名だった _probe_i2c_addr があるが、あちらは複数アドレスを
+    ///  ビット列で返す別物。取り違えを避けるため名前を分けている)
+    /// @return true = ACK が返った (デバイスが存在する)。
+    ///         false は「ACK を確認できなかった」であり、不在のほかバスが
+    ///         成立していない場合・probe 用ポートの初期化に失敗した場合を含む。
+    bool _probe_i2c_addr(uint8_t sda, uint8_t scl, uint8_t addr);
 
     static void _setup_pinmap(board_t);
     static bool _speaker_enabled_cb_core2(void* args, bool enabled);
     static bool _speaker_enabled_cb_cores3(void* args, bool enabled);
-    static bool _speaker_enabled_cb_hat_spk(void* args, bool enabled);
-    static bool _speaker_enabled_cb_atomic_echo(void* args, bool enabled);
+    static bool _speaker_enabled_cb_sticks3(void* args, bool enabled);
+    static bool _speaker_enabled_cb_papercolor(void* args, bool enabled);
+    static bool _speaker_enabled_cb_stopwatch(void* args, bool enabled);
+    static bool _speaker_enabled_cb_chain_captain(void* args, bool enabled);
     static bool _speaker_enabled_cb_tab5(void* args, bool enabled);
+    static bool _speaker_enabled_cb_corep4x(void* args, bool enabled);
     static bool _speaker_enabled_cb_cardputer_adv(void* args, bool enabled);
-    static bool _microphone_enabled_cb_stickc(void* args, bool enabled);
+    static bool _speaker_enabled_cb_atom_echos3r(void* args, bool enabled);
+    static bool _speaker_enabled_cb_atomic_echo(void* args, bool enabled);
+    static bool _speaker_enabled_cb_hat_spk(void* args, bool enabled);
     static bool _microphone_enabled_cb_cores3(void* args, bool enabled);
+    static bool _microphone_enabled_cb_stickc(void* args, bool enabled);
+    static bool _microphone_enabled_cb_sticks3(void* args, bool enabled);
+    static bool _microphone_enabled_cb_papercolor(void* args, bool enabled);
+    static bool _microphone_enabled_cb_papermono(void* args, bool enabled);
+    static bool _microphone_enabled_cb_stopwatch(void* args, bool enabled);
+    static bool _microphone_enabled_cb_chain_captain(void* args, bool enabled);
+    static bool _microphone_enabled_cb_tab5(void* args, bool enabled);
+    static bool _microphone_enabled_cb_corep4x(void* args, bool enabled);
+    static bool _microphone_enabled_cb_cardputer_adv(void* args, bool enabled);
     static bool _microphone_enabled_cb_atomic_echo(void* args, bool enabled);
     static bool _microphone_enabled_cb_atom_echos3r(void* args, bool enabled);
-    static bool _speaker_enabled_cb_atom_echos3r(void* args, bool enabled);
-    static bool _microphone_enabled_cb_tab5(void* args, bool enabled);
-    static bool _microphone_enabled_cb_cardputer_adv(void* args, bool enabled);
 
     static int8_t _get_pin_table[pin_name_max];
   };

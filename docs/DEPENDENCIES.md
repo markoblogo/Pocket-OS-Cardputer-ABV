@@ -5,11 +5,16 @@ Status: maintained reference for the current source tree.
 | Dependency | Current version | Source | Distribution boundary |
 | --- | --- | --- | --- |
 | ESP-IDF | 5.4.4 | https://github.com/espressif/esp-idf | Build toolchain; not vendored |
-| M5Unified | 0.2.10 | https://github.com/m5stack/M5Unified | Vendored under `components/M5Unified`; preserve its license |
+| M5Unified | 0.2.21 (`3eaaf828`) | https://github.com/m5stack/M5Unified | Vendored under `components/M5Unified`; preserve its license |
 | M5GFX | 0.2.28 (`d91077b9`) | https://github.com/m5stack/M5GFX | Vendored under `components/M5GFX`; preserve its license |
 | minimp3 | vendored snapshot | https://github.com/lieff/minimp3 | Vendored under `components/minimp3`; preserve notices |
 | Adafruit TCA8418 | local ESP-IDF port | https://github.com/adafruit/Adafruit_TCA8418 | Source under `main/lib`; preserve notices |
 | parakeet-mlx/model weights | optional, user-installed | documented in `VOICE_TO_TEXT.md` | Never bundled in firmware or Companion |
+
+Local vendor patch: the M5Unified 0.2.21 `idf_component.yml` registry dependency
+on M5GFX is removed because the matching M5GFX 0.2.28 source is already vendored
+as a local component. This prevents ESP-IDF from downloading and compiling a
+second copy; library source is otherwise taken from upstream tag 0.2.21.
 
 ## Update procedure
 

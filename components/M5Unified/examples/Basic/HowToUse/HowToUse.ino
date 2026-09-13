@@ -49,6 +49,9 @@
 // If you use UnitRCA (for Video output), write this.
 #include <M5UnitRCA.h>
 
+// If you use AddOn Display Out For PoE-P4, write this.
+#include <M5UnitPoEP4HDMI.h>
+
 // * The display header must be included before the M5Unified library.
 
 //----------------------------------------------------------------
@@ -101,6 +104,7 @@ void setup(void)
   cfg.external_display.unit_lcd       = false; // default=true. use UnitLCD
   cfg.external_display.unit_rca       = false; // default=true. use UnitRCA VideoOutput
   cfg.external_display.module_rca     = false; // default=true. use ModuleRCA VideoOutput
+  cfg.external_display.unit_poep4_hdmi = false; // default=true. use AddOn Display Out For PoE-P4
 /*
 ※ Unit OLED, Unit Mini OLED, Unit GLASS2 cannot be distinguished at runtime and may be misidentified as each other.
 
@@ -112,6 +116,7 @@ void setup(void)
  - unit_oled
  - unit_mini_oled
  - unit_lcd
+ - unit_poep4_hdmi
 
 ※ Displays that cannot be auto-detected
  - module_rca
@@ -181,6 +186,16 @@ void setup(void)
 // cfg.unit_lcd.i2c_freq = 400000;
 // cfg.unit_lcd.i2c_port = I2C_NUM_0;
 #endif
+#if defined ( __M5GFX_M5UNITPOEP4HDMI__ ) // setting for AddOn Display Out For PoE-P4.
+// Supported timings only. Choose one of the following two modes:
+// cfg.unit_poep4_hdmi.width = 1280;
+// cfg.unit_poep4_hdmi.height = 720;
+// cfg.unit_poep4_hdmi.refresh_rate = 60;
+
+// cfg.unit_poep4_hdmi.width = 1920;
+// cfg.unit_poep4_hdmi.height = 1080;
+// cfg.unit_poep4_hdmi.refresh_rate = 30;
+#endif
 
   // begin M5Unified.
   M5.begin(cfg);
@@ -197,6 +212,7 @@ void setup(void)
 //    m5::board_t::board_M5UnitOLED,
 //    m5::board_t::board_M5UnitLCD,
 //    m5::board_t::board_M5UnitRCA,
+//    m5::board_t::board_M5UnitPoEP4HDMI,
   } );
 
   if (M5.Speaker.isEnabled())
@@ -265,127 +281,70 @@ void setup(void)
   switch (M5.getBoard())
   {
 #if defined (CONFIG_IDF_TARGET_ESP32S3)
-  case m5::board_t::board_M5StackCoreS3:
-    name = "StackCoreS3";
-    break;
-  case m5::board_t::board_M5StackCoreS3SE:
-    name = "StackCoreS3SE";
-    break;
-  case m5::board_t::board_M5StampS3:
-    name = "StampS3";
-    break;
-  case m5::board_t::board_M5AtomS3U:
-    name = "ATOMS3U";
-    break;
-  case m5::board_t::board_M5AtomS3Lite:
-    name = "ATOMS3Lite";
-    break;
-  case m5::board_t::board_M5AtomS3:
-    name = "ATOMS3";
-    break;
-  case m5::board_t::board_M5AtomS3R:
-    name = "ATOMS3R";
-    break;
-  case m5::board_t::board_M5AtomS3RCam:
-    name = "ATOMS3R Camera";
-    break;
-  case m5::board_t::board_M5AtomS3RExt:
-    name = "ATOMS3R Ext";
-    break;
-  case m5::board_t::board_M5AtomEchoS3R:
-    name = "ATOM ECHO S3R";
-    break;
-  case m5::board_t::board_M5Dial:
-    name = "Dial";
-    break;
-  case m5::board_t::board_M5DinMeter:
-    name = "DinMeter";
-    break;
-  case m5::board_t::board_M5Capsule:
-    name = "Capsule";
-    break;
-  case m5::board_t::board_M5Cardputer:
-    name = "Cardputer";
-    break;
-  case m5::board_t::board_M5CardputerADV:
-    name = "CardputerADV";
-    break;
-  case m5::board_t::board_M5VAMeter:
-    name = "VAMeter";
-    break;
-  case m5::board_t::board_M5PaperS3:
-    name = "PaperS3";
-    break;
+  case m5::board_t::board_M5StackCoreS3:    name = "StackCoreS3";    break;
+  case m5::board_t::board_M5StackCoreS3SE:  name = "StackCoreS3SE";  break;
+  case m5::board_t::board_M5StickS3:        name = "StickS3";        break;
+  case m5::board_t::board_M5StampS3:        name = "StampS3";        break;
+  case m5::board_t::board_M5StampS3Bat:     name = "StampS3Bat";     break;
+  case m5::board_t::board_M5StampS3Mini:    name = "StampS3Mini";    break;
+  case m5::board_t::board_M5StampPLC:       name = "StampPLC";       break;
+  case m5::board_t::board_M5AtomS3U:        name = "ATOMS3U";        break;
+  case m5::board_t::board_M5AtomS3Lite:     name = "ATOMS3Lite";     break;
+  case m5::board_t::board_M5AtomS3:         name = "ATOMS3";         break;
+  case m5::board_t::board_M5AtomS3R:        name = "ATOMS3R";        break;
+  case m5::board_t::board_M5AtomS3RCam:     name = "ATOMS3R Camera"; break;
+  case m5::board_t::board_M5AtomS3RExt:     name = "ATOMS3R Ext";    break;
+  case m5::board_t::board_M5AtomVoiceS3R:   name = "ATOM Voice S3R"; break;
+  case m5::board_t::board_M5Dial:           name = "Dial";           break;
+  case m5::board_t::board_M5DinMeter:       name = "DinMeter";       break;
+  case m5::board_t::board_M5Capsule:        name = "Capsule";        break;
+  case m5::board_t::board_M5Cardputer:      name = "Cardputer";      break;
+  case m5::board_t::board_M5CardputerADV:   name = "CardputerADV";   break;
+  case m5::board_t::board_M5VAMeter:        name = "VAMeter";        break;
+  case m5::board_t::board_M5PaperS3:        name = "PaperS3";        break;
+  case m5::board_t::board_M5PaperDIY:       name = "PaperDIY";       break;
+  case m5::board_t::board_M5PowerHub:       name = "PowerHub";       break;
+  case m5::board_t::board_M5PaperColor:     name = "PaperColor";     break;
+  case m5::board_t::board_M5PaperMono:      name = "PaperMono";      break;
+  case m5::board_t::board_M5StopWatch:      name = "StopWatch";      break;
+  case m5::board_t::board_M5AirQ:           name = "AirQ";           break;
+  case m5::board_t::board_M5StackChan:      name = "StackChan";      break;
+  case m5::board_t::board_M5ChainCaptain:   name = "ChainCaptain";   break;
+  case m5::board_t::board_M5DualKey:        name = "DualKey";        break;
 #elif defined (CONFIG_IDF_TARGET_ESP32C3)
-  case m5::board_t::board_M5StampC3:
-    name = "StampC3";
-    break;
-  case m5::board_t::board_M5StampC3U:
-    name = "StampC3U";
-    break;
+  case m5::board_t::board_M5StampC3:        name = "StampC3";        break;
+  case m5::board_t::board_M5StampC3U:       name = "StampC3U";       break;
+#elif defined (CONFIG_IDF_TARGET_ESP32C5)
+  case m5::board_t::board_M5StampC5:        name = "StampC5";        break;
+  case m5::board_t::board_M5ToughC5:        name = "ToughC5";        break;
 #elif defined (CONFIG_IDF_TARGET_ESP32C6)
-  case m5::board_t::board_M5NanoC6:
-    name = "NanoC6";
-    break;
-  case m5::board_t::board_M5UnitC6L:
-    name = "UnitC6L";
-    break;
-  case m5::board_t::board_ArduinoNessoN1:
-    name = "NessoN1";
-    break;
+  case m5::board_t::board_M5NanoC6:         name = "NanoC6";         break;
+  case m5::board_t::board_M5UnitC6L:        name = "UnitC6L";        break;
+  case m5::board_t::board_M5StampC6:        name = "StampC6";        break;
+  case m5::board_t::board_ArduinoNessoN1:   name = "NessoN1";        break;
+#elif defined (CONFIG_IDF_TARGET_ESP32H2)
+  case m5::board_t::board_M5NanoH2:         name = "NanoH2";         break;
 #elif defined (CONFIG_IDF_TARGET_ESP32P4)
-  case m5::board_t::board_M5Tab5:
-    name = "Tab5";
-    break;
+  case m5::board_t::board_M5Tab5:           name = "Tab5";           break;
+  case m5::board_t::board_M5UnitPoEP4:      name = "UnitPoEP4";      break;
+  case m5::board_t::board_M5StampP4:        name = "StampP4";        break;
 #else
-  case m5::board_t::board_M5Stack:
-    name = "Stack";
-    break;
-  case m5::board_t::board_M5StackCore2:
-    name = "StackCore2";
-    break;
-  case m5::board_t::board_M5StickC:
-    name = "StickC";
-    break;
-  case m5::board_t::board_M5StickCPlus:
-    name = "StickCPlus";
-    break;
-  case m5::board_t::board_M5StickCPlus2:
-    name = "StickCPlus2";
-    break;
-  case m5::board_t::board_M5StackCoreInk:
-    name = "CoreInk";
-    break;
-  case m5::board_t::board_M5Paper:
-    name = "Paper";
-    break;
-  case m5::board_t::board_M5Tough:
-    name = "Tough";
-    break;
-  case m5::board_t::board_M5Station:
-    name = "Station";
-    break;
-  case m5::board_t::board_M5AtomLite:
-    name = "ATOM Lite";
-    break;
-  case m5::board_t::board_M5AtomMatrix:
-    name = "ATOM Matrix";
-    break;
-  case m5::board_t::board_M5AtomEcho:
-    name = "ATOM ECHO";
-    break;
-  case m5::board_t::board_M5AtomPsram:
-    name = "ATOM PSRAM";
-    break;
-  case m5::board_t::board_M5AtomU:
-    name = "ATOM U";
-    break;
-  case m5::board_t::board_M5TimerCam:
-    name = "TimerCamera";
-    break;
-  case m5::board_t::board_M5StampPico:
-    name = "StampPico";
-    break;
+  case m5::board_t::board_M5Stack:          name = "Stack";          break;
+  case m5::board_t::board_M5StackCore2:     name = "StackCore2";     break;
+  case m5::board_t::board_M5StickC:         name = "StickC";         break;
+  case m5::board_t::board_M5StickCPlus:     name = "StickCPlus";     break;
+  case m5::board_t::board_M5StickCPlus2:    name = "StickCPlus2";    break;
+  case m5::board_t::board_M5StackCoreInk:   name = "CoreInk";        break;
+  case m5::board_t::board_M5Paper:          name = "Paper";          break;
+  case m5::board_t::board_M5Tough:          name = "Tough";          break;
+  case m5::board_t::board_M5Station:        name = "Station";        break;
+  case m5::board_t::board_M5AtomLite:       name = "ATOM Lite";      break;
+  case m5::board_t::board_M5AtomMatrix:     name = "ATOM Matrix";    break;
+  case m5::board_t::board_M5AtomVoice:      name = "ATOM Voice";     break;
+  case m5::board_t::board_M5AtomPsram:      name = "ATOM PSRAM";     break;
+  case m5::board_t::board_M5AtomU:          name = "ATOM U";         break;
+  case m5::board_t::board_M5TimerCam:       name = "TimerCamera";    break;
+  case m5::board_t::board_M5StampPico:      name = "StampPico";      break;
 #endif
   default:
     name = "Who am I ?";
@@ -414,8 +373,11 @@ void setup(void)
   case m5::imu_t::imu_sh200q:
     name = "SH200Q";
     break;
-  default:
+  case m5::imu_t::imu_none:
     name = "none";
+    break;
+  default:
+    name = "unknown";
     break;
   }
   M5.Display.print("IMU:");
@@ -465,6 +427,7 @@ void loop(void)
             : 0;
   if (state)
   {
+    M5.Led.setAllColor(colors[state]);
     M5.Speaker.tone(783.991, 100);
     M5_LOGI("BtnPWR:%s  count:%d", names[state], M5.BtnPWR.getClickCount());
     if (!M5.Display.displayBusy())
@@ -484,6 +447,7 @@ void loop(void)
         : 0;
   if (state)
   {
+    M5.Led.setAllColor(colors[state]);
     M5.Speaker.tone(523.251, 100);
     M5_LOGI("BtnA:%s  count:%d", names[state], M5.BtnA.getClickCount());
     if (!M5.Display.displayBusy())
@@ -502,6 +466,7 @@ void loop(void)
         : 0;
   if (state)
   {
+    M5.Led.setAllColor(colors[state]);
     M5.Speaker.tone(587.330, 100);
     M5_LOGI("BtnB:%s  count:%d", names[state], M5.BtnB.getClickCount());
     if (!M5.Display.displayBusy())
@@ -520,6 +485,7 @@ void loop(void)
         : 0;
   if (state)
   {
+    M5.Led.setAllColor(colors[state]);
     M5.Speaker.tone(659.255, 100);
     M5_LOGI("BtnC:%s  count:%d", names[state], M5.BtnC.getClickCount());
     if (!M5.Display.displayBusy())
@@ -538,6 +504,7 @@ void loop(void)
         : 0;
   if (state)
   {
+    M5.Led.setAllColor(colors[state]);
     M5.Speaker.tone(698.456, 100);
     M5_LOGI("BtnEXT:%s  count:%d", names[state], M5.BtnEXT.getClickCount());
     if (!M5.Display.displayBusy())

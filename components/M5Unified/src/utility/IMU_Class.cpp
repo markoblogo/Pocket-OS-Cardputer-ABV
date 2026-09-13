@@ -86,9 +86,21 @@ namespace m5
         _imu_instance[0].reset(bmi2);
         _imu = imu_t::imu_bmi270;
 
-#if defined ( CONFIG_IDF_TARGET_ESP32S3 )
-        if (board == m5::board_t::board_M5StackCoreS3 && bmi2->getAddress() == 0x69)
-        {  // CoreS3 では、地磁気のY軸Z軸をそれぞれ反転する
+#if defined(CONFIG_IDF_TARGET_ESP32)
+        if (board == m5::board_t::board_M5AtomMatrix) {  // AtomMatrix(new BMI270)
+          _internal_axisorder_fixed[sensor_index_accel] = (internal_axisorder_t)(axis_invert_x | axis_invert_z); // X軸,Z軸反転
+          _internal_axisorder_fixed[sensor_index_gyro ] = (internal_axisorder_t)(axis_invert_x | axis_invert_z); // X軸,Z軸反転
+        }
+#elif defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (board == m5::board_t::board_M5CoreP4X)
+        {
+          _internal_axisorder_fixed[sensor_index_accel] = (internal_axisorder_t)(axis_invert_z);
+          _internal_axisorder_fixed[sensor_index_gyro ] = (internal_axisorder_t)(axis_invert_z);
+        }
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+        if ((board == m5::board_t::board_M5StackCoreS3 || board == m5::board_t::board_M5StackChan)
+         && bmi2->getAddress() == 0x69)
+        {  // CoreS3 / StackChan では、地磁気のY軸Z軸をそれぞれ反転する
           _internal_axisorder_fixed[sensor_index_mag] = (internal_axisorder_t)(axis_invert_y | axis_invert_z); // Y軸,Z軸反転
         } else
         if (board == m5::board_t::board_M5AtomS3R || board == m5::board_t::board_M5AtomS3RCam || board == m5::board_t::board_M5AtomS3RExt)
@@ -96,6 +108,17 @@ namespace m5
           _internal_axisorder_fixed[sensor_index_accel] = (internal_axisorder_t)(axis_order_yxz | axis_invert_y);
           _internal_axisorder_fixed[sensor_index_gyro ] = (internal_axisorder_t)(axis_order_yxz | axis_invert_y);
           _internal_axisorder_fixed[sensor_index_mag  ] = (internal_axisorder_t)(axis_invert_x | axis_invert_z); // X軸,Z軸反転
+        } else
+        if (board == m5::board_t::board_M5ChainCaptain)
+        { // ChainCaptain BMI270 : X=-Y, Y=-X, Z=-Z
+          _internal_axisorder_fixed[sensor_index_accel] = (internal_axisorder_t)(axis_order_yxz | axis_invert_x | axis_invert_y | axis_invert_z);
+          _internal_axisorder_fixed[sensor_index_gyro ] = (internal_axisorder_t)(axis_order_yxz | axis_invert_x | axis_invert_y | axis_invert_z);
+        }
+#elif defined(CONFIG_IDF_TARGET_ESP32C61)
+        if (board == m5::board_t::board_M5CoreMatrix)
+        { // CoreMatrix BMI270 : X=+Y, Y=-X, Z=+Z (90-degree rotation about Z)
+          _internal_axisorder_fixed[sensor_index_accel] = (internal_axisorder_t)(axis_order_yxz | axis_invert_y);
+          _internal_axisorder_fixed[sensor_index_gyro ] = (internal_axisorder_t)(axis_order_yxz | axis_invert_y);
         }
 #endif
 
@@ -532,15 +555,15 @@ namespace m5
       int32_t pv = prev_value[i];
       int32_t diff = d - pv;
       prev_value[i] = d;
-      maxdiff = std::max(maxdiff, abs(diff));
+      maxdiff = std::max<int32_t>(maxdiff, abs(diff));
 
       int32_t av = avg_value[i];
       diff = d - av;
-      maxdiff = std::max(maxdiff, abs(diff));
+      maxdiff = std::max<int32_t>(maxdiff, abs(diff));
 
       diff = (diff + (1 << (average_shifter - 1))) >> average_shifter;
       avg_value[i] = av + diff;
-      // maxdiff = std::max(maxdiff, abs(diff) << (average_shifter));
+      // maxdiff = std::max<int32_t>(maxdiff, abs(diff) << (average_shifter));
     }
 
     int32_t rt = noise_level << 8;

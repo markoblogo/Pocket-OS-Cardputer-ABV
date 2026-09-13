@@ -89,7 +89,8 @@ namespace m5
 
     /// Set timer IRQ
     /// @param milliseconds (0 == disable)
-    /// @return the set number of milliseconds. (0 == disable)
+    /// @return the set number of milliseconds. 0 == disabled, or the timer could not be set
+    ///         (communication failure; the driver then stops the timer on a best-effort basis).
     virtual std::uint32_t setTimerIRQ(std::uint32_t timer_msec) { return 0; };
 
     /// Set alarm by time
@@ -100,6 +101,18 @@ namespace m5
     virtual void disableIRQ(void) {};
 
     virtual bool getVoltLow(void) { return false; }
+
+  protected:
+    /// Check that both nibbles of a (masked) register byte are valid BCD.
+    /// A corrupted I2C read (e.g. 0xFF) would otherwise decode to a
+    /// plausible-looking but impossible value such as year 2165.
+    static bool isValidBcd(std::uint8_t value)
+    {
+      return ((value & 0x0F) <= 9) && ((value >> 4) <= 9);
+    }
+
+    /// Range-check decoded values before committing them to the output.
+    static bool validateDateTime(const rtc_date_t* date, const rtc_time_t* time);
   };
 }
 
