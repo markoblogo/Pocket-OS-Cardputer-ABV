@@ -12,5 +12,7 @@
 | `ARCHITECTURE_DECISIONS.md` | Mixed history/current | Accepted decisions and hardware-gated proposals |
 | Other architecture documents | Reference or proposal | Read their status statement before implementation |
 
-Release evidence belongs in `PROJECT_STATUS.md` and `SMOKE_TEST.md`. A proposal
-or simulator result does not establish physical Cardputer behavior.
+Published release status belongs in `PROJECT_STATUS.md`; physical-device evidence
+belongs in `HARDWARE_ACCEPTANCE.md`. `SMOKE_TEST.md` defines the procedure and
+links to the acceptance record. A proposal or simulator result does not establish
+physical Cardputer behavior.

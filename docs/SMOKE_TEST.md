@@ -2,6 +2,9 @@
 
 Use this checklist after flashing a release checkpoint.
 
+Record release-gate results in `HARDWARE_ACCEPTANCE.md`; this file defines the
+test procedure rather than serving as a second evidence ledger.
+
 ## Boot and Navigation
 
 1. Boot shows the ABVx splash.
