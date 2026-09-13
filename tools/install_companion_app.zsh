@@ -12,7 +12,10 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/ABVx Companion.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/companion_ui"
-cp "$ROOT"/tools/*.py "$APP/Contents/Resources/"
+while IFS= read -r name; do
+  [[ -z "$name" || "$name" == \#* ]] && continue
+  cp "$ROOT/tools/$name" "$APP/Contents/Resources/$name"
+done < "$ROOT/tools/companion_runtime_files.txt"
 cp "$ROOT/tools/companion_ui/index.html" "$APP/Contents/Resources/companion_ui/"
 cp "$ROOT/tools/mac/ABVx.icns" "$APP/Contents/Resources/ABVx.icns"
 xcrun swiftc -O "$ROOT/tools/mac/Companion.swift" -o "$APP/Contents/MacOS/ABVx Companion" -framework Cocoa -framework WebKit

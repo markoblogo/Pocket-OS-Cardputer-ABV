@@ -42,4 +42,3 @@ jobs:
             build/release/bootloader.bin
             build/release/partition-table.bin
             build/release/SHA256SUMS.txt
-            build/flasher_args.json

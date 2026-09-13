@@ -37,4 +37,13 @@ packager = read("tools/package_companion.py")
 assert "root.glob('*.py')" not in packager, "developer utilities must not enter the app bundle"
 assert "runtime_sources" in packager
 
+installer = read("tools/install_companion_app.zsh")
+assert 'tools/*.py' not in installer, "installer must not copy developer utilities"
+assert "companion_runtime_files.txt" in installer
+
+runtime_files = set(read("tools/companion_runtime_files.txt").splitlines())
+assert "abvx_companion_app.py" in runtime_files
+assert "check_firmware_size.py" not in runtime_files
+assert "package_release.py" not in runtime_files
+
 print("repository contract test: ok")

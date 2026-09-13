@@ -24,10 +24,10 @@ backup from this same device, with its matching original partition layout.
 
 ## Flash the candidate
 
-Download the release files and verify `SHA256SUMS` in their directory:
+Download the release files and verify `SHA256SUMS.txt` in their directory:
 
 ```sh
-shasum -a 256 -c SHA256SUMS
+shasum -a 256 -c SHA256SUMS.txt
 ```
 
 Install ESP-IDF 5.4.4 for a development build, or use its esptool environment for
