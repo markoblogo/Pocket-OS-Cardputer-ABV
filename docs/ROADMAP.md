@@ -24,8 +24,8 @@ and distance as experimental until compared with a reference route.
 
 Reconcile main and development, run CI, include checksummed binaries, install and
 backup instructions, generate Companion resources from canonical tools. Promote
-to stable only after hardware evidence. Choose a project-wide license separately;
-retain all donor notices.
+to stable only after hardware evidence. The project-owned code is MIT licensed;
+retain all dependency and donor notices.
 
 ## 5. Improve discovery
 
