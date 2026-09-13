@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | `INSTALL.md` | Current | Backup, flash and first boot |
 | `SMOKE_TEST.md` | Current acceptance contract | Host and physical-device checks |
+| `HARDWARE_ACCEPTANCE.md` | Open release gate | Evidence required before stable release |
 | `DATA_SAFETY.md` | Current | Storage guarantees and limits |
 | `PROJECT_STATUS.md` | Current | Implemented behavior and open evidence |
 | `DEPENDENCIES.md` | Current | Version, source and license provenance |

@@ -31,6 +31,21 @@ into another phone.
 | Inbox and Notes | Local capture and recovery-aware persistence | Keep backups before upgrading |
 | Mac Companion | Compact terminal-style desktop UI for files and device tasks | Local macOS installation; not notarized |
 
+## How it fits together
+
+```mermaid
+flowchart LR
+    Mac[Mac Companion] -->|prepare library| SD[SD card]
+    SD -->|music and books| Pocket[Pocket OS]
+    Pocket -->|temporary WPA2 Transfer| Mac
+    Pocket -->|fresh GNSS fixes| Journey[Journey CSV]
+    Pocket -->|verified Voice export| Mac
+```
+
+Music and books stay on removable storage. Internal Voice recordings move only
+through a manually started Transfer session and remain on the device after a
+verified export.
+
 ## Start here
 
 1. Read the [installation and backup instructions](docs/INSTALL.md). Do not erase
@@ -101,6 +116,7 @@ GNSS reception on the target module, live Voice Wi-Fi export and model-backed
 transcription require separate end-to-end acceptance.
 
 [Changelog](CHANGELOG.md) · [Project status](docs/PROJECT_STATUS.md) ·
+[Hardware acceptance](docs/HARDWARE_ACCEPTANCE.md) ·
 [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
 If this is useful, a star helps others discover it. Hardware reports are even
