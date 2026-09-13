@@ -19,6 +19,10 @@ notarized distribution. Moving/removing Python requires reinstalling. Firmware
 build and flash still require the checkout and ESP-IDF. The installer refuses
 to overwrite an existing app; move the old app aside or supply another path.
 
+Firmware actions use `~/esp/esp-idf-v5.4.4/export.sh`. If ESP-IDF 5.4.4 is
+installed elsewhere, start Companion with `ABVX_IDF_EXPORT` set to that
+installation's `export.sh` path.
+
 ## What connecting means
 
 - USB: firmware connection. It does not expose the SD as a Mac disk.

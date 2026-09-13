@@ -2,30 +2,44 @@ name: Checks
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   host:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
       - run: sh tools/check_host.sh
+      - name: Verify packaged Companion matches canonical sources
+        run: |
+          python3 tools/package_companion.py
+          git diff --exit-code -- tools/ABVx\ Companion.app/Contents/Resources
   firmware:
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.4.2
+    timeout-minutes: 30
+    container: espressif/idf:v5.4.4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build ADV firmware
         shell: bash
         run: |
           . /opt/esp/idf/export.sh
           idf.py build
-      - uses: actions/upload-artifact@v4
+          python3 tools/check_firmware_size.py build/cardputer-abvx-minimal.bin
+          python3 tools/package_release.py --build-dir build --output-dir build/release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cardputer-adv-firmware
+          if-no-files-found: error
+          retention-days: 14
           path: |
-            build/cardputer-abvx-minimal.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
+            build/release/cardputer-abvx-minimal.bin
+            build/release/bootloader.bin
+            build/release/partition-table.bin
+            build/release/SHA256SUMS.txt
             build/flasher_args.json

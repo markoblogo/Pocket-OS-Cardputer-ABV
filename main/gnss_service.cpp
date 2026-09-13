@@ -11,10 +11,10 @@
 namespace {
 #ifndef ABVX_HOST_TEST
 constexpr uart_port_t GNSS_UART = UART_NUM_1;
-#endif
 constexpr int GNSS_RX_PIN = 15;
 constexpr int GNSS_TX_PIN = 13;
 constexpr int GNSS_BAUD = 115200;
+#endif
 constexpr uint32_t GNSS_STALE_MS = 3000;
 
 int hexValue(char value)

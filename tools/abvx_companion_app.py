@@ -27,7 +27,9 @@ from needle_intent_adapter import build_intent_adapter
 
 PROJECT_ROOT = Path(os.environ.get("ABVX_PROJECT_ROOT", Path(__file__).resolve().parent.parent)).expanduser().resolve()
 UI_FILE = Path(__file__).resolve().parent / "companion_ui" / "index.html"
-IDF_EXPORT = Path.home() / "esp/esp-idf-v5.4.2/export.sh"
+IDF_EXPORT = Path(os.environ.get(
+    "ABVX_IDF_EXPORT", Path.home() / "esp/esp-idf-v5.4.4/export.sh"
+)).expanduser()
 BACKUP_ROOT = Path.home() / "ABVxCompanionBackup"
 BACKUP_STATE = BACKUP_ROOT / ".state" / "sync-status.json"
 BACKUP_TRACKS = BACKUP_ROOT / "Tracks"

@@ -22,4 +22,4 @@ individual firmware binaries, not a private device backup.
 The Mac source/setup archive includes the native installer and Python source,
 not a universal, Python-bundled or notarized app. It requires a local Python 3
 installation and Apple command-line build tools. Firmware actions additionally
-require this repository and ESP-IDF 5.4.2. Refer to docs/COMPANION_DESKTOP.md.
+require this repository and ESP-IDF 5.4.4. Refer to docs/COMPANION_DESKTOP.md.

@@ -30,7 +30,7 @@ Download the release files and verify `SHA256SUMS` in their directory:
 shasum -a 256 -c SHA256SUMS
 ```
 
-Install ESP-IDF 5.4.2 for a development build, or use its esptool environment for
+Install ESP-IDF 5.4.4 for a development build, or use its esptool environment for
 the downloaded binaries. List ports safely under zsh:
 
 ```sh
@@ -58,4 +58,4 @@ Use FAT32 SD for media. Start with one MP3 and one TXT via Companion. For Voice
 export open Transfer, start AP, then use its displayed password on the Mac.
 The old hard-coded password is no longer the default for this candidate.
 
-[ESP-IDF setup](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/get-started/).
+[ESP-IDF setup](https://docs.espressif.com/projects/esp-idf/en/v5.4.4/esp32s3/get-started/).
