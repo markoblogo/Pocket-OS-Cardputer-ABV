@@ -2,6 +2,11 @@
 
 # Pocket OS / ABVx for M5Stack Cardputer
 
+[![Checks](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/actions/workflows/checks.yml/badge.svg)](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/actions/workflows/checks.yml)
+[![Release](https://img.shields.io/github/v/release/markoblogo/Pocket-OS-Cardputer-ABV?include_prereleases&label=release)](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases)
+[![ESP-IDF 5.4](https://img.shields.io/badge/ESP--IDF-5.4.x-E7352C)](https://github.com/espressif/esp-idf/tree/release/v5.4)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Music, books, short voice notes and walking tracks. A pocket device, with a Mac companion.**
 
 A keyboard-first ESP-IDF firmware project for Cardputer. Keep your library on SD,
@@ -11,6 +16,9 @@ into another phone.
 [Download releases](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases) ·
 [Installation](docs/INSTALL.md) · [Mac Companion](docs/COMPANION_DESKTOP.md) ·
 [Hardware checklist](docs/SMOKE_TEST.md)
+
+> **Current status:** release candidate. Host tests and firmware compilation pass;
+> Voice transfer, GNSS and extended Journey use still require physical-device acceptance.
 
 ## What you can do
 
@@ -27,14 +35,15 @@ into another phone.
 
 1. Read the [installation and backup instructions](docs/INSTALL.md). Do not erase
    flash when upgrading a device with recordings or notes.
-2. Download the current **pre-release**, or build from this repository using
-   ESP-IDF **5.4.2**. The firmware project is at the repository root.
+2. Download [v0.3.0-rc1](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases/tag/v0.3.0-rc1),
+   or build from this repository using ESP-IDF **5.4.x**. The firmware project
+   is at the repository root.
 3. Prepare music and books with [Mac Companion](docs/COMPANION_DESKTOP.md).
 4. Use the [smoke checklist](docs/SMOKE_TEST.md) on your own hardware before
    relying on a new build away from home.
 
 ```sh
-. "$HOME/esp/esp-idf-v5.4.2/export.sh"
+. "$HOME/esp/esp-idf-v5.4.4/export.sh"
 idf.py build
 ```
 
@@ -98,7 +107,8 @@ If this is useful, a star helps others discover it. Hardware reports are even
 more useful: include your exact board/module, firmware version and reproduction
 steps. Do not attach private voice recordings or location tracks to public issues.
 
-## Licensing and donors
+## Licensing and dependencies
 
-See [third-party notices](docs/THIRD_PARTY_NOTICES.md). A repository-wide license
-has not yet been selected; do not infer blanket relicensing of bundled donor code.
+Project-owned code is available under the [MIT License](LICENSE). Vendored and
+optional dependencies retain their own licenses; see the [dependency inventory](docs/DEPENDENCIES.md)
+and [third-party notices](docs/THIRD_PARTY_NOTICES.md).

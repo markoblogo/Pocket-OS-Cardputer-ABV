@@ -5,7 +5,7 @@ Scope: first-party firmware, build/configuration, simulator, upload tool, and pr
 ## Baseline
 
 - Target: M5Stack Cardputer ADV / ESP32-S3FN8.
-- ESP-IDF: 5.4.2.
+- ESP-IDF: 5.4.x maintenance line.
 - Baseline and hardened firmware builds succeeded.
 - Simulator builds with `-Wall -Wextra`.
 - Python uploader passes bytecode compilation.
@@ -18,8 +18,10 @@ Scope: first-party firmware, build/configuration, simulator, upload tool, and pr
 - Message return routing uses one typed state instead of four stale flags.
 - AP password is random for each Transfer session and displayed only while active.
 - AP accepts one station at a time.
-- Large upload remains disabled; small upload is limited to 64 KB.
-- Removed staged upload routes from the release surface; small upload has bounded receive timeouts.
+- Direct upload is limited to 64 KB. Connections v3 staged upload accepts files
+  up to 32 MB in bounded 2 KB chunks through the main-loop storage handoff.
+- Staged upload uses explicit begin/chunk/finish/abort routes, inactivity timeouts,
+  temporary files, final size verification, and no-overwrite publication.
 - Upload client bounds and sanitizes HTTP responses.
 - Simulator sanitizes SD-derived filenames before terminal output.
 - Notes and recordings fail closed on filename exhaustion instead of overwriting existing files.
@@ -38,7 +40,8 @@ Physical possession, removable-SD confidentiality, secure boot, flash encryption
 - `main/main.cpp` remains monolithic. Split input, storage, audio, transfer, and UI only through hardware-tested incremental refactors.
 - SD hot removal and electrical faults still require manual Settings -> SD Reprobe.
 - Text files and directory lists are bounded, but malicious media safety still depends partly on FatFs, minimp3, and M5 libraries.
-- Small upload writes from the HTTP task; this is acceptable only for the 64 KB release limit. Large transfer needs a new architecture.
+- Direct upload retains the 64 KB boundary. The larger staged path is queued to
+  the main loop and still requires interrupted-transfer hardware stress testing.
 - No automated hardware test harness exists.
 - Clock resets after full power-off until Companion/network time sync exists.
 
@@ -51,4 +54,5 @@ Physical possession, removable-SD confidentiality, secure boot, flash encryption
 5. Reader EN/RU book, speed mode, bookmark reopen.
 6. Notes create/edit/delete and Cyrillic view-only behavior.
 7. Time, Files, Routines, Decide, Settings.
-8. Transfer: random password, ping, list, download, write-test, one small upload, GO shutdown.
+8. Transfer: generated password, ping, list, download, one direct upload, staged
+   500-900 KB and 5-10 MB uploads, interrupted upload recovery, GO shutdown.

@@ -119,7 +119,7 @@ volatile bool connection_dirty = false;
 int connection_req_count = 0;
 char connection_last_endpoint[32] = "-";
 char connection_last_error[64] = "none";
-char connection_ap_password[16] = "cardputer";
+char connection_ap_password[16] = {};
 volatile bool connection_upload_active = false;
 volatile int connection_upload_done = 0;
 volatile int connection_upload_total = 0;
@@ -7334,8 +7334,8 @@ bool startConnections(char* err, size_t err_len)
 
     wifi_config_t ap_config = {};
     const char* ssid = "ABVX-Cardputer";
-    if (std::strcmp(connection_ap_password, "cardputer") == 0)
-        snprintf(connection_ap_password, sizeof(connection_ap_password), "abvx%08lx", static_cast<unsigned long>(esp_random()));
+    // A stopped Transfer session must not retain the previous admission secret.
+    snprintf(connection_ap_password, sizeof(connection_ap_password), "abvx%08lx", static_cast<unsigned long>(esp_random()));
     const char* pass = connection_ap_password;
     snprintf(reinterpret_cast<char*>(ap_config.ap.ssid), sizeof(ap_config.ap.ssid), "%s", ssid);
     snprintf(reinterpret_cast<char*>(ap_config.ap.password), sizeof(ap_config.ap.password), "%s", pass);

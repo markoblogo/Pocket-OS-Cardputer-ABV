@@ -7,6 +7,6 @@
 - Optional parakeet-mlx and NVIDIA/MLX-community model weights are installed
   separately. Their own licenses/model cards apply; weights are not bundled.
 
-A root license for project-owned code has not been selected by the owner. No
-license is inferred from third-party dependencies. M5Burner stable publication
-requires resolving this and the hardware gate.
+The root MIT license applies only to project-owned code. It does not replace or
+relicense bundled third-party components. See `DEPENDENCIES.md` for versions and
+source locations. M5Burner stable publication still requires the hardware gate.

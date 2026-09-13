@@ -27,8 +27,8 @@ Use this checklist after flashing a release checkpoint.
 13. In Launcher, Up on the first app wraps to the last app and Down wraps back to the first.
 14. With Journey active, press `J` from Music List, Track Info, or Listening; Journey reopens without stopping playback.
 15. Let the current track finish while Journey is visible; the next track starts without switching the screen back to Music.
-7. `2` or `I` opens `TRACK INFO`.
-8. `2` or `P` inside Track Info runs the safe probe.
+16. `2` or `I` opens `TRACK INFO`.
+17. `2` or `P` inside Track Info runs the safe probe.
 
 ## Read / Write / Voice
 
@@ -85,7 +85,8 @@ Use this checklist after flashing a release checkpoint.
 
 1. `TRANSFER` starts AP.
 2. Network `ABVX-Cardputer` appears.
-3. Password is `cardputer`.
+3. Join with the generated password displayed on Cardputer. Confirm it changes
+   after stopping and starting Transfer again.
 4. `http://192.168.4.1/api/ping` returns `ping ok`.
 5. `/api/list?path=/music` lists files.
 6. `/api/download?path=/notes/NOTE0001.TXT` downloads when the file exists.

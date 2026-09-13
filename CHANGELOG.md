@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Corrected Transfer, staged-upload, release-status, and hardware-acceptance documentation.
+- Added the MIT project license, security policy, dependency provenance, and contributor context.
+- Strengthened CI maintenance and release checks for the next candidate.
+
 ## 0.3.0-rc1 - 2026-09-07
 
 - Protect non-empty Voice storage from mount-error formatting; recover Inbox generations.
@@ -10,9 +16,6 @@
 - Reject stale/invalid GNSS fixes, sample Journey every five seconds and check close errors.
 - Add host failure-path tests, CI, install guide, candidate release assets and workflow overview.
 - Hardware/real-speech gates remain open; this is not a stable hardware-certified release.
-
-
-## Unreleased
 
 - Added the dependency-free Mac Companion Core for direct-SD status/layout, validated MP3 import, UTF-8 book preparation, and clock sync.
 - Added EPUB spine and FB2 section conversion with title/author/chapter extraction into Reader-compatible UTF-8 TXT; PDF remains out of scope.
@@ -30,8 +33,6 @@
 - Replaced the technical FatFS `FR_INVALID_NAME` error with the user-facing `Unsupported filename`; malformed directory entries are skipped without destabilizing playback.
 - Music list navigation now wraps from the first track to the last with Up, and from the last to the first with Down.
 - Launcher navigation now wraps between its first and last entries in both directions.
-
-## Unreleased
 
 - Persistence: introduced a tested POSIX event-log module with bounded 64-event history and temp-file replacement.
 - Inbox/Timeline: moved persistence from RAM-only state to internal SPIFFS; queued events are committed only from the main loop on Launcher/Inbox screens.
