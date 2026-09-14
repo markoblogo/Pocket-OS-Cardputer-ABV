@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed the Pocket OS to YTMamp cast integration to use API v1 JSON commands, version negotiation, and token-protected LAN requests.
+- Added a pinned machine-readable YTMamp contract and cross-repository CI drift check.
+- Documented opt-in setup and kept physical-device acceptance explicitly pending.
 - Corrected Transfer, staged-upload, release-status, and hardware-acceptance documentation.
 - Added the MIT project license, security policy, dependency provenance, and contributor context.
 - Strengthened CI maintenance and release checks for the next candidate.

@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "api_version": 1,
+  "status": "STABLE_LOCAL_INTEGRATION_CONTRACT",
+  "transport": "http",
+  "default_port": 18880,
+  "security": {
+    "loopback_default": true,
+    "lan_requires_token": true,
+    "token_header": "X-YTMAMP-Token"
+  },
+  "status_endpoint": {
+    "method": "GET",
+    "path": "/api/cast/status"
+  },
+  "command_endpoint": {
+    "method": "POST",
+    "path": "/api/cast/cmd",
+    "content_type": "application/json",
+    "body_property": "action",
+    "actions": ["play", "pause", "toggle", "stop", "next", "prev"]
+  },
+  "response_headers": {
+    "api_version": "x-ytmamp-api-version",
+    "cache_control": "no-store"
+  },
+  "consumer": "https://github.com/markoblogo/Pocket-OS-Cardputer-ABV"
+}

@@ -30,6 +30,7 @@ into another phone.
 | Journey | GNSS tracks, CSV, distance and elapsed time alongside Music | External GNSS; hardware acceptance still pending |
 | Inbox and Notes | Local capture and recovery-aware persistence | Keep backups before upgrading |
 | Mac Companion | Compact terminal-style desktop UI for files and device tasks | Local macOS installation; not notarized |
+| YTMamp remote | Play/pause, previous, next and status over a token-protected local API | Opt-in LAN setup; physical-device acceptance pending |
 
 ## How it fits together
 
@@ -40,6 +41,7 @@ flowchart LR
     Pocket -->|temporary WPA2 Transfer| Mac
     Pocket -->|fresh GNSS fixes| Journey[Journey CSV]
     Pocket -->|verified Voice export| Mac
+    Pocket -->|cast API v1| YTMamp[YTMamp on computer]
 ```
 
 Music and books stay on removable storage. Internal Voice recordings move only
@@ -101,6 +103,10 @@ The Companion does not currently implement a Bluetooth transfer transport.
   all SD/FAT failures or power loss.
 
 [Data safety](docs/DATA_SAFETY.md) · [Voice export and transcription](docs/VOICE_TO_TEXT.md)
+
+## Optional YTMamp control
+
+Pocket OS can act as a small local remote for [YTMamp](https://github.com/markoblogo/YTMamp). Configure the computer address, port `18880`, and a shared token using the [YTMamp setup guide](docs/YTMAMP.md). The repositories share a machine-readable API contract that CI checks on both sides.
 
 ## AI: optional, on the Mac
 
