@@ -101,6 +101,7 @@ constexpr int SPEED_WPM_MAX = 1000;
 constexpr int SPEED_WPM_STEP = 50;
 constexpr uint32_t CAST_REQUEST_TIMEOUT_MS = 1500;
 constexpr int CAST_MAX_HOST = 63;
+constexpr int CAST_MAX_TOKEN = 64;
 constexpr size_t CAST_MAX_TRACE_LINE = 64;
 constexpr uint32_t DEBOUNCE_MS = 180;
 constexpr float PI = 3.14159265358979323846f;
@@ -131,8 +132,9 @@ int connection_time_pending_offset_min = 0;
 uint64_t connection_time_last_epoch = 0;
 int connection_time_last_offset_min = 0;
 bool connection_time_sync_applied = false;
-char cast_host[CAST_MAX_HOST + 1] = "192.168.4.1";
-uint16_t cast_port = 8080;
+char cast_host[CAST_MAX_HOST + 1] = "192.168.4.2";
+uint16_t cast_port = 18880;
+char cast_token[CAST_MAX_TOKEN + 1] = {};
 bool cast_trace_enabled = true;
 char cast_last_endpoint[48] = "-";
 char cast_last_path[96] = "-";
@@ -772,6 +774,7 @@ void saveConfig()
     fprintf(f, "POWER=%d\n", power_save ? 1 : 0);
     fprintf(f, "CAST_HOST=%s\n", cast_host);
     fprintf(f, "CAST_PORT=%u\n", static_cast<unsigned int>(cast_port));
+    fprintf(f, "CAST_TOKEN=%s\n", cast_token);
     fprintf(f, "CAST_TRACE=%d\n", cast_trace_enabled ? 1 : 0);
     if (!flushAndClose(f)) {
         config_status = "RAM";
@@ -789,7 +792,7 @@ void loadConfig()
         saveConfig();
         return;
     }
-    char line[80];
+    char line[128];
     while (fgets(line, sizeof(line), f)) {
         std::string s = line;
         while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
@@ -799,6 +802,10 @@ void loadConfig()
         else if (s.rfind("POWER=", 0) == 0) power_save = s.substr(6) == "1";
         else if (s.rfind("CAST_HOST=", 0) == 0) setCastHost(s.substr(10));
         else if (s.rfind("CAST_PORT=", 0) == 0) setCastPortFromName(s.substr(10));
+        else if (s.rfind("CAST_TOKEN=", 0) == 0) {
+            std::string token = s.substr(11, CAST_MAX_TOKEN);
+            snprintf(cast_token, sizeof(cast_token), "%s", token.c_str());
+        }
         else if (s.rfind("CAST_TRACE=", 0) == 0) cast_trace_enabled = s.substr(11) == "1";
     }
     fclose(f);
@@ -6217,7 +6224,7 @@ void sendHttpError(httpd_req_t* req, const char* endpoint, const char* reason, h
     httpd_resp_send_err(req, code, reason);
 }
 
-bool requestCastEndpoint(esp_http_client_method_t method, const char* path, std::string* response, std::string* err)
+bool requestCastEndpoint(esp_http_client_method_t method, const char* path, std::string* response, std::string* err, const char* body = nullptr)
 {
     if (!cast_trace_enabled) cast_retries_total = 0;
     if (!cast_host[0] || !cast_port) {
@@ -6229,7 +6236,7 @@ bool requestCastEndpoint(esp_http_client_method_t method, const char* path, std:
     if (!full_path.empty() && full_path[0] != '/') full_path.insert(0, 1, '/');
     char url[160] = {};
     const char* host = cast_host;
-    if (!host[0]) host = "192.168.4.1";
+    if (!host[0]) host = "192.168.4.2";
     if (snprintf(url, sizeof(url), "http://%s:%u%s", host, static_cast<unsigned int>(cast_port), full_path.c_str()) >= static_cast<int>(sizeof(url))) {
         if (err) *err = "url too long";
         setCastTrace("URL", full_path.c_str(), false, 0, 0, "url too long");
@@ -6248,6 +6255,12 @@ bool requestCastEndpoint(esp_http_client_method_t method, const char* path, std:
             if (err) *err = "http init";
             setCastTrace(full_path.c_str(), full_path.c_str(), false, 0, 0, "http init failed");
             return false;
+        }
+        esp_http_client_set_header(client, "X-YTMAMP-API-Version", "1");
+        if (cast_token[0]) esp_http_client_set_header(client, "X-YTMAMP-Token", cast_token);
+        if (body) {
+            esp_http_client_set_header(client, "Content-Type", "application/json");
+            esp_http_client_set_post_field(client, body, static_cast<int>(std::strlen(body)));
         }
         ++cast_retries_total;
         esp_err_t rc = esp_http_client_perform(client);
@@ -6278,6 +6291,7 @@ bool requestCastEndpoint(esp_http_client_method_t method, const char* path, std:
         if (err) *err = rc == ESP_OK ? "http error" : esp_err_to_name(rc);
         setCastTrace(full_path.c_str(), full_path.c_str(), false, static_cast<uint16_t>(code), lat, err ? err->c_str() : "failed");
         esp_http_client_cleanup(client);
+        if (rc == ESP_OK && code >= 400 && code < 500 && code != 408 && code != 429) break;
         vTaskDelay(pdMS_TO_TICKS(150 + tries * 120));
         ++tries;
     }
@@ -6311,12 +6325,15 @@ esp_err_t connectionCastStatusHandler(httpd_req_t* req)
     return httpd_resp_sendstr(req, response.empty() ? "OK CAST STATUS\n" : response.c_str());
 }
 
-esp_err_t connectionCastActionHandler(httpd_req_t* req, const char* endpoint, const char* primary, const char* fallback)
+esp_err_t connectionCastActionHandler(httpd_req_t* req, const char* endpoint, const char* action, const char* fallback)
 {
     ++connection_req_count;
     std::string response;
     std::string err;
-    if (!requestCastPathWithCompat(HTTP_METHOD_POST, primary, fallback, &response, &err)) {
+    char body[48] = {};
+    snprintf(body, sizeof(body), "{\"action\":\"%s\"}", action);
+    if (!requestCastEndpoint(HTTP_METHOD_POST, "/api/cast/cmd", &response, &err, body) &&
+        !requestCastEndpoint(HTTP_METHOD_POST, fallback, &response, &err)) {
         sendHttpError(req, endpoint, err.empty() ? "cast action" : err.c_str(), HTTPD_500_INTERNAL_SERVER_ERROR);
         return ESP_OK;
     }
@@ -6327,17 +6344,17 @@ esp_err_t connectionCastActionHandler(httpd_req_t* req, const char* endpoint, co
 
 esp_err_t connectionCastPlayHandler(httpd_req_t* req)
 {
-    return connectionCastActionHandler(req, "/api/cast/play", "/api/cast/play", "/cast/play");
+    return connectionCastActionHandler(req, "/api/cast/play", "toggle", "/cast/play");
 }
 
 esp_err_t connectionCastNextHandler(httpd_req_t* req)
 {
-    return connectionCastActionHandler(req, "/api/cast/next", "/api/cast/next", "/cast/next");
+    return connectionCastActionHandler(req, "/api/cast/next", "next", "/cast/next");
 }
 
 esp_err_t connectionCastPrevHandler(httpd_req_t* req)
 {
-    return connectionCastActionHandler(req, "/api/cast/prev", "/api/cast/prev", "/cast/prev");
+    return connectionCastActionHandler(req, "/api/cast/prev", "prev", "/cast/prev");
 }
 
 void cleanupUploadSession(bool remove_partial)

@@ -15,6 +15,12 @@ jobs:
         with:
           python-version: '3.11'
       - run: sh tools/check_host.sh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: markoblogo/YTMamp
+          path: .compat/ytmamp
+      - name: Verify current YTMamp Cardputer contract
+        run: cmp integrations/ytmamp-v1.json .compat/ytmamp/docs/cardputer-contract.v1.json
       - name: Verify packaged Companion matches canonical sources
         run: |
           python3 tools/package_companion.py

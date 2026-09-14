@@ -35,6 +35,7 @@ assert "one direct upload" not in audit
 readme = read("README.md")
 assert "release candidate" in readme
 assert "MIT License" in readme
+assert "YTMamp setup guide" in readme
 
 docs_index = read("docs/README.md")
 assert "physical-device evidence\nbelongs in `HARDWARE_ACCEPTANCE.md`" in docs_index
