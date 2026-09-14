@@ -128,3 +128,12 @@ steps. Do not attach private voice recordings or location tracks to public issue
 Project-owned code is available under the [MIT License](LICENSE). Vendored and
 optional dependencies retain their own licenses; see the [dependency inventory](docs/DEPENDENCIES.md)
 and [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+
+<!-- ABVX:ECOSYSTEM:BEGIN -->
+## ABVX ecosystem
+
+- [AGENTS.md_generator](https://agentsmd.abvx.xyz/) — Keeps repository guidance and machine-readable context current. Current release: `v0.5.1`.
+- [abvx-agent-skills](https://abvx.xyz/work/abvx-agent-skills) — Uses shared, reviewable agent capabilities during maintenance. Current release: `v0.15.0`.
+
+_This block is generated from the reviewed ABVX ecosystem registry._
+<!-- ABVX:ECOSYSTEM:END -->
