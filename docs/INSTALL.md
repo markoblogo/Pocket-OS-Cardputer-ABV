@@ -1,4 +1,4 @@
-# Install 0.3.0-rc1 (Cardputer ADV only)
+# Install 0.3.0-rc2 (Cardputer ADV only)
 
 This is a release candidate: host checks and ESP-IDF build are not a hardware
 acceptance certificate. Do not flash an original Cardputer with this ADV build.
@@ -49,7 +49,7 @@ installing over existing user data. A merged `firmware.bin` is also supplied for
 M5Burner preparation at offset 0; hardware acceptance is pending before catalog
 publication. The partition table matches the existing 4 MiB app + 2 MiB Voice layout.
 
-Reset, confirm About shows 0.3.0-rc1, and follow SMOKE_TEST.md. A truly blank Voice
+Reset, confirm About shows 0.3.0-rc2, and follow SMOKE_TEST.md. A truly blank Voice
 partition initializes automatically. A damaged non-empty one stays unformatted.
 
 ## First use

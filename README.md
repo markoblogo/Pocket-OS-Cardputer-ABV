@@ -52,7 +52,7 @@ verified export.
 
 1. Read the [installation and backup instructions](docs/INSTALL.md). Do not erase
    flash when upgrading a device with recordings or notes.
-2. Download [v0.3.0-rc1](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases/tag/v0.3.0-rc1),
+2. Download [v0.3.0-rc2](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases/tag/v0.3.0-rc2),
    or build from this repository using ESP-IDF **5.4.x**. The firmware project
    is at the repository root.
 3. Prepare music and books with [Mac Companion](docs/COMPANION_DESKTOP.md).
@@ -116,7 +116,7 @@ or validate model weights. Read the setup instructions before enabling them.
 
 ## Release status
 
-**0.3.0-rc1 is a pre-release**, not a claim of completed hardware acceptance.
+**0.3.0-rc2 is a pre-release**, not a claim of completed hardware acceptance.
 Host regression tests and firmware compilation have passed during development;
 GNSS reception on the target module, live Voice Wi-Fi export and model-backed
 transcription require separate end-to-end acceptance.

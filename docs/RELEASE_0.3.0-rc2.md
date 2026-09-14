@@ -9,6 +9,8 @@ This candidate focuses on maintenance and reproducibility rather than new apps.
 - Pins CI actions, treats host C++ warnings as errors and enforces a 1.75 MiB
   firmware budget.
 - Produces checksummed firmware assets and verifies packaged Companion resources.
+- Implements the YTMamp cast API v1 with JSON commands, version negotiation,
+  shared-token LAN authentication, and a cross-repository contract check.
 
 Software evidence: host checks and clean ESP-IDF 5.4.4 builds pass on the staged
 changes. Physical display, keyboard, SD, audio, Voice Transfer, GNSS, endurance
