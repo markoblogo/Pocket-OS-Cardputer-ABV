@@ -138,6 +138,7 @@ and [third-party notices](docs/THIRD_PARTY_NOTICES.md).
 <!-- ABVX:ECOSYSTEM:BEGIN -->
 ## ABVX ecosystem
 
+- [YTMamp](https://github.com/markoblogo/YTMamp/releases/latest) — Controls YTMamp through the versioned, token-protected cast API and checks the shared contract in CI. Current release: `v0.4.1`.
 - [AGENTS.md_generator](https://agentsmd.abvx.xyz/) — Keeps repository guidance and machine-readable context current. Current release: `v0.5.1`.
 - [abvx-agent-skills](https://abvx.xyz/work/abvx-agent-skills) — Uses shared, reviewable agent capabilities during maintenance. Current release: `v0.15.0`.
 
