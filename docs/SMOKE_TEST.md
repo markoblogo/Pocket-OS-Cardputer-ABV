@@ -115,3 +115,21 @@ test procedure rather than serving as a second evidence ledger.
    close, SD access. Record point count and distance against a known route.
 
 Only after these checks: stable tag, real device video and M5Burner catalog entry.
+# Games smoke check
+
+1. Open `GAMES` from the Launcher and enter `TETRIS`.
+2. Confirm left/right movement, up rotation, down acceleration and Enter drop.
+3. Confirm completed rows disappear and the score/line counter changes.
+4. Press Go/Back and confirm return to `GAMES`, then Go/Back again to Launcher.
+5. Open Music and Journey after leaving Tetris; confirm no audio, GNSS or SD
+   behavior changed. Tetris must not write to SD.
+
+# Games: Klondike and DOOM LITE
+
+1. From `GAMES`, enter `KLONDIKE`; use left/right to move across the top row
+   and up/down to reach the tableau. Enter selects and moves a legal card or
+   open sequence; Go returns to `GAMES`.
+2. Enter `DOOM LITE`; confirm the scene renders without SD, move with up/down,
+   turn with left/right, fire with Enter, and leave with Go.
+3. Reopen Music and Journey after both games. Confirm no reboot, audio stop,
+   GNSS polling error or SD write occurred.

@@ -38,3 +38,18 @@ Then share an actual use case with the Cardputer community.
 Prepared-first Browser, Reader/Notes usability, optional host routing and final
 visual polish remain secondary. Meshtastic is not planned. Firmware chat and
 nano-LLM experiments must not displace capture, media, data safety or Journey.
+# Games direction
+
+The Launcher now has a `GAMES` section with playable Tetris, Klondike and a
+compact `DOOM LITE` raycast prototype.
+Tetris uses the existing Cardputer keyboard and returns to the Games menu without
+rebooting. Controls are left/right to move, up to rotate, down to accelerate,
+Enter to hard-drop, and Go/Back to leave.
+
+Next game slices remain separate:
+
+- Klondike: keyboard-only selection model using arrows, Enter and Go.
+- DOOM LITE: keyboard-only raycast prototype, no SD/WAD dependency, no audio.
+- Full DOOM: still a separate donor integration experiment. The direct
+  Cardputer-doom donor is a proof-of-concept that expects PSRAM and a WAD
+  partition, so it cannot be copied into this 8 MB no-PSRAM firmware unchanged.

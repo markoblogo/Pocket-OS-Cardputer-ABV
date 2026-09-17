@@ -171,7 +171,7 @@ uint32_t connection_upload_last_activity_ms = 0;
 
 LGFX_Sprite canvas(&M5.Display);
 
-enum class Screen { Launcher, Dashboard, MusicList, MusicInfo, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, InboxDetail, GnssLab, Running, Message };
+enum class Screen { Launcher, Dashboard, MusicList, MusicInfo, MusicPlaying, ReaderList, ReaderView, ReaderSpeed, NotesList, NotesView, NotesEdit, NotesDeleteConfirm, RecorderList, RecorderRecording, RecorderPlaying, RecorderDeleteConfirm, TimeApp, FilesList, FilesInfo, FilesDeleteConfirm, Randomizer, HabitsList, HabitsStats, HabitsManage, HabitsEdit, HabitsDisableConfirm, Settings, Connections, InboxList, InboxDetail, GnssLab, Running, Games, Tetris, Klondike, DoomLite, Message };
 enum class Key { None, Up, Down, Left, Right, Ok, Back, Home, One, Two, Backspace };
 enum class VolumeMode { Mute = 0, Mid = 1, Loud = 2 };
 enum class SpeedMode { OneWord = 0, TwoWords = 1, Line = 2 };
@@ -252,6 +252,35 @@ GnssService gnss;
 JourneyService journey;
 uint32_t gnss_last_draw_ms = 0;
 std::string journey_notice;
+
+uint8_t tetris_board[20][10] = {};
+int tetris_piece = 0;
+int tetris_rotation = 0;
+int tetris_x = 3;
+int tetris_y = 0;
+int tetris_score = 0;
+int tetris_lines = 0;
+bool tetris_game_over = false;
+uint32_t tetris_next_drop_ms = 0;
+int games_cursor = 0;
+
+struct KlondikeCard { int id; bool face; };
+std::vector<KlondikeCard> klondike_tableau[7];
+std::vector<KlondikeCard> klondike_stock;
+std::vector<KlondikeCard> klondike_waste;
+std::vector<KlondikeCard> klondike_foundation[4];
+int klondike_cursor = 6;
+int klondike_selected = -1;
+int klondike_score = 0;
+bool klondike_won = false;
+float doom_x = 2.5f;
+float doom_y = 2.5f;
+float doom_angle = 0.0f;
+int doom_health = 100;
+int doom_score = 0;
+uint32_t doom_last_frame_ms = 0;
+uint32_t doom_fire_until_ms = 0;
+bool doom_game_over = false;
 
 std::vector<std::string> tracks;
 std::map<std::string, std::string> music_titles;
@@ -4125,6 +4154,11 @@ void openLauncherApp(int index)
         else showMessage("GNSS", error ? error : "UART unavailable");
         blockInput(250);
     }
+    else if (index == 12) {
+        games_cursor = 0;
+        screen = Screen::Games;
+        blockInput(250);
+    }
 }
 
 const char* resumeName()
@@ -4252,9 +4286,307 @@ void drawCyberAccent()
     // be reintroduced centrally without touching every screen.
 }
 
+struct TetrisCell { int x; int y; };
+const TetrisCell TETRIS_SHAPES[7][4] = {
+    {{0,1},{1,1},{2,1},{3,1}}, {{1,0},{2,0},{1,1},{2,1}},
+    {{1,0},{0,1},{1,1},{2,1}}, {{1,0},{2,0},{0,1},{1,1}},
+    {{0,0},{1,0},{1,1},{2,1}}, {{0,0},{0,1},{1,1},{2,1}},
+    {{2,0},{0,1},{1,1},{2,1}}
+};
+
+TetrisCell tetrisCell(int index, int cell_index, int rotation)
+{
+    TetrisCell cell = TETRIS_SHAPES[index][cell_index];
+    for (int turn = 0; turn < rotation % 4; ++turn) {
+        const int next_x = 3 - cell.y;
+        cell.y = cell.x;
+        cell.x = next_x;
+    }
+    return cell;
+}
+
+bool tetrisFits(int x, int y, int rotation)
+{
+    for (int i = 0; i < 4; ++i) {
+        const TetrisCell cell = tetrisCell(tetris_piece, i, rotation);
+        const int px = x + cell.x;
+        const int py = y + cell.y;
+        if (px < 0 || px >= 10 || py >= 20 || (py >= 0 && tetris_board[py][px])) return false;
+    }
+    return true;
+}
+
+void tetrisSpawn()
+{
+    tetris_piece = (tetris_piece * 17 + tetris_lines + 5) % 7;
+    tetris_rotation = 0;
+    tetris_x = 3;
+    tetris_y = 0;
+    if (!tetrisFits(tetris_x, tetris_y, tetris_rotation)) tetris_game_over = true;
+}
+
+void tetrisLock()
+{
+    for (int i = 0; i < 4; ++i) {
+        const TetrisCell cell = tetrisCell(tetris_piece, i, tetris_rotation);
+        const int px = tetris_x + cell.x;
+        const int py = tetris_y + cell.y;
+        if (px >= 0 && px < 10 && py >= 0 && py < 20) tetris_board[py][px] = 1;
+    }
+    for (int row = 19; row >= 0; --row) {
+        bool full = true;
+        for (int col = 0; col < 10; ++col) if (!tetris_board[row][col]) full = false;
+        if (full) {
+            for (int move = row; move > 0; --move)
+                for (int col = 0; col < 10; ++col) tetris_board[move][col] = tetris_board[move - 1][col];
+            for (int col = 0; col < 10; ++col) tetris_board[0][col] = 0;
+            ++tetris_lines;
+            ++row;
+        }
+    }
+    tetris_score += 10;
+    tetrisSpawn();
+}
+
+void startTetris()
+{
+    memset(tetris_board, 0, sizeof(tetris_board));
+    tetris_piece = 0;
+    tetris_rotation = 0;
+    tetris_x = 3;
+    tetris_y = 0;
+    tetris_score = 0;
+    tetris_lines = 0;
+    tetris_game_over = false;
+    tetris_next_drop_ms = M5.millis() + 650;
+    tetrisSpawn();
+    screen = Screen::Tetris;
+    dirty = true;
+}
+
+void updateTetris()
+{
+    if (screen != Screen::Tetris || tetris_game_over) return;
+    const uint32_t now = M5.millis();
+    if (now < tetris_next_drop_ms) return;
+    tetris_next_drop_ms = now + std::max(130, 650 - tetris_lines * 20);
+    if (tetrisFits(tetris_x, tetris_y + 1, tetris_rotation)) ++tetris_y;
+    else tetrisLock();
+    dirty = true;
+}
+
+void drawGames()
+{
+    canvas.fillScreen(uiBg());
+    canvas.setTextColor(uiFg(), uiBg());
+    canvas.setTextSize(2); canvas.setCursor(8, 8); canvas.print("GAMES");
+    canvas.setTextSize(1); canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(178, 12); canvas.print("1/3");
+    const char* labels[] = {"TETRIS", "KLONDIKE", "DOOM LITE"};
+    canvas.setTextSize(2);
+    for (int i = 0; i < 3; ++i) {
+        canvas.setCursor(8, 40 + i * 24);
+        canvas.setTextColor(i == games_cursor ? uiBg() : uiFg(), i == games_cursor ? uiFg() : uiBg());
+        canvas.printf("%c %s", i == games_cursor ? '>' : ' ', labels[i]);
+    }
+    canvas.setTextSize(1); canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(8, 122); canvas.print("OK OPEN  GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+void drawTetris()
+{
+    canvas.fillScreen(uiBg());
+    canvas.setTextColor(uiFg(), uiBg()); canvas.setTextSize(2);
+    canvas.setCursor(8, 5); canvas.print("TETRIS");
+    canvas.setTextSize(1); canvas.setTextColor(uiAccent(), uiBg());
+    canvas.setCursor(174, 8); canvas.printf("%dL %d", tetris_lines, tetris_score);
+    const int ox = 42, oy = 22, cell = 5;
+    canvas.drawRect(ox - 2, oy - 2, 54, 104, uiDim());
+    for (int row = 0; row < 20; ++row) for (int col = 0; col < 10; ++col)
+        if (tetris_board[row][col]) canvas.fillRect(ox + col * cell, oy + row * cell, cell - 1, cell - 1, uiFg());
+    if (!tetris_game_over) for (int i = 0; i < 4; ++i) {
+        const TetrisCell c = tetrisCell(tetris_piece, i, tetris_rotation);
+        canvas.fillRect(ox + (tetris_x + c.x) * cell, oy + (tetris_y + c.y) * cell, cell - 1, cell - 1, uiAccent());
+    }
+    canvas.setTextSize(1); canvas.setTextColor(uiDim(), uiBg());
+    canvas.setCursor(108, 38); canvas.print("UP ROTATE");
+    canvas.setCursor(108, 52); canvas.print("LEFT/RIGHT");
+    canvas.setCursor(108, 66); canvas.print("DOWN MOVE");
+    canvas.setCursor(108, 80); canvas.print("ENTER DROP");
+    canvas.setCursor(8, 122); canvas.print(tetris_game_over ? "ENTER NEW  GO BACK" : "GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+int klondikeRank(int id) { return id % 13; }
+int klondikeSuit(int id) { return id / 13; }
+bool klondikeRed(int id) { return (klondikeSuit(id) % 2) != 0; }
+
+KlondikeCard* klondikeTop(int slot)
+{
+    if (slot == 1 && !klondike_waste.empty()) return &klondike_waste.back();
+    if (slot >= 2 && slot <= 5 && !klondike_foundation[slot - 2].empty()) return &klondike_foundation[slot - 2].back();
+    if (slot >= 6 && slot <= 12 && !klondike_tableau[slot - 6].empty()) return &klondike_tableau[slot - 6].back();
+    return nullptr;
+}
+
+void klondikeFlipTableau(int column)
+{
+    if (!klondike_tableau[column].empty()) klondike_tableau[column].back().face = true;
+}
+
+void startKlondike()
+{
+    for (auto& column : klondike_tableau) column.clear();
+    klondike_stock.clear(); klondike_waste.clear();
+    for (auto& foundation : klondike_foundation) foundation.clear();
+    std::vector<int> deck;
+    for (int id = 0; id < 52; ++id) deck.push_back(id);
+    uint32_t seed = M5.millis() | 1U;
+    for (int i = 51; i > 0; --i) { seed = seed * 1664525U + 1013904223U; const int j = seed % (i + 1); std::swap(deck[i], deck[j]); }
+    int next = 0;
+    for (int column = 0; column < 7; ++column) {
+        for (int row = 0; row <= column; ++row) klondike_tableau[column].push_back({deck[next++], row == column});
+    }
+    while (next < 52) klondike_stock.push_back({deck[next++], false});
+    klondike_cursor = 6; klondike_selected = -1; klondike_score = 0; klondike_won = false;
+    screen = Screen::Klondike;
+    dirty = true;
+}
+
+bool klondikeCanMove(int source, int destination)
+{
+    KlondikeCard* card = klondikeTop(source);
+    if (!card || !card->face) return false;
+    if (destination >= 2 && destination <= 5) {
+        auto& foundation = klondike_foundation[destination - 2];
+        return klondikeSuit(card->id) == destination - 2 &&
+            klondikeRank(card->id) == static_cast<int>(foundation.size());
+    }
+    if (destination < 6 || destination > 12 || source == destination) return false;
+    auto& column = klondike_tableau[destination - 6];
+    if (column.empty()) return klondikeRank(card->id) == 12;
+    KlondikeCard& target = column.back();
+    return target.face && klondikeRed(card->id) != klondikeRed(target.id) &&
+        klondikeRank(card->id) + 1 == klondikeRank(target.id);
+}
+
+void klondikeMove(int source, int destination)
+{
+    if (!klondikeCanMove(source, destination)) return;
+    KlondikeCard moving;
+    if (source == 1) { moving = klondike_waste.back(); klondike_waste.pop_back(); }
+    else if (source >= 6) { moving = klondike_tableau[source - 6].back(); klondike_tableau[source - 6].pop_back(); klondikeFlipTableau(source - 6); }
+    else { moving = klondike_foundation[source - 2].back(); klondike_foundation[source - 2].pop_back(); }
+    if (destination >= 2 && destination <= 5) klondike_foundation[destination - 2].push_back(moving);
+    else klondike_tableau[destination - 6].push_back(moving);
+    ++klondike_score; klondike_selected = -1;
+    klondike_won = true;
+    for (const auto& foundation : klondike_foundation) if (foundation.size() != 13) klondike_won = false;
+}
+
+void klondikeEnter()
+{
+    if (klondike_won) { startKlondike(); return; }
+    if (klondike_cursor == 0) {
+        if (!klondike_stock.empty()) { KlondikeCard card = klondike_stock.back(); klondike_stock.pop_back(); card.face = true; klondike_waste.push_back(card); }
+        else { while (!klondike_waste.empty()) { KlondikeCard card = klondike_waste.back(); klondike_waste.pop_back(); card.face = false; klondike_stock.push_back(card); } }
+        klondike_selected = -1; return;
+    }
+    if (klondike_selected >= 0) { const int source = klondike_selected; klondikeMove(source, klondike_cursor); return; }
+    KlondikeCard* card = klondikeTop(klondike_cursor);
+    if (card && card->face) klondike_selected = klondike_cursor;
+}
+
+void drawKlondikeCard(int x, int y, KlondikeCard* card, bool selected)
+{
+    canvas.drawRect(x, y, 30, 15, selected ? uiAccent() : uiDim());
+    if (!card || !card->face) { canvas.setCursor(x + 4, y + 4); canvas.print("##"); return; }
+    const char* suits = "CDHS";
+    const char* ranks = "A23456789TJQK";
+    canvas.setTextColor(klondikeRed(card->id) ? uiAccent() : uiFg(), uiBg());
+    canvas.setCursor(x + 3, y + 4); canvas.printf("%c%c", ranks[klondikeRank(card->id)], suits[klondikeSuit(card->id)]);
+}
+
+void drawKlondike()
+{
+    canvas.fillScreen(uiBg()); canvas.setTextSize(1); canvas.setTextColor(uiFg(), uiBg());
+    canvas.setCursor(8, 5); canvas.print("KLONDIKE");
+    canvas.setTextColor(uiAccent(), uiBg()); canvas.setCursor(150, 5); canvas.printf("S%d M%d", static_cast<int>(klondike_stock.size()), klondike_score);
+    drawKlondikeCard(8, 18, nullptr, klondike_cursor == 0);
+    drawKlondikeCard(42, 18, klondike_waste.empty() ? nullptr : &klondike_waste.back(), klondike_cursor == 1);
+    for (int i = 0; i < 4; ++i) drawKlondikeCard(112 + i * 32, 18, klondike_foundation[i].empty() ? nullptr : &klondike_foundation[i].back(), klondike_cursor == i + 2);
+    for (int column = 0; column < 7; ++column) {
+        const int x = 4 + column * 34;
+        for (size_t row = 0; row < klondike_tableau[column].size() && row < 5; ++row) {
+            KlondikeCard* card = &klondike_tableau[column][row];
+            drawKlondikeCard(x, 40 + static_cast<int>(row) * 16, card, klondike_cursor == column + 6 && row + 1 == klondike_tableau[column].size() && klondike_selected >= 0);
+        }
+    }
+    canvas.setTextColor(uiDim(), uiBg()); canvas.setCursor(8, 122);
+    canvas.print(klondike_won ? "WIN  ENTER NEW  GO BACK" : "ARROWS SELECT  ENTER MOVE  GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
+const char* DOOM_MAP[] = {
+    "############", "#..........#", "#.##.###...#", "#....#.....#",
+    "#....#..##.#", "#........#.#", "#..###.....#", "#..........#",
+    "############"
+};
+constexpr int DOOM_MAP_W = 12;
+constexpr int DOOM_MAP_H = 9;
+
+bool doomWall(float x, float y)
+{
+    const int ix = static_cast<int>(x), iy = static_cast<int>(y);
+    return ix < 0 || iy < 0 || ix >= DOOM_MAP_W || iy >= DOOM_MAP_H || DOOM_MAP[iy][ix] == '#';
+}
+
+void startDoomLite()
+{
+    doom_x = 2.5f; doom_y = 2.5f; doom_angle = 0.0f;
+    doom_health = 100; doom_score = 0; doom_fire_until_ms = 0; doom_game_over = false;
+    screen = Screen::DoomLite; dirty = true;
+}
+
+void updateDoomLite()
+{
+    if (screen != Screen::DoomLite || doom_game_over) return;
+    const uint32_t now = M5.millis();
+    if (now - doom_last_frame_ms < 160) return;
+    doom_last_frame_ms = now;
+    if (doom_score < 3 && now > doom_fire_until_ms + 1200) doom_health = std::max(0, doom_health - 2);
+    if (doom_health == 0) doom_game_over = true;
+    dirty = true;
+}
+
+void drawDoomLite()
+{
+    canvas.fillScreen(uiBg()); canvas.setTextColor(uiFg(), uiBg()); canvas.setTextSize(1);
+    canvas.setCursor(8, 4); canvas.printf("DOOM LITE  HP:%d  K:%d", doom_health, doom_score);
+    const int horizon = 58, rays = 80, view_w = 232;
+    for (int ray = 0; ray < rays; ++ray) {
+        const float camera = (static_cast<float>(ray) / rays - 0.5f) * 1.1f;
+        const float angle = doom_angle + camera;
+        float distance = 0.15f;
+        while (distance < 12.0f && !doomWall(doom_x + cosf(angle) * distance, doom_y + sinf(angle) * distance)) distance += 0.08f;
+        distance *= cosf(camera);
+        const int height = std::min(75, static_cast<int>(62.0f / std::max(0.2f, distance)));
+        const int x = 4 + ray * view_w / rays;
+        const uint16_t color = distance < 2.5f ? uiFg() : uiDim();
+        canvas.drawFastVLine(x, horizon - height / 2, height, color);
+    }
+    if (!doom_game_over) {
+        canvas.setTextSize(2); canvas.setTextColor(uiAccent(), uiBg()); canvas.setCursor(112, 48); canvas.print("[+]");
+    }
+    canvas.setTextSize(1); canvas.setTextColor(uiDim(), uiBg()); canvas.setCursor(8, 122);
+    canvas.print(doom_game_over ? "ENTER NEW  GO BACK" : "UP/DN MOVE  L/R TURN  ENTER FIRE  GO BACK");
+    canvas.pushSprite(0, 0);
+}
+
 void drawLauncher()
 {
-    static const char* labels[] = {"[#] LISTEN", "[=] READ", "[+] WRITE", "[o] VOICE", "[~] TIME", "[*] FILES", "[?] DECIDE", "[x] ROUTINES", "[%] SETTINGS", "[~] TRANSFER", "[>] INBOX", "[^] JOURNEY"};
+    static const char* labels[] = {"[#] LISTEN", "[=] READ", "[+] WRITE", "[o] VOICE", "[~] TIME", "[*] FILES", "[?] DECIDE", "[x] ROUTINES", "[%] SETTINGS", "[~] TRANSFER", "[>] INBOX", "[^] JOURNEY", "[G] GAMES"};
     constexpr int launcher_count = sizeof(labels) / sizeof(labels[0]);
     canvas.fillScreen(uiBg());
     drawCyberAccent();
@@ -7621,6 +7953,10 @@ void drawIfDirty()
     else if (screen == Screen::InboxDetail) drawInboxDetail();
     else if (screen == Screen::GnssLab) drawGnssLab();
     else if (screen == Screen::Running) drawRunning();
+    else if (screen == Screen::Games) drawGames();
+    else if (screen == Screen::Tetris) drawTetris();
+    else if (screen == Screen::Klondike) drawKlondike();
+    else if (screen == Screen::DoomLite) drawDoomLite();
     else drawMessage();
     dirty = false;
 }
@@ -7883,11 +8219,68 @@ void handleKey(KeyEvent ev)
     if (handleOneButtonCapture(ev)) return;
 
     if (screen == Screen::Launcher) {
-        if (ev.key == Key::Up) { launcher_index = (launcher_index + 11) % 12; pulseUi(); }
-        else if (ev.key == Key::Down) { launcher_index = (launcher_index + 1) % 12; pulseUi(); }
+        if (ev.key == Key::Up) { launcher_index = (launcher_index + 12) % 13; pulseUi(); }
+        else if (ev.key == Key::Down) { launcher_index = (launcher_index + 1) % 13; pulseUi(); }
         else if (ev.key == Key::Home) { launcher_index = 0; scanMusic(); screen = Screen::MusicList; pulseUi(); }
         else if (ev.key == Key::Two) resumeContext();
         else if (ev.key == Key::Ok) openLauncherApp(launcher_index);
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::Games) {
+        if (ev.key == Key::Up) games_cursor = (games_cursor + 2) % 3;
+        else if (ev.key == Key::Down) games_cursor = (games_cursor + 1) % 3;
+        else if (ev.key == Key::Ok && games_cursor == 0) startTetris();
+        else if (ev.key == Key::Ok && games_cursor == 1) startKlondike();
+        else if (ev.key == Key::Ok && games_cursor == 2) startDoomLite();
+        else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Launcher;
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::Tetris) {
+        if (tetris_game_over && ev.key == Key::Ok) startTetris();
+        else if (ev.key == Key::Left && tetrisFits(tetris_x - 1, tetris_y, tetris_rotation)) --tetris_x;
+        else if (ev.key == Key::Right && tetrisFits(tetris_x + 1, tetris_y, tetris_rotation)) ++tetris_x;
+        else if (ev.key == Key::Down && tetrisFits(tetris_x, tetris_y + 1, tetris_rotation)) ++tetris_y;
+        else if (ev.key == Key::Up && tetrisFits(tetris_x, tetris_y, tetris_rotation + 1)) ++tetris_rotation;
+        else if (ev.key == Key::Ok && !tetris_game_over) {
+            while (tetrisFits(tetris_x, tetris_y + 1, tetris_rotation)) ++tetris_y;
+            tetrisLock();
+        }
+        else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Games;
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::Klondike) {
+        if (ev.key == Key::Left) klondike_cursor = (klondike_cursor + 12) % 13;
+        else if (ev.key == Key::Right) klondike_cursor = (klondike_cursor + 1) % 13;
+        else if (ev.key == Key::Up) klondike_cursor = klondike_cursor >= 6 ? 0 : klondike_cursor;
+        else if (ev.key == Key::Down) klondike_cursor = klondike_cursor < 6 ? 6 : klondike_cursor;
+        else if (ev.key == Key::Ok) klondikeEnter();
+        else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Games;
+        dirty = true;
+        return;
+    }
+
+    if (screen == Screen::DoomLite) {
+        if (doom_game_over && ev.key == Key::Ok) startDoomLite();
+        else if (ev.key == Key::Left) doom_angle -= 0.18f;
+        else if (ev.key == Key::Right) doom_angle += 0.18f;
+        else if (ev.key == Key::Up || ev.key == Key::Down) {
+            const float direction = ev.key == Key::Up ? 0.16f : -0.12f;
+            const float nx = doom_x + cosf(doom_angle) * direction;
+            const float ny = doom_y + sinf(doom_angle) * direction;
+            if (!doomWall(nx, doom_y)) doom_x = nx;
+            if (!doomWall(doom_x, ny)) doom_y = ny;
+        }
+        else if (ev.key == Key::Ok && !doom_game_over && M5.millis() >= doom_fire_until_ms) {
+            doom_fire_until_ms = M5.millis() + 350;
+            if (doom_score < 3) ++doom_score;
+        }
+        else if (ev.key == Key::Home || ev.key == Key::Back) screen = Screen::Games;
         dirty = true;
         return;
     }
@@ -8866,6 +9259,8 @@ extern "C" void app_main(void)
             ui_anim_last_frame_ms = now;
             dirty = true;
         }
+        updateTetris();
+        updateDoomLite();
         if (!display_off && now - marquee_last_frame_ms >= 180) {
             if (screen == Screen::MusicList ||
                 screen == Screen::MusicInfo || screen == Screen::MusicPlaying ||

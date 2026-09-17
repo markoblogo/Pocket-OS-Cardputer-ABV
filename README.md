@@ -28,6 +28,7 @@ into another phone.
 | Reader | Prepared TXT books; EPUB/FB2 conversion on Mac | SD required |
 | Voice | Short internal recordings; verified, non-destructive export | New firmware and Transfer Wi-Fi required |
 | Journey | GNSS tracks, CSV, distance and elapsed time alongside Music | External GNSS; hardware acceptance still pending |
+| Games | Launcher section with keyboard-first Tetris, Klondike and DOOM LITE | DOOM LITE is a compact no-WAD prototype |
 | Inbox and Notes | Local capture and recovery-aware persistence | Keep backups before upgrading |
 | Mac Companion | Compact terminal-style desktop UI for files and device tasks | Local macOS installation; not notarized |
 | YTMamp remote | Play/pause, previous, next and status over a token-protected local API | Opt-in LAN setup; physical-device acceptance pending |

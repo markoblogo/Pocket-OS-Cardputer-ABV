@@ -91,3 +91,9 @@ Hardware-tested baseline for ABVx Pocket OS on Cardputer ADV.
 
 - Minimal ESP-IDF Cardputer ADV firmware split from the M5 UserDemo/Mooncake app framework.
 - ABVx splash, Pocket OS launcher, Music MVP, Reader, Notes, Record, Time, Files, Habits, Settings, and Connections were built iteratively from hardware tests.
+# Unreleased
+
+- Added `GAMES` Launcher section with keyboard-first Tetris and Klondike.
+- Added `DOOM LITE`, a self-contained raycast game imitation with no WAD or SD
+  dependency; full doomgeneric remains outside the release path.
+- Added Games smoke checks and documented the donor/memory boundary.
