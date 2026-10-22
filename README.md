@@ -76,7 +76,8 @@ zsh tools/install_companion_app.zsh
 
 Open **Applications > ABVx Companion**. Choose a task after connecting the relevant
 transport. The native window uses a compact, high-contrast terminal interface.
-It requires an existing Python 3; firmware builds also require ESP-IDF and the
+It requires Python 3 and Apple's command-line tools (`xcrun`/`swiftc`) for the
+local app build; firmware builds also require ESP-IDF and the
 checkout. The app is locally signed, not Apple-notarized. Existing installations
 are preserved; the installer accepts a different destination.
 

@@ -12,6 +12,8 @@ Run `zsh tools/install_companion_app.zsh` once. It installs
 no Terminal or browser tab is needed. The native window hosts the local UI and
 starts its private Python service on localhost port 18765. It refuses a normal
 quit while a background job is running or its state cannot be determined.
+The local installer compiles Swift and requires Apple's command-line tools
+(`xcrun` and `swiftc`) as well as Python 3.
 
 The installer bundles the Python source and UI, but records the current Python
 interpreter and repository path. This is a local installation, not a portable,
