@@ -11,6 +11,8 @@ A pre-release for **M5Stack Cardputer ADV**, 8 MB flash, no PSRAM.
 - Separate, host-testable game rules and game rendering; one framebuffer.
 - Current rc2 dependency/security/YTMamp baseline retained; documentation and
   installation asset claims reconciled.
+- Companion marks imports and note backups busy, blocks competing jobs and
+  refuses shutdown during transfer; loopback HTTP regression covers the state.
 
 ## Install
 

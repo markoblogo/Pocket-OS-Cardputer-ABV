@@ -10,6 +10,7 @@
 - Replace Doom Lite's wall spawn, unconditional kill counter and timer damage with a colour raycaster, enemies, checked shots, ammo and an exit.
 - Preserve the current rc2 dependency/security/YTMamp baseline; retain the 4 MiB app and 2 MiB Voice layout.
 - Reconcile README, installation, hardware evidence, roadmap and source-kit packaging; keep GPS paused and hardware acceptance explicit.
+- Report synchronous imports/note backup as busy so the Mac window cannot quit or start a competing job during transfer.
 
 
 ## 0.3.0-rc2 - 2026-09-14

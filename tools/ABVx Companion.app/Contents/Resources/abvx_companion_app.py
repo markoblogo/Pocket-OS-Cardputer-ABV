@@ -150,6 +150,8 @@ class AppState:
 
     def start(self, name, command):
         with self.lock:
+            if IMPORT_LOCK.locked():
+                raise RuntimeError("Wait for the active file transfer")
             if self.job_state == "RUNNING":
                 raise RuntimeError(f"{self.job_name} is already running")
             self.job_name, self.job_state, self.job_returncode = name, "RUNNING", None
@@ -292,6 +294,8 @@ def device_status():
                         "error": ""}
     except Exception as exc:
         result["sd"]["error"] = str(exc)
+    if IMPORT_LOCK.locked():
+        result["job"] = {**result["job"], "name": "FILE TRANSFER", "state": "RUNNING", "returncode": None}
     job_running = result["job"]["state"] == "RUNNING"
     result["project_ready"] = (PROJECT_ROOT / "CMakeLists.txt").is_file() and (PROJECT_ROOT / "main/main.cpp").is_file()
     result["ready_build"] = IDF_EXPORT.is_file() and result["project_ready"] and not job_running
@@ -483,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
                 STATE.start("FLASH", idf_command("flash", port))
                 self._json(202, {"ok": True, "message": f"Flash started on {port}"})
             elif route.path == "/api/shutdown":
-                if STATE.snapshot()["state"] == "RUNNING":
+                if IMPORT_LOCK.locked() or STATE.snapshot()["state"] == "RUNNING":
                     raise RuntimeError("wait for the active build/flash job")
                 self._json(200, {"ok": True, "message": "Companion stopped"})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -565,8 +569,12 @@ class Handler(BaseHTTPRequestHandler):
             IMPORT_LOCK.release()
 
     def _sync_notes(self, delete_after=False):
-        STATE.set_sync_pending(NOTES, last_file="pull")
+        if not IMPORT_LOCK.acquire(blocking=False):
+            raise RuntimeError("Wait for the active file transfer")
         try:
+            if STATE.snapshot()["state"] == "RUNNING":
+                raise RuntimeError("Wait for the active operation")
+            STATE.set_sync_pending(NOTES, last_file="pull")
             sd = core.resolve_sd(SD_OVERRIDE)
             if not sd.is_dir():
                 raise RuntimeError(f"SD is not a directory: {sd}")
@@ -577,6 +585,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             STATE.set_sync_fail(NOTES, last_file="pull", last_error=str(exc))
             raise
+        finally:
+            IMPORT_LOCK.release()
 
     def _sync_voice(self, delete_after=False):
         if delete_after is not False:

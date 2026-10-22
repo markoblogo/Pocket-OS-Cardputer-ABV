@@ -65,6 +65,21 @@ with tempfile.TemporaryDirectory() as directory:
             assert status == 400 and b"full Pocket OS checkout" in data
             assert request("/api/status", host="untrusted.example")[0] == 403
             assert app.STATE.snapshot()["state"] != "RUNNING"
+            # A synchronous file import owns this lock while reading/copying.
+            # The native Mac window uses this HTTP state to decide if it may quit.
+            with app.IMPORT_LOCK:
+                _, data = request("/api/status")
+                busy = json.loads(data)
+                assert busy["job"]["state"] == "RUNNING", "active import incorrectly appears idle"
+                assert not busy["ready_import"] and not busy["ready_build"]
+                assert request("/api/shutdown", b"{}", app.STATE.token)[0] == 400
+                try:
+                    app.STATE.start("BLOCKED", [sys.executable, "-c", "pass"])
+                except RuntimeError:
+                    pass
+                else:
+                    raise AssertionError("job started while a file import owned storage")
+            assert json.loads(request("/api/status")[1])["job"]["state"] != "RUNNING"
         finally:
             server.shutdown()
             server.server_close()
