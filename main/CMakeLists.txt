@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS
         "main.cpp"
+        "games_app.cpp"
+        "games_core.cpp"
         "gnss_service.cpp"
         "journey_service.cpp"
         "persistence.cpp"

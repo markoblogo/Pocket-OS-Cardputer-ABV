@@ -12,6 +12,8 @@ Run `zsh tools/install_companion_app.zsh` once. It installs
 no Terminal or browser tab is needed. The native window hosts the local UI and
 starts its private Python service on localhost port 18765. It refuses a normal
 quit while a background job is running or its state cannot be determined.
+The local installer compiles Swift and requires Apple's command-line tools
+(`xcrun` and `swiftc`) as well as Python 3.
 
 The installer bundles the Python source and UI, but records the current Python
 interpreter and repository path. This is a local installation, not a portable,
@@ -22,6 +24,12 @@ to overwrite an existing app; move the old app aside or supply another path.
 Firmware actions use `~/esp/esp-idf-v5.4.4/export.sh`. If ESP-IDF 5.4.4 is
 installed elsewhere, start Companion with `ABVX_IDF_EXPORT` set to that
 installation's `export.sh` path.
+
+The release's `ABVx-Companion-*-source.zip` contains these tools and the local
+installer, not a preconfigured app or Python runtime. Extract the kit, run its
+installer, and use a full firmware checkout for build/flash. To isolate backups
+or tests, `ABVX_BACKUP_ROOT` can select another backup directory; the default
+remains `~/ABVxCompanionBackup`.
 
 ## What connecting means
 

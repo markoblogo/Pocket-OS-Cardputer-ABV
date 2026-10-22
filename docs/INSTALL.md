@@ -1,4 +1,4 @@
-# Install 0.3.0-rc2 (Cardputer ADV only)
+# Install 0.3.0-rc3 (Cardputer ADV only)
 
 This is a release candidate: host checks and ESP-IDF build are not a hardware
 acceptance certificate. Do not flash an original Cardputer with this ADV build.
@@ -44,12 +44,14 @@ release directory:
 python -m esptool --chip esp32s3 --port YOUR_PORT --baud 460800 write_flash --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 cardputer-abvx-minimal.bin
 ```
 
-No Voice partition image is included. Never pad/erase the whole flash when
-installing over existing user data. A merged `firmware.bin` is also supplied for
-M5Burner preparation at offset 0; hardware acceptance is pending before catalog
-publication. The partition table matches the existing 4 MiB app + 2 MiB Voice layout.
+No Voice partition image or merged whole-flash image is included. Use the three
+separate binaries at the documented offsets. Never pad/erase the whole flash
+when installing over existing user data. The partition table keeps the existing
+4 MiB app + 2 MiB Voice layout. M5Burner catalog publication remains pending.
 
-Reset, confirm About shows 0.3.0-rc2, and follow SMOKE_TEST.md. A truly blank Voice
+Press BtnRst once without holding BtnG0 after flashing if the screen stays blank:
+USB flashing can leave a manually entered download mode active. Confirm About
+shows 0.3.0-rc3 and follow SMOKE_TEST.md. A truly blank Voice
 partition initializes automatically. A damaged non-empty one stays unformatted.
 
 ## First use

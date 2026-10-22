@@ -1,55 +1,35 @@
 # Roadmap
 
-## 1. Protect data
+## Current: rc3 and a useful demo
 
-Candidate implements mount protection, recoverable Inbox and safe incremental SD
-publication. Next: power-cut/card-removal hardware acceptance; then measured
-recovery-folder pruning. Keep originals and previous good generations.
+Ship tested Games rules, readable layouts and a reproducible pre-release. Verify
+portrait transitions and keyboard repeat on Cardputer. Record Music, Reader and
+Games on the physical device; label any software illustrations accurately.
 
-## 2. Complete Voice -> Mac -> text
+## Reliability
 
-Candidate implements internal Voice inventory/download, verified offload and real
-optional Parakeet adapter. Next: actual recordings on the user's Mac, evaluate
-Russian/Ukrainian/English short notes and street noise. Long recording, live
-streaming and higher sample rates follow only if the short-note flow is useful.
+Complete verified internal Voice export and short-note transcription on the
+owner's Mac. Exercise interrupted writes and storage recovery on backed-up
+media. Recovery-folder pruning needs a measured retention policy; do not delete
+older generations automatically just to reclaim space.
 
-## 3. Finish Journey + Music
+## Maintainability
 
-Freshness and zero-quality fix rejection, 5-second CSV sampling, jump rejection
-and checked close are implemented. Next: identify physical module/pins/power,
-obtain raw NMEA and outdoor fix, then a 20-30 minute outing with music. Treat pace
-and distance as experimental until compared with a reference route.
+Keep rules and renderers separate. Games is the first application module; move
+another screen only when modifying its behavior. Preserve main-loop ownership
+of audio, storage and network handoffs. Maintain the firmware size budget and
+checksummed release packaging.
 
-## 4. Ship a reproducible candidate
+## GPS: paused
 
-Reconcile main and development, run CI, include checksummed binaries, install and
-backup instructions, generate Companion resources from canonical tools. Promote
-to stable only after hardware evidence. The project-owned code is MIT licensed;
-retain all dependency and donor notices.
-
-## 5. Improve discovery
-
-Concise README, illustrated workflow video, issue template and release page.
-Capture real device footage next. Publish in M5Burner after the hardware gate.
-Then share an actual use case with the Cardputer community.
+The CAP's expander answers at 0x43; direct GNSS UART tests received zero bytes.
+Resume only after reseating/contact checks and, if needed, independent power or
+USB-UART measurements. Raw NMEA comes before outdoor fix and Journey + Music.
+Meshtastic is not planned.
 
 ## Later
 
-Prepared-first Browser, Reader/Notes usability, optional host routing and final
-visual polish remain secondary. Meshtastic is not planned. Firmware chat and
-nano-LLM experiments must not displace capture, media, data safety or Journey.
-# Games direction
-
-The Launcher now has a `GAMES` section with playable Tetris, Klondike and a
-compact `DOOM LITE` raycast prototype.
-Tetris uses the existing Cardputer keyboard and returns to the Games menu without
-rebooting. Controls are left/right to move, up to rotate, down to accelerate,
-Enter to hard-drop, and Go/Back to leave.
-
-Next game slices remain separate:
-
-- Klondike: keyboard-only selection model using arrows, Enter and Go.
-- DOOM LITE: keyboard-only raycast prototype, no SD/WAD dependency, no audio.
-- Full DOOM: still a separate donor integration experiment. The direct
-  Cardputer-doom donor is a proof-of-concept that expects PSRAM and a WAD
-  partition, so it cannot be copied into this 8 MB no-PSRAM firmware unchanged.
+Prepared-first Browser, more Reader/Notes polish, optional host routing and final
+artwork. A real no-PSRAM ADV Doom donor exists, but its larger app partition,
+engine/WAD licenses and memory lifecycle need separate qualification. It is not
+a drop-in replacement for the integrated DOOM LITE game or the Voice layout.

@@ -16,3 +16,8 @@ c++ -std=c++17 -Wall -Wextra -Werror -I main tests/journey_test.cpp main/journey
 
 c++ -std=c++17 -Wall -Wextra -Werror -I main tests/transfer_security_test.cpp main/transfer_security.cpp -o "$work/transfer_security"
 "$work/transfer_security"
+
+c++ -std=c++17 -Wall -Wextra -Werror -I main tests/games_test.cpp main/games_core.cpp -o "$work/games"
+"$work/games"
+c++ -std=c++17 -Wall -Wextra -Werror -I tests/render_stub -I main tests/games_render_test.cpp main/games_app.cpp main/games_core.cpp -o "$work/games_render"
+"$work/games_render" "$work"

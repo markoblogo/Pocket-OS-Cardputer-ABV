@@ -1,25 +1,27 @@
-# Project status: 0.3.0-rc2
+# Project status: 0.3.0-rc3
 
-The previous ADV baseline has real user experience with Music/Reader/Notes/Voice
-and Connections/SD flows. This release candidate adds new code requiring new
-acceptance; old hardware results are not silently applied to it.
+This candidate brings the previous Games extraction onto the current main branch,
+including rc2's dependency, Transfer-security, packaging and YTMamp changes.
 
-Implemented: non-destructive Voice mount failure, blank-partition initialization,
-Inbox generation recovery, index-last content-hash sync, shared storage lock,
-source-first UI imports, internal Voice API/offload, optional Parakeet batch ASR,
-fresh-fix Journey logging and checked Stop. Host tests and ESP-IDF build passed.
+Current apps: Music, Reader, internal Voice, Notes, Inbox, Time, Routines, Files,
+Transfer, Games and optional YTMamp control. The Games rules are isolated from
+rendering: portrait Tetris, sequence-aware Klondike and colour DOOM LITE. The
+original Doom engine is not included.
 
-Pending evidence: flash this candidate, export actual internal recordings, real
-ASR quality/timing, power-cut recovery on SPIFFS/FAT, GNSS UART/fix on the physical
-module, 20-30 minute Journey + Music outing. Last known GNSS hardware observation
-was UART B0; receiving coordinates has not been demonstrated in this task.
+Host behavior checks, renderer bounds and firmware compilation are required
+before publication. CI uses ESP-IDF 5.4.4 and enforces the 1.75 MiB app budget.
+The release remains a pre-release: software checks do not close device gates.
 
-The published pre-release is 0.3.0-rc2. It updates ESP-IDF and M5 libraries,
-strengthens release checks, isolates Transfer password generation, and implements
-the versioned YTMamp cast contract. These changes have host/build evidence but no
-new physical-device acceptance. M5Burner publication and real device footage wait
-for that gate.
+GPS work is paused by the owner. Direct UART diagnostics on the tested CAP
+produced zero bytes at six speeds while its I2C expander acknowledged. Journey
+is experimental; no outdoor fix or sports-tracking accuracy is claimed.
 
-See HARDWARE_ACCEPTANCE.md, DATA_SAFETY.md, VOICE_TO_TEXT.md, INSTALL.md and
-SMOKE_TEST.md for current contracts. Older design documents describe proposals,
-not proof of implementation.
+Prior device observations and new candidate acceptance are recorded only in
+HARDWARE_ACCEPTANCE.md. Voice export/ASR quality, interrupted-write recovery,
+endurance and the new Games hardware paths still need their stated checks.
+M5Burner catalog/stable publication remains separate from this GitHub candidate.
+
+Next: device smoke checks for rc3 and an honest Music/Reader/Games demo, following
+DEMO_PLAN.md. GPS need not appear in a demo of the working media and Games paths.
+
+See AUDIT_2026-10-22.md, GAMES.md, DATA_SAFETY.md and INSTALL.md for details.

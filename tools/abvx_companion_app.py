@@ -30,7 +30,7 @@ UI_FILE = Path(__file__).resolve().parent / "companion_ui" / "index.html"
 IDF_EXPORT = Path(os.environ.get(
     "ABVX_IDF_EXPORT", Path.home() / "esp/esp-idf-v5.4.4/export.sh"
 )).expanduser()
-BACKUP_ROOT = Path.home() / "ABVxCompanionBackup"
+BACKUP_ROOT = Path(os.environ.get("ABVX_BACKUP_ROOT", Path.home() / "ABVxCompanionBackup")).expanduser()
 BACKUP_STATE = BACKUP_ROOT / ".state" / "sync-status.json"
 BACKUP_TRACKS = BACKUP_ROOT / "Tracks"
 BACKUP_NOTES = BACKUP_ROOT / "Notes"
@@ -150,6 +150,8 @@ class AppState:
 
     def start(self, name, command):
         with self.lock:
+            if IMPORT_LOCK.locked():
+                raise RuntimeError("Wait for the active file transfer")
             if self.job_state == "RUNNING":
                 raise RuntimeError(f"{self.job_name} is already running")
             self.job_name, self.job_state, self.job_returncode = name, "RUNNING", None
@@ -292,8 +294,11 @@ def device_status():
                         "error": ""}
     except Exception as exc:
         result["sd"]["error"] = str(exc)
+    if IMPORT_LOCK.locked():
+        result["job"] = {**result["job"], "name": "FILE TRANSFER", "state": "RUNNING", "returncode": None}
     job_running = result["job"]["state"] == "RUNNING"
-    result["ready_build"] = IDF_EXPORT.is_file() and not job_running
+    result["project_ready"] = (PROJECT_ROOT / "CMakeLists.txt").is_file() and (PROJECT_ROOT / "main/main.cpp").is_file()
+    result["ready_build"] = IDF_EXPORT.is_file() and result["project_ready"] and not job_running
     result["ready_flash"] = bool(result["usb_ports"]) and result["ready_build"] and not job_running
     result["ready_import"] = result["sd"]["ready"] and not job_running
     return result
@@ -462,11 +467,15 @@ class Handler(BaseHTTPRequestHandler):
                     core.sync_time(payload.get("url", "http://192.168.4.1"))
                 self._json(200, {"ok": True, "message": output.getvalue().strip() or "Time synchronized"})
             elif route.path == "/api/build":
+                if not (PROJECT_ROOT / "main/main.cpp").is_file():
+                    raise RuntimeError("Firmware build requires the full Pocket OS checkout")
                 if not IDF_EXPORT.is_file():
                     raise RuntimeError(f"ESP-IDF export not found: {IDF_EXPORT}")
                 STATE.start("BUILD", idf_command("build"))
                 self._json(202, {"ok": True, "message": "Build started"})
             elif route.path == "/api/flash":
+                if not (PROJECT_ROOT / "main/main.cpp").is_file():
+                    raise RuntimeError("Firmware flash requires the full Pocket OS checkout")
                 payload = validate_payload_json(self._read_json())
                 if payload.get("port") not in usb_ports():
                     raise RuntimeError("selected USB port is not available")
@@ -478,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
                 STATE.start("FLASH", idf_command("flash", port))
                 self._json(202, {"ok": True, "message": f"Flash started on {port}"})
             elif route.path == "/api/shutdown":
-                if STATE.snapshot()["state"] == "RUNNING":
+                if IMPORT_LOCK.locked() or STATE.snapshot()["state"] == "RUNNING":
                     raise RuntimeError("wait for the active build/flash job")
                 self._json(200, {"ok": True, "message": "Companion stopped"})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -560,8 +569,12 @@ class Handler(BaseHTTPRequestHandler):
             IMPORT_LOCK.release()
 
     def _sync_notes(self, delete_after=False):
-        STATE.set_sync_pending(NOTES, last_file="pull")
+        if not IMPORT_LOCK.acquire(blocking=False):
+            raise RuntimeError("Wait for the active file transfer")
         try:
+            if STATE.snapshot()["state"] == "RUNNING":
+                raise RuntimeError("Wait for the active operation")
+            STATE.set_sync_pending(NOTES, last_file="pull")
             sd = core.resolve_sd(SD_OVERRIDE)
             if not sd.is_dir():
                 raise RuntimeError(f"SD is not a directory: {sd}")
@@ -572,6 +585,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             STATE.set_sync_fail(NOTES, last_file="pull", last_error=str(exc))
             raise
+        finally:
+            IMPORT_LOCK.release()
 
     def _sync_voice(self, delete_after=False):
         if delete_after is not False:

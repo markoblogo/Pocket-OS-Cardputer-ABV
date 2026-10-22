@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.3.0-rc3 - 2026-10-22
+
+- Move Games out of main.cpp; isolate display-independent rules and host rendering checks.
+- Turn Tetris into a portrait 10px-cell game with seven-piece bags, wall kicks, next/ghost, pause and held-arrow repeat.
+- Correct Klondike suit colours, add sequence moves and scrolling column focus, retain stock recycling and suit foundations.
+- Replace Doom Lite's wall spawn, unconditional kill counter and timer damage with a colour raycaster, enemies, checked shots, ammo and an exit.
+- Preserve the current rc2 dependency/security/YTMamp baseline; retain the 4 MiB app and 2 MiB Voice layout.
+- Reconcile README, installation, hardware evidence, roadmap and source-kit packaging; keep GPS paused and hardware acceptance explicit.
+- Report synchronous imports/note backup as busy so the Mac window cannot quit or start a competing job during transfer.
+
 
 ## 0.3.0-rc2 - 2026-09-14
 
