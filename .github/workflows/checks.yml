@@ -38,6 +38,7 @@ jobs:
           idf.py build
           python3 tools/check_firmware_size.py build/cardputer-abvx-minimal.bin
           python3 tools/package_release.py --build-dir build --output-dir build/release
+          python3 tools/package_companion_kit.py --output-dir build/release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cardputer-adv-firmware
@@ -48,3 +49,4 @@ jobs:
             build/release/bootloader.bin
             build/release/partition-table.bin
             build/release/SHA256SUMS.txt
+            build/release/ABVx-Companion-*-source.zip

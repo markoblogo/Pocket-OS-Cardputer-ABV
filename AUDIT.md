@@ -1,5 +1,9 @@
 # ABVx Release Audit
 
+Historical baseline and safeguards. For the current candidate's review use
+[rc3 audit](docs/AUDIT_2026-10-22.md); physical observations belong only in
+[hardware acceptance](docs/HARDWARE_ACCEPTANCE.md).
+
 Scope: first-party firmware, build/configuration, simulator, upload tool, and project documentation. Vendored M5Unified, M5GFX, minimp3, and ESP-IDF are treated as privileged dependency boundaries.
 
 ## Baseline
@@ -43,7 +47,7 @@ Physical possession, removable-SD confidentiality, secure boot, flash encryption
 - The staged path is queued to the main loop and still requires
   interrupted-transfer hardware stress testing.
 - No automated hardware test harness exists.
-- Clock resets after full power-off until Companion/network time sync exists.
+- Clock resets after full power-off; Companion time sync is available through Transfer Wi-Fi.
 
 ## Release smoke test
 

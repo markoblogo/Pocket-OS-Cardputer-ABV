@@ -1,147 +1,122 @@
-<p align="center"><img src="docs/media/abvx-icon.png" width="128" alt="ABVx terminal icon"></p>
+<p align="center"><img src="docs/media/abvx-icon.png" width="96" alt="ABVx terminal icon"></p>
 
-# Pocket OS / ABVx for M5Stack Cardputer
+# Pocket OS / ABVx for Cardputer ADV
 
 [![Checks](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/actions/workflows/checks.yml/badge.svg)](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/actions/workflows/checks.yml)
 [![Release](https://img.shields.io/github/v/release/markoblogo/Pocket-OS-Cardputer-ABV?include_prereleases&label=release)](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases)
-[![ESP-IDF 5.4](https://img.shields.io/badge/ESP--IDF-5.4.x-E7352C)](https://github.com/espressif/esp-idf/tree/release/v5.4)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Music, books, short voice notes and walking tracks. A pocket device, with a Mac companion.**
+**A music player, book reader, short voice recorder and three keyboard games on one pocket computer.**
 
-A keyboard-first ESP-IDF firmware project for Cardputer. Keep your library on SD,
-record a quick thought, and prepare your next walk without turning the device
-into another phone.
+Built for the **M5Stack Cardputer ADV**, its 240x135 display and 8 MB flash,
+without PSRAM. Media stays on your SD; the Mac Companion prepares files and
+exports internal recordings. Everyday use works without an AI service.
 
-[Download releases](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases) ·
-[Installation](docs/INSTALL.md) · [Mac Companion](docs/COMPANION_DESKTOP.md) ·
-[Hardware checklist](docs/SMOKE_TEST.md)
+[Download rc3](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases/tag/v0.3.0-rc3) ·
+[Install / upgrade](docs/INSTALL.md) · [Mac Companion](docs/COMPANION_DESKTOP.md) ·
+[Games controls](docs/GAMES.md)
 
-> **Current status:** release candidate. Host tests and firmware compilation pass;
-> Voice transfer, GNSS and extended Journey use still require physical-device acceptance.
+> **0.3.0-rc3 is a release candidate.** Software checks and hardware observations
+> are tracked separately. GPS development is paused: the tested CAP responds on
+> I2C but supplies no GNSS UART data. Music, Reader and Games do not require GPS.
 
-## What you can do
+## On the device
 
-| Feature | What it provides | Current boundary |
-| --- | --- | --- |
-| Music | MP3 library with content deduplication and readable indexes | SD required |
-| Reader | Prepared TXT books; EPUB/FB2 conversion on Mac | SD required |
-| Voice | Short internal recordings; verified, non-destructive export | New firmware and Transfer Wi-Fi required |
-| Journey | GNSS tracks, CSV, distance and elapsed time alongside Music | External GNSS; hardware acceptance still pending |
-| Games | Launcher section with keyboard-first Tetris, Klondike and DOOM LITE | DOOM LITE is a compact no-WAD prototype |
-| Inbox and Notes | Local capture and recovery-aware persistence | Keep backups before upgrading |
-| Mac Companion | Compact terminal-style desktop UI for files and device tasks | Local macOS installation; not notarized |
-| YTMamp remote | Play/pause, previous, next and status over a token-protected local API | Opt-in LAN setup; physical-device acceptance pending |
+| App | What it does |
+| --- | --- |
+| Music | MP3 playback, shuffle, volume, readable titles and library navigation |
+| Reader | TXT reading, speed reading and bookmarks; Companion converts EPUB/FB2/HTML |
+| Voice | Short internal recordings and size/SHA-256-verified Wi-Fi export |
+| Games | Portrait Tetris, draw-one Klondike with sequence moves, colour DOOM LITE |
+| Notes / Inbox | Keyboard capture, local history and recovery-aware persistence |
+| Time / Routines / Files | Timers, habits and access to SD content |
+| Transfer | Temporary Wi-Fi AP for internal Voice, clock sync and staged uploads |
+| YTMamp remote | Optional token-protected LAN controls; [YTMamp setup guide](docs/YTMAMP.md) |
+| Journey | Experimental GNSS tracking; hardware work is paused |
 
-## How it fits together
+## Games that fit the screen
 
-```mermaid
-flowchart LR
-    Mac[Mac Companion] -->|prepare library| SD[SD card]
-    SD -->|music and books| Pocket[Pocket OS]
-    Pocket -->|temporary WPA2 Transfer| Mac
-    Pocket -->|fresh GNSS fixes| Journey[Journey CSV]
-    Pocket -->|verified Voice export| Mac
-    Pocket -->|cast API v1| YTMamp[YTMamp on computer]
-```
+Turn the device clockwise for **Tetris**: the complete 10x20 field uses 10-pixel
+cells. **Klondike** supports alternating-colour runs, stock recycling and scrolling
+through long columns. **DOOM LITE** is an original small raycaster with coloured
+walls, enemies, hit detection and an exit. It is an adaptation, not the original
+DOOM engine; it needs no WAD, extra firmware or SD assets.
 
-Music and books stay on removable storage. Internal Voice recordings move only
-through a manually started Transfer session and remain on the device after a
-verified export.
+<p>
+<img src="docs/media/games-tetris.png" height="240" alt="Portrait Tetris software render">
+<img src="docs/media/games-klondike.png" width="320" alt="Klondike software render">
+<img src="docs/media/games-doom-lite.png" width="320" alt="Colour DOOM LITE software render">
+</p>
 
-## Start here
+These are software-rendered fixtures from the game drawing code, with approximate
+host font metrics. They are **not device photographs**. Controls and hardware
+checks are in [Games](docs/GAMES.md).
 
-1. Read the [installation and backup instructions](docs/INSTALL.md). Do not erase
-   flash when upgrading a device with recordings or notes.
-2. Download [v0.3.0-rc2](https://github.com/markoblogo/Pocket-OS-Cardputer-ABV/releases/tag/v0.3.0-rc2),
-   or build from this repository using ESP-IDF **5.4.x**. The firmware project
-   is at the repository root.
-3. Prepare music and books with [Mac Companion](docs/COMPANION_DESKTOP.md).
-4. Use the [smoke checklist](docs/SMOKE_TEST.md) on your own hardware before
-   relying on a new build away from home.
+## Get started
+
+1. Read [backup and installation](docs/INSTALL.md). Upgrade without `erase_flash`.
+2. Download the three firmware binaries and `SHA256SUMS.txt` from the release.
+   This build targets **ADV only**, not the original Cardputer.
+3. Prepare a **FAT32** SD using the local pipeline or Mac Companion.
+4. Follow the [smoke checklist](docs/SMOKE_TEST.md) before relying on a new build.
+
+For a source build, use **ESP-IDF 5.4.4**:
 
 ```sh
 . "$HOME/esp/esp-idf-v5.4.4/export.sh"
 idf.py build
+sh tools/check_host.sh
 ```
 
-## Mac app: click, connect, choose an action
+## Mac Companion
 
 ```sh
 zsh tools/install_companion_app.zsh
 ```
 
-Open **Applications → ABVx Companion**. The installer bundles the local service,
-UI and ABVx icon in a native window. It needs an existing Python 3 interpreter;
-firmware build/flash additionally needs the checkout and ESP-IDF. It does not
-bundle Python, AI model weights, or an Apple notarization ticket. An existing
-installation is not overwritten silently; move it aside before reinstalling.
+Open **Applications > ABVx Companion**. Choose a task after connecting the relevant
+transport. The native window uses a compact, high-contrast terminal interface.
+It requires an existing Python 3; firmware builds also require ESP-IDF and the
+checkout. The app is locally signed, not Apple-notarized. Existing installations
+are preserved; the installer accepts a different destination.
 
-The everyday screen has **Music**, **Books** and **Voice**, with firmware and
-maintenance under Additional actions. No operation starts just because you
-connect a device.
-
-### Three connections, different jobs
-
-| Connection | Use |
+| Connection | Purpose |
 | --- | --- |
-| USB | Firmware programming; not an SD mass-storage connection |
-| SD card reader | Music, books and note backup |
-| Cardputer Transfer Wi-Fi | Internal Voice export and device time |
+| USB | Firmware programming; the SD does not appear as a USB drive |
+| SD card reader | Music, books and external note backup |
+| Transfer Wi-Fi | Internal Voice export and device time |
 
-For Wi-Fi, open **Transfer** on Cardputer, then join the network shown on its
-screen from the Mac. A USB cable alone is insufficient for these HTTP operations.
-The Companion does not currently implement a Bluetooth transfer transport.
+Open Transfer on Cardputer and join the Wi-Fi network using the displayed
+password. Bluetooth file transfer is not implemented. [Companion instructions](docs/COMPANION_DESKTOP.md).
 
-## Data first
+## Your files
 
-- Music duplicates are identified by file content, not just their titles.
-- Sync stages payloads before publishing the new index; old payloads are kept
-  hidden for recovery rather than immediately destroyed.
-- Internal Voice exports are checked by size and SHA-256. Device originals stay.
-- A failed mount of non-empty internal storage does not trigger automatic format.
-- Back up before firmware changes. These safeguards are not a guarantee against
-  all SD/FAT failures or power loss.
+- MP3 duplicates are identified by content; titles have readable ASCII fallbacks.
+- Payloads are verified before publishing the new index; previous payloads remain
+  hidden for recovery. Sync does not automatically prune that recovery folder.
+- Invalid music sources stop a normal sync before replacing a good library.
+- Voice export checks size and SHA-256 and retains device originals.
+- A mount failure does not automatically format non-empty Voice storage.
 
-[Data safety](docs/DATA_SAFETY.md) · [Voice export and transcription](docs/VOICE_TO_TEXT.md)
+Keep backups: SD electrical faults, card removal and power loss still need
+physical testing. [Data safety](docs/DATA_SAFETY.md).
 
-## Optional YTMamp control
+## Optional AI
 
-Pocket OS can act as a small local remote for [YTMamp](https://github.com/markoblogo/YTMamp). Configure the computer address, port `18880`, and a shared token using the [YTMamp setup guide](docs/YTMAMP.md). The repositories share a machine-readable API contract that CI checks on both sides.
+Local transcription and experimental intent routing run on the Mac. Model
+weights are installed separately. There is no autonomous on-device LLM in this
+release. [Voice to text](docs/VOICE_TO_TEXT.md).
 
-## AI: optional, on the Mac
+## Project and contributions
 
-Local transcription and experimental routing belong on the host. They are not
-an autonomous LLM running on Cardputer, and installing Companion does not install
-or validate model weights. Read the setup instructions before enabling them.
+[Status](docs/PROJECT_STATUS.md) · [Roadmap](docs/ROADMAP.md) ·
+[Release audit](docs/AUDIT_2026-10-22.md) · [Hardware evidence](docs/HARDWARE_ACCEPTANCE.md) ·
+[Changelog](CHANGELOG.md) · [Module boundaries](docs/FIRMWARE_MODULES.md) ·
+[Contributing](CONTRIBUTING.md) · [Documentation index](docs/README.md)
 
-## Release status
+If you use Pocket OS, a star helps other Cardputer owners find it. Reports with
+board revision, version and reproduction steps help more than a vague failure.
+Do not publish private recordings, books, location tracks or Transfer passwords.
 
-**0.3.0-rc2 is a pre-release**, not a claim of completed hardware acceptance.
-Host regression tests and firmware compilation have passed during development;
-GNSS reception on the target module, live Voice Wi-Fi export and model-backed
-transcription require separate end-to-end acceptance.
-
-[Changelog](CHANGELOG.md) · [Project status](docs/PROJECT_STATUS.md) ·
-[Hardware acceptance](docs/HARDWARE_ACCEPTANCE.md) ·
-[Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
-
-If this is useful, a star helps others discover it. Hardware reports are even
-more useful: include your exact board/module, firmware version and reproduction
-steps. Do not attach private voice recordings or location tracks to public issues.
-
-## Licensing and dependencies
-
-Project-owned code is available under the [MIT License](LICENSE). Vendored and
-optional dependencies retain their own licenses; see the [dependency inventory](docs/DEPENDENCIES.md)
-and [third-party notices](docs/THIRD_PARTY_NOTICES.md).
-
-<!-- ABVX:ECOSYSTEM:BEGIN -->
-## ABVX ecosystem
-
-- [YTMamp](https://github.com/markoblogo/YTMamp/releases/latest) — Controls YTMamp through the versioned, token-protected cast API and checks the shared contract in CI. Current release: `v0.4.1`.
-- [AGENTS.md_generator](https://agentsmd.abvx.xyz/) — Keeps repository guidance and machine-readable context current. Current release: `v0.5.1`.
-- [abvx-agent-skills](https://abvx.xyz/work/abvx-agent-skills) — Uses shared, reviewable agent capabilities during maintenance. Current release: `v0.16.1`.
-
-_This block is generated from the reviewed ABVX ecosystem registry._
-<!-- ABVX:ECOSYSTEM:END -->
+Project-owned code uses the **MIT License**. Vendored components retain their own
+licenses; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).

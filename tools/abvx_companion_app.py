@@ -30,7 +30,7 @@ UI_FILE = Path(__file__).resolve().parent / "companion_ui" / "index.html"
 IDF_EXPORT = Path(os.environ.get(
     "ABVX_IDF_EXPORT", Path.home() / "esp/esp-idf-v5.4.4/export.sh"
 )).expanduser()
-BACKUP_ROOT = Path.home() / "ABVxCompanionBackup"
+BACKUP_ROOT = Path(os.environ.get("ABVX_BACKUP_ROOT", Path.home() / "ABVxCompanionBackup")).expanduser()
 BACKUP_STATE = BACKUP_ROOT / ".state" / "sync-status.json"
 BACKUP_TRACKS = BACKUP_ROOT / "Tracks"
 BACKUP_NOTES = BACKUP_ROOT / "Notes"
@@ -293,7 +293,8 @@ def device_status():
     except Exception as exc:
         result["sd"]["error"] = str(exc)
     job_running = result["job"]["state"] == "RUNNING"
-    result["ready_build"] = IDF_EXPORT.is_file() and not job_running
+    result["project_ready"] = (PROJECT_ROOT / "CMakeLists.txt").is_file() and (PROJECT_ROOT / "main/main.cpp").is_file()
+    result["ready_build"] = IDF_EXPORT.is_file() and result["project_ready"] and not job_running
     result["ready_flash"] = bool(result["usb_ports"]) and result["ready_build"] and not job_running
     result["ready_import"] = result["sd"]["ready"] and not job_running
     return result
@@ -462,11 +463,15 @@ class Handler(BaseHTTPRequestHandler):
                     core.sync_time(payload.get("url", "http://192.168.4.1"))
                 self._json(200, {"ok": True, "message": output.getvalue().strip() or "Time synchronized"})
             elif route.path == "/api/build":
+                if not (PROJECT_ROOT / "main/main.cpp").is_file():
+                    raise RuntimeError("Firmware build requires the full Pocket OS checkout")
                 if not IDF_EXPORT.is_file():
                     raise RuntimeError(f"ESP-IDF export not found: {IDF_EXPORT}")
                 STATE.start("BUILD", idf_command("build"))
                 self._json(202, {"ok": True, "message": "Build started"})
             elif route.path == "/api/flash":
+                if not (PROJECT_ROOT / "main/main.cpp").is_file():
+                    raise RuntimeError("Firmware flash requires the full Pocket OS checkout")
                 payload = validate_payload_json(self._read_json())
                 if payload.get("port") not in usb_ports():
                     raise RuntimeError("selected USB port is not available")

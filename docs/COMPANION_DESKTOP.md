@@ -23,6 +23,12 @@ Firmware actions use `~/esp/esp-idf-v5.4.4/export.sh`. If ESP-IDF 5.4.4 is
 installed elsewhere, start Companion with `ABVX_IDF_EXPORT` set to that
 installation's `export.sh` path.
 
+The release's `ABVx-Companion-*-source.zip` contains these tools and the local
+installer, not a preconfigured app or Python runtime. Extract the kit, run its
+installer, and use a full firmware checkout for build/flash. To isolate backups
+or tests, `ABVX_BACKUP_ROOT` can select another backup directory; the default
+remains `~/ABVxCompanionBackup`.
+
 ## What connecting means
 
 - USB: firmware connection. It does not expose the SD as a Mac disk.

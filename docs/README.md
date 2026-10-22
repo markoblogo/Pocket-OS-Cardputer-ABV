@@ -9,6 +9,10 @@
 | `PROJECT_STATUS.md` | Current | Implemented behavior and open evidence |
 | `DEPENDENCIES.md` | Current | Version, source and license provenance |
 | `ROADMAP.md` | Current direction | Work after the release candidate |
+| `GAMES.md` | Current | Rules, controls, orientation and Games checks |
+| `FIRMWARE_MODULES.md` | Current | Ownership of rules, rendering and hardware |
+| `AUDIT_2026-10-22.md` | Scoped rc3 review | Findings, fixes and remaining evidence |
+| `DEMO_PLAN.md` | Planned | Actual-device demo after the relevant smoke checks |
 | `ARCHITECTURE_DECISIONS.md` | Mixed history/current | Accepted decisions and hardware-gated proposals |
 | Other architecture documents | Reference or proposal | Read their status statement before implementation |
 

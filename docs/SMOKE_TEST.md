@@ -133,3 +133,21 @@ Only after these checks: stable tag, real device video and M5Burner catalog entr
    turn with left/right, fire with Enter, and leave with Go.
 3. Reopen Music and Journey after both games. Confirm no reboot, audio stop,
    GNSS polling error or SD write occurred.
+
+## rc3 Games acceptance
+
+Record release-gate results in `HARDWARE_ACCEPTANCE.md`, with the exact commit.
+
+1. Open Games; start Tetris; turn clockwise. Hold each arrow, rotate near walls,
+   hard-drop, clear a line, pause/resume, restart and leave via Go and Escape.
+   Confirm a full 10x20 field, no clipped NEXT/footer, and restored landscape.
+2. Klondike: draw/recycle the stock, cancel a selection, move a legal run, reject
+   same-colour or wrong-rank placement, build a foundation, scroll a tall column
+   and reveal a hidden card. R must deal again; Go must return to Games.
+3. Doom Lite: move without crossing walls, fire away from enemies without earning
+   kills, hit a target twice, confirm wall occlusion and nearby enemy damage,
+   kill three targets and reach the marked exit. Restart and leave.
+4. Reopen each game, return to Launcher, then open Music and Reader. Check theme,
+   screen dimensions, SD availability and audio after orientation changes.
+5. Film only passing paths for DEMO_PLAN.md. Host render fixtures are not physical
+   display/input acceptance. GPS is paused and is not part of this Games check.
