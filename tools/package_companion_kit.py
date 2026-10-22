@@ -30,7 +30,10 @@ def package(root: Path, output: Path) -> Path:
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (0o100755 if name.endswith(".zsh") else 0o100644) << 16
             bundle.writestr(info, source.read_bytes())
-        bundle.writestr("ABVx-Companion/START-HERE.txt",
+        info = zipfile.ZipInfo("ABVx-Companion/START-HERE.txt", date_time=(2026, 1, 1, 0, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.external_attr = 0o100644 << 16
+        bundle.writestr(info,
                         "Companion source + local Mac installer; Python is not bundled.\n"
                         "Run: zsh tools/install_companion_app.zsh\n"
                         "Read docs/COMPANION_DESKTOP.md first.\n"

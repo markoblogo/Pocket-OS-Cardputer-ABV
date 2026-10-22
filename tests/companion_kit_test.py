@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import zipfile
+from unittest.mock import patch
 
 root = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("kit", root / "tools/package_companion_kit.py")
@@ -12,7 +13,8 @@ with tempfile.TemporaryDirectory() as directory:
     output = Path(directory)
     archive = kit.package(root, output)
     first = archive.read_bytes()
-    kit.package(root, output)
+    with patch("zipfile.time.localtime", return_value=(2031, 1, 1, 0, 0, 0, 2, 1, 0)):
+        kit.package(root, output)
     assert first == archive.read_bytes(), "kit must be reproducible"
     assert len((output / "SHA256SUMS.txt").read_text().splitlines()) == 1
     assert hashlib.sha256(first).hexdigest() in (output / "SHA256SUMS.txt").read_text()
